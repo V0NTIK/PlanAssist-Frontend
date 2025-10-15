@@ -352,7 +352,53 @@ const PlanAssist = () => {
     }
   };
 
-  // Task type detection
+  // Extract keywords from task title
+  const extractKeywords = (title) => {
+    const lower = title.toLowerCase();
+    const keywords = new Set();
+    
+    // Subject keywords
+    const subjects = ['math', 'science', 'history', 'english', 'physics', 'chemistry', 'biology', 'geography', 'literature', 'spanish', 'french', 'german'];
+    subjects.forEach(subject => {
+      if (lower.includes(subject)) keywords.add(subject);
+    });
+    
+    // Task type keywords
+    const types = ['homework', 'assignment', 'essay', 'lab', 'project', 'reading', 'study', 'review', 'quiz', 'test', 'exam'];
+    types.forEach(type => {
+      if (lower.includes(type)) keywords.add(type);
+    });
+    
+    // Chapter/unit numbers
+    const chapterMatch = lower.match(/chapter\s*(\d+)/);
+    if (chapterMatch) keywords.add('chapter');
+    
+    const unitMatch = lower.match(/unit\s*(\d+)/);
+    if (unitMatch) keywords.add('unit');
+    
+    // Action words
+    const actions = ['complete', 'write', 'read', 'finish', 'prepare', 'practice', 'solve'];
+    actions.forEach(action => {
+      if (lower.includes(action)) keywords.add(action);
+    });
+    
+    return Array.from(keywords);
+  };
+
+  // Calculate similarity score between two tasks
+  const calculateSimilarity = (keywords1, keywords2) => {
+    if (keywords1.length === 0 || keywords2.length === 0) return 0;
+    
+    const set1 = new Set(keywords1);
+    const set2 = new Set(keywords2);
+    const intersection = new Set([...set1].filter(x => set2.has(x)));
+    const union = new Set([...set1, ...set2]);
+    
+    // Jaccard similarity: intersection / union
+    return intersection.size / union.size;
+  };
+
+  // Task type detection (kept for backward compatibility)
   const detectTaskType = (title) => {
     const lower = title.toLowerCase();
     if (lower.includes('homework') || lower.includes('hw')) return 'homework';
@@ -364,16 +410,36 @@ const PlanAssist = () => {
     return 'general';
   };
 
-  // Estimate task time
+  // IMPROVED: Estimate task time using keyword matching
   const estimateTaskTime = (title) => {
+    const keywords = extractKeywords(title);
     const type = detectTaskType(title);
-    const similarTasks = completionHistory.filter(h => h.type === type);
     
-    if (similarTasks.length > 0) {
-      const avgTime = similarTasks.reduce((sum, t) => sum + t.actualTime, 0) / similarTasks.length;
-      return Math.round(avgTime);
+    // Find similar tasks from completion history
+    const scoredHistory = completionHistory.map(h => ({
+      ...h,
+      similarity: calculateSimilarity(keywords, extractKeywords(h.taskTitle))
+    })).filter(h => h.similarity > 0.3); // Only consider tasks with >30% similarity
+    
+    // Sort by similarity (most similar first)
+    scoredHistory.sort((a, b) => b.similarity - a.similarity);
+    
+    if (scoredHistory.length > 0) {
+      // Weighted average: more similar tasks have more weight
+      const weightedSum = scoredHistory.reduce((sum, h, idx) => {
+        const weight = 1 / (idx + 1); // First task has weight 1, second has 0.5, etc.
+        return sum + (h.actualTime * weight * h.similarity);
+      }, 0);
+      
+      const totalWeight = scoredHistory.reduce((sum, h, idx) => {
+        const weight = 1 / (idx + 1);
+        return sum + (weight * h.similarity);
+      }, 0);
+      
+      return Math.round(weightedSum / totalWeight);
     }
 
+    // Fallback to defaults if no similar tasks found
     const defaults = {
       homework: 20,
       lab: 35,
@@ -451,14 +517,20 @@ const PlanAssist = () => {
     setSessions(newSessions);
   };
 
-  // Update task estimate
+  // Update task estimate with immediate regeneration
   const updateTaskEstimate = async (taskId, estimate) => {
     try {
       await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { userEstimate: estimate });
-      setTasks(prev => prev.map(t => 
+      
+      const updatedTasks = tasks.map(t => 
         t.id === taskId ? { ...t, userEstimate: estimate } : t
-      ));
-      generateSessions(tasks, accountSetup.schedule);
+      );
+      
+      setTasks(updatedTasks);
+      
+      // IMMEDIATE RESCHEDULE
+      console.log('🔄 Rescheduling sessions after estimate override...');
+      generateSessions(updatedTasks, accountSetup.schedule);
     } catch (error) {
       console.error('Failed to update estimate:', error);
     }
@@ -541,6 +613,43 @@ const PlanAssist = () => {
         day: currentSession.day,
         period: currentSession.period
       });
+      
+      // CRITICAL: Reload tasks and regenerate sessions with new learning
+      console.log('📚 Session complete! Applying learnings and rescheduling...');
+      
+      // Reload tasks from backend (includes completed status)
+      const tasksData = await apiCall('/tasks', 'GET');
+      const loadedTasks = tasksData.map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        dueDate: new Date(t.due_date),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimate,
+        completed: t.completed,
+        type: t.task_type
+      }));
+      
+      // Re-estimate ALL incomplete tasks with new learning
+      const reestimatedTasks = loadedTasks.map(task => {
+        if (task.completed) return task;
+        
+        // Recalculate estimate using updated completion history
+        const newEstimate = estimateTaskTime(task.title);
+        console.log(`📊 Reestimated "${task.title}": ${task.estimatedTime}min → ${newEstimate}min`);
+        
+        return {
+          ...task,
+          estimatedTime: newEstimate
+        };
+      });
+      
+      setTasks(reestimatedTasks);
+      
+      // Regenerate sessions with new estimates
+      generateSessions(reestimatedTasks, accountSetup.schedule);
+      
+      console.log('✅ Rescheduling complete!');
     } catch (error) {
       console.error('Failed to save session:', error);
     }
