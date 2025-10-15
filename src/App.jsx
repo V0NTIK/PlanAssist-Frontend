@@ -40,6 +40,7 @@ const PlanAssist = () => {
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [savedSessionState, setSavedSessionState] = useState(null);
 
   // API call helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
