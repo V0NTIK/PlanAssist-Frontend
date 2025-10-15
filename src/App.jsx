@@ -142,15 +142,16 @@ const PlanAssist = () => {
         const isToday = savedDate.toDateString() === today.toDateString();
 
         if (isToday) {
-          // Offer to resume session
+          // Store saved session state
+          setSavedSessionState(sessionStateData);
           console.log('Found saved session state:', sessionStateData);
-          // We'll handle this in the sessions page
         } else {
           // Clear old session state
           await fetch(`${API_URL}/sessions/saved-state`, {
             method: 'DELETE',
             headers: { 'Authorization': `Bearer ${authToken}` }
           });
+          setSavedSessionState(null);
         }
       }
 
@@ -297,16 +298,22 @@ const PlanAssist = () => {
       const text = await file.text();
       const parsedTasks = parseICSFile(text);
 
-      const newTasks = await Promise.all(parsedTasks.map(async (t, idx) => ({
+      // Create tasks with temporary estimates, then update them
+      const newTasks = parsedTasks.map((t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.dueDate),
-        estimatedTime: await estimateTaskTime(t.title),
+        estimatedTime: 20, // Temporary default
         userEstimate: null,
         completed: false,
         type: detectTaskType(t.title)
-      })));
+      }));
+
+      // Estimate times for all tasks
+      for (let i = 0; i < newTasks.length; i++) {
+        newTasks[i].estimatedTime = await estimateTaskTime(newTasks[i].title);
+      }
 
       // Save to backend (preserves manual overrides)
       const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
@@ -629,30 +636,29 @@ const PlanAssist = () => {
   // NEW: Resume session
   const resumeSession = async () => {
     try {
-      const sessionStateData = await apiCall('/sessions/saved-state', 'GET');
-      
-      if (!sessionStateData.sessionId) {
+      if (!savedSessionState) {
         alert('No saved session found');
         return;
       }
 
       // Find the session
-      const session = sessions.find(s => s.id === sessionStateData.sessionId);
+      const session = sessions.find(s => s.id === savedSessionState.sessionId);
       if (!session) {
         alert('Session no longer exists');
         await apiCall('/sessions/saved-state', 'DELETE');
+        setSavedSessionState(null);
         return;
       }
 
       setCurrentSession(session);
-      setSessionTime(sessionStateData.remainingTime);
-      setCurrentTaskIndex(sessionStateData.currentTaskIndex);
-      setTaskStartTime(sessionStateData.taskStartTime);
-      setSessionCompletions(sessionStateData.completions);
+      setSessionTime(savedSessionState.remainingTime);
+      setCurrentTaskIndex(savedSessionState.currentTaskIndex);
+      setTaskStartTime(savedSessionState.taskStartTime);
+      setSessionCompletions(savedSessionState.completions);
       setIsTimerRunning(true);
       setCurrentPage('session-active');
 
-      console.log('▶️ Resumed session:', sessionStateData);
+      console.log('▶️ Resumed session:', savedSessionState);
     } catch (error) {
       console.error('Failed to resume session:', error);
       alert('Failed to resume session');
@@ -1211,19 +1217,8 @@ const PlanAssist = () => {
     </div>
   );
 
-  // RENDER: Sessions (ENHANCED with resume capability)
-  const renderSessions = async () => {
-    // Check for saved session
-    let savedSession = null;
-    try {
-      const sessionStateData = await apiCall('/sessions/saved-state', 'GET');
-      if (sessionStateData.sessionId) {
-        savedSession = sessionStateData;
-      }
-    } catch (error) {
-      console.log('No saved session');
-    }
-
+  // RENDER: Sessions (FIXED: not async anymore)
+  const renderSessions = () => {
     return (
       <div className="max-w-5xl mx-auto p-6">
         <div className="bg-white rounded-xl shadow-md p-6">
@@ -1232,13 +1227,13 @@ const PlanAssist = () => {
             <p className="text-gray-600">Your scheduled study periods</p>
           </div>
 
-          {savedSession && (
+          {savedSessionState && (
             <div className="mb-6 p-4 bg-blue-50 border-2 border-blue-300 rounded-lg">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="font-bold text-blue-900 mb-1">Resume Session</h3>
                   <p className="text-sm text-blue-700">
-                    {savedSession.day} - Period {savedSession.period} ({Math.floor(savedSession.remainingTime / 60)} min remaining)
+                    {savedSessionState.day} - Period {savedSessionState.period} ({Math.floor(savedSessionState.remainingTime / 60)} min remaining)
                   </p>
                 </div>
                 <button
