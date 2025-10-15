@@ -238,7 +238,7 @@ const PlanAssist = () => {
       });
 
       const newTasks = data.tasks.map((t, idx) => ({
-        id: Date.now() + idx,
+        id: Date.now() + idx, // Temporary ID
         title: t.title,
         description: t.description,
         dueDate: new Date(t.dueDate),
@@ -248,10 +248,24 @@ const PlanAssist = () => {
         type: detectTaskType(t.title)
       }));
 
-      setTasks(newTasks);
-      await apiCall('/tasks', 'POST', { tasks: newTasks });
-      generateSessions(newTasks, accountSetup.schedule);
-      alert(`Loaded ${newTasks.length} tasks from Canvas!`);
+      // Save to backend and get real IDs
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
+      
+      // Update with real database IDs
+      const tasksWithIds = saveResult.tasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        dueDate: new Date(t.due_date),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimate,
+        completed: t.completed,
+        type: t.task_type
+      }));
+
+      setTasks(tasksWithIds);
+      generateSessions(tasksWithIds, accountSetup.schedule);
+      alert(`Loaded ${tasksWithIds.length} tasks from Canvas!`);
     } catch (error) {
       alert('Failed to fetch Canvas calendar: ' + error.message);
     } finally {
@@ -295,16 +309,30 @@ const PlanAssist = () => {
 
   // Generate sessions
   const generateSessions = (taskList, scheduleData) => {
-    if (!scheduleData || Object.keys(scheduleData).length === 0) return;
+    console.log('Generating sessions with:', { taskList, scheduleData });
+    
+    if (!scheduleData || Object.keys(scheduleData).length === 0) {
+      console.warn('No schedule data available');
+      return;
+    }
 
     const incompleteTasks = taskList.filter(t => !t.completed).sort((a, b) => a.dueDate - b.dueDate);
+    
+    if (incompleteTasks.length === 0) {
+      console.log('No incomplete tasks to schedule');
+      setSessions([]);
+      return;
+    }
+
     const newSessions = [];
     let taskIndex = 0;
 
-    const days = Object.keys(scheduleData);
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     
     for (const day of days) {
-      const periods = Object.keys(scheduleData[day]).sort();
+      if (!scheduleData[day]) continue;
+      
+      const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
       
       for (const period of periods) {
         if (scheduleData[day][period] === 'Study') {
@@ -335,8 +363,12 @@ const PlanAssist = () => {
           }
         }
       }
+      
+      // Stop if all tasks are scheduled
+      if (taskIndex >= incompleteTasks.length) break;
     }
 
+    console.log('Generated sessions:', newSessions);
     setSessions(newSessions);
   };
 
