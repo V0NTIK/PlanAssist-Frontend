@@ -41,6 +41,9 @@ const PlanAssist = () => {
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [savedSessionState, setSavedSessionState] = useState(null);
+  const [showSplitTask, setShowSplitTask] = useState(null);
+  const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
+  const [completedSessionIds, setCompletedSessionIds] = useState([]);
 
   // API call helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
@@ -352,16 +355,22 @@ const PlanAssist = () => {
         canvasUrl: accountSetup.canvasUrl 
       });
 
-      const newTasks = await Promise.all(data.tasks.map(async (t, idx) => ({
+      // Create tasks with temporary estimates
+      const newTasks = data.tasks.map((t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.dueDate),
-        estimatedTime: await estimateTaskTime(t.title),
+        estimatedTime: 20, // Temporary default
         userEstimate: null,
         completed: false,
         type: detectTaskType(t.title)
-      })));
+      }));
+
+      // Estimate times for all tasks
+      for (let i = 0; i < newTasks.length; i++) {
+        newTasks[i].estimatedTime = await estimateTaskTime(newTasks[i].title);
+      }
 
       const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
       
@@ -427,9 +436,15 @@ const PlanAssist = () => {
     return Array.from(keywords);
   };
 
-  // NEW AI ESTIMATION ALGORITHM
+  // NEW AI ESTIMATION ALGORITHM (skips Homeroom tasks)
   const estimateTaskTime = async (title) => {
     const lower = title.toLowerCase();
+
+    // Skip estimation for Homeroom tasks
+    if (lower.includes('homeroom')) {
+      console.log(`🏠 Homeroom task detected: "${title}" → No estimation needed`);
+      return 0;
+    }
 
     // Step 1: Check for global data (≥3 completions)
     try {
@@ -498,7 +513,7 @@ const PlanAssist = () => {
     return 20;
   };
 
-  // Generate sessions (ENHANCED: excludes Homeroom tasks)
+  // Generate sessions (ENHANCED: excludes Homeroom tasks, past due tasks, and completed sessions)
   const generateSessions = (taskList, scheduleData) => {
     console.log('Generating sessions with:', { taskList, scheduleData });
     
@@ -507,9 +522,19 @@ const PlanAssist = () => {
       return;
     }
 
-    // Filter out completed tasks AND Homeroom tasks
+    // Get today's date at midnight for comparison
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Filter out completed tasks, Homeroom tasks, and past due tasks
     const incompleteTasks = taskList
-      .filter(t => !t.completed && !t.title.toLowerCase().includes('homeroom'))
+      .filter(t => {
+        const dueDate = new Date(t.dueDate);
+        dueDate.setHours(0, 0, 0, 0);
+        return !t.completed && 
+               !t.title.toLowerCase().includes('homeroom') &&
+               dueDate >= today; // Only today or future tasks
+      })
       .sort((a, b) => a.dueDate - b.dueDate);
     
     if (incompleteTasks.length === 0) {
@@ -524,7 +549,6 @@ const PlanAssist = () => {
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     
     // Get current day to filter out old sessions
-    const today = new Date();
     const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
     const currentDayName = days[currentDayIndex - 1]; // Adjust for Monday = 0
     
@@ -541,6 +565,13 @@ const PlanAssist = () => {
       const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
       
       for (const period of periods) {
+        const sessionId = `${day}-${period}`;
+        
+        // Skip if this session was already completed
+        if (completedSessionIds.includes(sessionId)) {
+          continue;
+        }
+
         if (scheduleData[day][period] === 'Study') {
           const sessionTasks = [];
           let totalTime = 0;
@@ -560,7 +591,7 @@ const PlanAssist = () => {
 
           if (sessionTasks.length > 0) {
             newSessions.push({
-              id: `${day}-${period}`,
+              id: sessionId,
               day,
               period: parseInt(period),
               tasks: sessionTasks,
@@ -614,8 +645,44 @@ const PlanAssist = () => {
     }
   };
 
-  // NEW: Save and Adjust Plan button handler
-  const handleSaveAndAdjustPlan = () => {
+  // NEW: Split task into segments
+  const handleSplitTask = async (taskId) => {
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      const totalTime = task.userEstimate || task.estimatedTime;
+      const timePerSegment = Math.round(totalTime / splitSegments.length);
+
+      // Create new task objects for each segment
+      const newTasks = splitSegments.map((seg, idx) => ({
+        id: Date.now() + idx,
+        title: `${task.title} - ${seg.name}`,
+        description: task.description,
+        dueDate: task.dueDate,
+        estimatedTime: timePerSegment,
+        userEstimate: timePerSegment,
+        completed: false,
+        type: task.type
+      }));
+
+      // Remove original task and add segments
+      const updatedTasks = tasks.filter(t => t.id !== taskId).concat(newTasks);
+      
+      // Save to backend
+      await apiCall('/tasks', 'POST', { tasks: updatedTasks.filter(t => !t.completed) });
+      
+      setTasks(updatedTasks);
+      setShowSplitTask(null);
+      setSplitSegments([{ name: 'Part 1' }]);
+      setHasUnsavedChanges(true);
+      
+      alert(`Split "${task.title}" into ${splitSegments.length} segments`);
+    } catch (error) {
+      console.error('Failed to split task:', error);
+      alert('Failed to split task');
+    }
+  };
     console.log('💾 Saving and adjusting plan...');
     generateSessions(tasks, accountSetup.schedule);
     setHasUnsavedChanges(false);
@@ -771,17 +838,15 @@ const PlanAssist = () => {
         type: t.task_type
       }));
       
-      const reestimatedTasks = await Promise.all(loadedTasks.map(async task => {
-        if (task.completed) return task;
-        
-        const newEstimate = await estimateTaskTime(task.title);
-        console.log(`📊 Reestimated "${task.title}": ${task.estimatedTime}min → ${newEstimate}min`);
-        
-        return {
-          ...task,
-          estimatedTime: newEstimate
-        };
-      }));
+      // Re-estimate all incomplete tasks
+      const reestimatedTasks = [...loadedTasks];
+      for (let i = 0; i < reestimatedTasks.length; i++) {
+        if (!reestimatedTasks[i].completed) {
+          const newEstimate = await estimateTaskTime(reestimatedTasks[i].title);
+          console.log(`📊 Reestimated "${reestimatedTasks[i].title}": ${reestimatedTasks[i].estimatedTime}min → ${newEstimate}min`);
+          reestimatedTasks[i].estimatedTime = newEstimate;
+        }
+      }
       
       setTasks(reestimatedTasks);
       generateSessions(reestimatedTasks, accountSetup.schedule);
@@ -792,6 +857,10 @@ const PlanAssist = () => {
     }
 
     setSessions(prev => prev.filter(s => s.id !== currentSession.id));
+    
+    // Mark this session as completed so it doesn't regenerate
+    setCompletedSessionIds(prev => [...prev, currentSession.id]);
+    
     setShowSessionSummary(true);
   };
 
@@ -912,44 +981,60 @@ const PlanAssist = () => {
 
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setCurrentPage('hub')}
+            onClick={() => currentPage !== 'session-active' && setCurrentPage('hub')}
+            disabled={currentPage === 'session-active'}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-              currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
+              currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : 
+              currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' :
+              'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <Home className="w-5 h-5" />
             <span className="font-medium">Hub</span>
           </button>
           <button
-            onClick={() => setCurrentPage('tasks')}
+            onClick={() => currentPage !== 'session-active' && setCurrentPage('tasks')}
+            disabled={currentPage === 'session-active'}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-              currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
+              currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : 
+              currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' :
+              'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <List className="w-5 h-5" />
             <span className="font-medium">Tasks</span>
-            {hasUnsavedChanges && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
+            {hasUnsavedChanges && currentPage !== 'session-active' && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
           </button>
           <button
-            onClick={() => setCurrentPage('sessions')}
+            onClick={() => currentPage !== 'session-active' && setCurrentPage('sessions')}
+            disabled={currentPage === 'session-active'}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-              currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
+              currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : 
+              currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' :
+              'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <Play className="w-5 h-5" />
             <span className="font-medium">Sessions</span>
           </button>
           <button
-            onClick={() => setCurrentPage('settings')}
+            onClick={() => currentPage !== 'session-active' && setCurrentPage('settings')}
+            disabled={currentPage === 'session-active'}
             className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
-              currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
+              currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : 
+              currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' :
+              'text-gray-600 hover:bg-gray-100'
             }`}
           >
             <Settings className="w-5 h-5" />
           </button>
           <button
             onClick={handleLogout}
-            className="px-4 py-2 rounded-lg flex items-center gap-2 text-red-600 hover:bg-red-50"
+            disabled={currentPage === 'session-active'}
+            className={`px-4 py-2 rounded-lg flex items-center gap-2 ${
+              currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' :
+              'text-red-600 hover:bg-red-50'
+            }`}
           >
             <LogOut className="w-5 h-5" />
           </button>
@@ -1057,9 +1142,244 @@ const PlanAssist = () => {
     </div>
   );
 
-  // RENDER: Task List (ENHANCED with checkboxes and Save button)
-  const renderTasks = () => (
-    <div className="max-w-5xl mx-auto p-6">
+  // RENDER: Task List (ENHANCED with checkboxes, split, and top Save button)
+  const renderTasks = () => {
+    // Filter to show only today and future tasks
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const visibleTasks = tasks.filter(t => {
+      const dueDate = new Date(t.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      return !t.completed && dueDate >= today;
+    });
+
+    return (
+      <div className="max-w-5xl mx-auto p-6">
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
+              <p className="text-gray-600">Manage your upcoming tasks</p>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="file"
+                accept=".ics"
+                onChange={handleICSUpload}
+                className="hidden"
+                id="ics-upload"
+              />
+              <label
+                htmlFor="ics-upload"
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                Upload ICS File
+              </label>
+              <button
+                onClick={fetchCanvasTasks}
+                disabled={isLoadingTasks}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50"
+              >
+                {isLoadingTasks ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Loading...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4" />
+                    Sync from URL
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {accountSetup.canvasUrl && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+              <p className="text-blue-800">
+                <strong>Tip:</strong> If "Sync from URL" doesn't work, download your Canvas calendar as an ICS file and use "Upload ICS File" instead.
+              </p>
+            </div>
+          )}
+
+          {hasUnsavedChanges && (
+            <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
+              <p className="text-orange-800 font-medium">
+                ⚠️ You have unsaved changes. Click "Save and Adjust Plan" to apply.
+              </p>
+              <button
+                onClick={handleSaveAndAdjustPlan}
+                className="bg-orange-600 text-white px-6 py-2 rounded-lg hover:bg-orange-700 font-semibold flex items-center gap-2 shadow-md"
+              >
+                <Save className="w-5 h-5" />
+                Save and Adjust Plan
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {visibleTasks.map(task => (
+              <div key={task.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
+                <div className="flex items-start gap-4">
+                  <input
+                    type="checkbox"
+                    checked={false}
+                    onChange={() => setShowCompleteConfirm(task.id)}
+                    className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
+                  />
+                  <div className="flex-1">
+                    <h3 className="font-semibold text-gray-900 mb-2">{task.title}</h3>
+                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                      <span>Due: {task.dueDate.toLocaleDateString()}</span>
+                      {task.estimatedTime > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Brain className="w-4 h-4" />
+                          AI: {task.estimatedTime} min
+                        </span>
+                      )}
+                      {task.title.toLowerCase().includes('homeroom') && (
+                        <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                          Not Scheduled
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {!task.title.toLowerCase().includes('homeroom') && (
+                      <>
+                        <input
+                          type="number"
+                          value={task.userEstimate || ''}
+                          onChange={(e) => {
+                            const val = e.target.value ? parseInt(e.target.value) : null;
+                            updateTaskEstimate(task.id, val);
+                          }}
+                          placeholder={task.estimatedTime > 0 ? task.estimatedTime : '0'}
+                          className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                        />
+                        <span className="text-sm text-gray-500">min</span>
+                        <button
+                          onClick={() => {
+                            setShowSplitTask(task.id);
+                            setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                          }}
+                          className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium"
+                          title="Split into segments"
+                        >
+                          Split
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {visibleTasks.length === 0 && (
+            <div className="text-center py-12">
+              <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+              <p className="text-gray-600">No pending tasks</p>
+            </div>
+          )}
+        </div>
+
+        {/* Confirmation Dialog for Manual Completion */}
+        {showCompleteConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-md mx-4">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Complete Task?</h3>
+              <p className="text-gray-600 mb-6">
+                Mark "{tasks.find(t => t.id === showCompleteConfirm)?.title}" as complete? This will remove it from your sessions.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCompleteConfirm(null)}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleManualComplete(showCompleteConfirm)}
+                  className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2"
+                >
+                  <Check className="w-5 h-5" />
+                  Complete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Split Task Dialog */}
+        {showSplitTask && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
+              <p className="text-gray-600 mb-4">
+                Split "{tasks.find(t => t.id === showSplitTask)?.title}" into multiple parts. Time will be divided equally.
+              </p>
+              
+              <div className="space-y-3 mb-4">
+                {splitSegments.map((seg, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={seg.name}
+                      onChange={(e) => {
+                        const newSegs = [...splitSegments];
+                        newSegs[idx].name = e.target.value;
+                        setSplitSegments(newSegs);
+                      }}
+                      placeholder={`Segment ${idx + 1} name`}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                    {splitSegments.length > 1 && (
+                      <button
+                        onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setSplitSegments([...splitSegments, { name: `Part ${splitSegments.length + 1}` }])}
+                className="w-full mb-4 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-200 font-medium"
+              >
+                + Add Segment
+              </button>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowSplitTask(null);
+                    setSplitSegments([{ name: 'Part 1' }]);
+                  }}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSplitTask(showSplitTask)}
+                  className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium"
+                >
+                  Split Task
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };-6">
       <div className="bg-white rounded-xl shadow-md p-6">
         <div className="flex items-center justify-between mb-6">
           <div>
