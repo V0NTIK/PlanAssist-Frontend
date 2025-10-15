@@ -224,6 +224,87 @@ const PlanAssist = () => {
     }
   };
 
+  // Parse ICS file manually
+  const parseICSFile = (icsText) => {
+    const tasks = [];
+    const lines = icsText.split('\n');
+    let currentEvent = {};
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      
+      if (line === 'BEGIN:VEVENT') {
+        currentEvent = {};
+      } else if (line.startsWith('SUMMARY:')) {
+        currentEvent.title = line.substring(8);
+      } else if (line.startsWith('DTSTART')) {
+        const dateStr = line.split(':')[1] || line.split('=')[line.split('=').length - 1].split(':')[1];
+        if (dateStr) {
+          currentEvent.dueDate = new Date(
+            dateStr.substring(0, 4),
+            parseInt(dateStr.substring(4, 6)) - 1,
+            dateStr.substring(6, 8)
+          );
+        }
+      } else if (line.startsWith('DESCRIPTION:')) {
+        currentEvent.description = line.substring(12);
+      } else if (line === 'END:VEVENT' && currentEvent.title) {
+        tasks.push({
+          title: currentEvent.title,
+          description: currentEvent.description || '',
+          dueDate: currentEvent.dueDate || new Date(),
+        });
+      }
+    }
+    
+    return tasks;
+  };
+
+  // Handle ICS file upload
+  const handleICSUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsLoadingTasks(true);
+    try {
+      const text = await file.text();
+      const parsedTasks = parseICSFile(text);
+
+      const newTasks = parsedTasks.map((t, idx) => ({
+        id: Date.now() + idx,
+        title: t.title,
+        description: t.description,
+        dueDate: new Date(t.dueDate),
+        estimatedTime: estimateTaskTime(t.title),
+        userEstimate: null,
+        completed: false,
+        type: detectTaskType(t.title)
+      }));
+
+      // Save to backend
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
+      
+      const tasksWithIds = saveResult.tasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        dueDate: new Date(t.due_date),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimate,
+        completed: t.completed,
+        type: t.task_type
+      }));
+
+      setTasks(tasksWithIds);
+      generateSessions(tasksWithIds, accountSetup.schedule);
+      alert(`Loaded ${tasksWithIds.length} tasks from file!`);
+    } catch (error) {
+      alert('Failed to parse calendar file: ' + error.message);
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  };
+
   // Fetch tasks from Canvas
   const fetchCanvasTasks = async () => {
     if (!accountSetup.canvasUrl) {
@@ -238,7 +319,7 @@ const PlanAssist = () => {
       });
 
       const newTasks = data.tasks.map((t, idx) => ({
-        id: Date.now() + idx, // Temporary ID
+        id: Date.now() + idx,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.dueDate),
@@ -248,10 +329,8 @@ const PlanAssist = () => {
         type: detectTaskType(t.title)
       }));
 
-      // Save to backend and get real IDs
       const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
       
-      // Update with real database IDs
       const tasksWithIds = saveResult.tasks.map(t => ({
         id: t.id,
         title: t.title,
@@ -740,24 +819,48 @@ const PlanAssist = () => {
             <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
             <p className="text-gray-600">Manage your upcoming tasks</p>
           </div>
-          <button
-            onClick={fetchCanvasTasks}
-            disabled={isLoadingTasks}
-            className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50"
-          >
-            {isLoadingTasks ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                Loading...
-              </>
-            ) : (
-              <>
-                <Upload className="w-4 h-4" />
-                Refresh from Canvas
-              </>
-            )}
-          </button>
+          <div className="flex gap-2">
+            <input
+              type="file"
+              accept=".ics"
+              onChange={handleICSUpload}
+              className="hidden"
+              id="ics-upload"
+            />
+            <label
+              htmlFor="ics-upload"
+              className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer"
+            >
+              <Upload className="w-4 h-4" />
+              Upload ICS File
+            </label>
+            <button
+              onClick={fetchCanvasTasks}
+              disabled={isLoadingTasks}
+              className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50"
+            >
+              {isLoadingTasks ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                  Loading...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4" />
+                  Sync from URL
+                </>
+              )}
+            </button>
+          </div>
         </div>
+
+        {accountSetup.canvasUrl && (
+          <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+            <p className="text-blue-800">
+              <strong>Tip:</strong> If "Sync from URL" doesn't work, download your Canvas calendar as an ICS file and use "Upload ICS File" instead.
+            </p>
+          </div>
+        )}
 
         <div className="space-y-3">
           {tasks.filter(t => !t.completed).map(task => (
