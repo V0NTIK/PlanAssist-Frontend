@@ -1,8 +1,8 @@
-// PlanAssist - OneSchool Global Study Planner Frontend
+// PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
 // App.jsx
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -38,6 +38,8 @@ const PlanAssist = () => {
   const [showSessionSummary, setShowSessionSummary] = useState(false);
   const [sessionSummary, setSessionSummary] = useState(null);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   // API call helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
@@ -126,6 +128,30 @@ const PlanAssist = () => {
         actualTime: h.actual_time,
         date: new Date(h.completed_at)
       })));
+
+      // Check for saved session state
+      const sessionStateData = await fetch(`${API_URL}/sessions/saved-state`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      }).then(r => r.json());
+
+      if (sessionStateData.sessionId) {
+        // Check if the saved session is from today
+        const savedDate = new Date(sessionStateData.savedAt);
+        const today = new Date();
+        const isToday = savedDate.toDateString() === today.toDateString();
+
+        if (isToday) {
+          // Offer to resume session
+          console.log('Found saved session state:', sessionStateData);
+          // We'll handle this in the sessions page
+        } else {
+          // Clear old session state
+          await fetch(`${API_URL}/sessions/saved-state`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          });
+        }
+      }
 
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -270,18 +296,18 @@ const PlanAssist = () => {
       const text = await file.text();
       const parsedTasks = parseICSFile(text);
 
-      const newTasks = parsedTasks.map((t, idx) => ({
+      const newTasks = await Promise.all(parsedTasks.map(async (t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.dueDate),
-        estimatedTime: estimateTaskTime(t.title),
+        estimatedTime: await estimateTaskTime(t.title),
         userEstimate: null,
         completed: false,
         type: detectTaskType(t.title)
-      }));
+      })));
 
-      // Save to backend
+      // Save to backend (preserves manual overrides)
       const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
       
       const tasksWithIds = saveResult.tasks.map(t => ({
@@ -296,7 +322,7 @@ const PlanAssist = () => {
       }));
 
       setTasks(tasksWithIds);
-      generateSessions(tasksWithIds, accountSetup.schedule);
+      setHasUnsavedChanges(false);
       alert(`Loaded ${tasksWithIds.length} tasks from file!`);
     } catch (error) {
       alert('Failed to parse calendar file: ' + error.message);
@@ -318,16 +344,16 @@ const PlanAssist = () => {
         canvasUrl: accountSetup.canvasUrl 
       });
 
-      const newTasks = data.tasks.map((t, idx) => ({
+      const newTasks = await Promise.all(data.tasks.map(async (t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.dueDate),
-        estimatedTime: estimateTaskTime(t.title),
+        estimatedTime: await estimateTaskTime(t.title),
         userEstimate: null,
         completed: false,
         type: detectTaskType(t.title)
-      }));
+      })));
 
       const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
       
@@ -343,7 +369,7 @@ const PlanAssist = () => {
       }));
 
       setTasks(tasksWithIds);
-      generateSessions(tasksWithIds, accountSetup.schedule);
+      setHasUnsavedChanges(false);
       alert(`Loaded ${tasksWithIds.length} tasks from Canvas!`);
     } catch (error) {
       alert('Failed to fetch Canvas calendar: ' + error.message);
@@ -352,31 +378,39 @@ const PlanAssist = () => {
     }
   };
 
+  // Task type detection
+  const detectTaskType = (title) => {
+    const lower = title.toLowerCase();
+    if (lower.includes('homework') || lower.includes('hw')) return 'homework';
+    if (lower.includes('lab')) return 'lab';
+    if (lower.includes('read')) return 'reading';
+    if (lower.includes('essay') || lower.includes('writing')) return 'essay';
+    if (lower.includes('project')) return 'project';
+    if (lower.includes('quiz') || lower.includes('test') || lower.includes('exam')) return 'test-prep';
+    return 'general';
+  };
+
   // Extract keywords from task title
   const extractKeywords = (title) => {
     const lower = title.toLowerCase();
     const keywords = new Set();
     
-    // Subject keywords
     const subjects = ['math', 'science', 'history', 'english', 'physics', 'chemistry', 'biology', 'geography', 'literature', 'spanish', 'french', 'german'];
     subjects.forEach(subject => {
       if (lower.includes(subject)) keywords.add(subject);
     });
     
-    // Task type keywords
     const types = ['homework', 'assignment', 'essay', 'lab', 'project', 'reading', 'study', 'review', 'quiz', 'test', 'exam'];
     types.forEach(type => {
       if (lower.includes(type)) keywords.add(type);
     });
     
-    // Chapter/unit numbers
     const chapterMatch = lower.match(/chapter\s*(\d+)/);
     if (chapterMatch) keywords.add('chapter');
     
     const unitMatch = lower.match(/unit\s*(\d+)/);
     if (unitMatch) keywords.add('unit');
     
-    // Action words
     const actions = ['complete', 'write', 'read', 'finish', 'prepare', 'practice', 'solve'];
     actions.forEach(action => {
       if (lower.includes(action)) keywords.add(action);
@@ -385,74 +419,78 @@ const PlanAssist = () => {
     return Array.from(keywords);
   };
 
-  // Calculate similarity score between two tasks
-  const calculateSimilarity = (keywords1, keywords2) => {
-    if (keywords1.length === 0 || keywords2.length === 0) return 0;
-    
-    const set1 = new Set(keywords1);
-    const set2 = new Set(keywords2);
-    const intersection = new Set([...set1].filter(x => set2.has(x)));
-    const union = new Set([...set1, ...set2]);
-    
-    // Jaccard similarity: intersection / union
-    return intersection.size / union.size;
-  };
-
-  // Task type detection (kept for backward compatibility)
-  const detectTaskType = (title) => {
+  // NEW AI ESTIMATION ALGORITHM
+  const estimateTaskTime = async (title) => {
     const lower = title.toLowerCase();
-    if (lower.includes('homework') || lower.includes('hw')) return 'homework';
-    if (lower.includes('lab')) return 'lab';
-    if (lower.includes('read')) return 'reading';
-    if (lower.includes('essay') || lower.includes('writing')) return 'essay';
-    if (lower.includes('project')) return 'project';
-    if (lower.includes('quiz') || lower.includes('test')) return 'test-prep';
-    return 'general';
-  };
 
-  // IMPROVED: Estimate task time using keyword matching
-  const estimateTaskTime = (title) => {
-    const keywords = extractKeywords(title);
-    const type = detectTaskType(title);
-    
-    // Find similar tasks from completion history
-    const scoredHistory = completionHistory.map(h => ({
-      ...h,
-      similarity: calculateSimilarity(keywords, extractKeywords(h.taskTitle))
-    })).filter(h => h.similarity > 0.3); // Only consider tasks with >30% similarity
-    
-    // Sort by similarity (most similar first)
-    scoredHistory.sort((a, b) => b.similarity - a.similarity);
-    
-    if (scoredHistory.length > 0) {
-      // Weighted average: more similar tasks have more weight
-      const weightedSum = scoredHistory.reduce((sum, h, idx) => {
-        const weight = 1 / (idx + 1); // First task has weight 1, second has 0.5, etc.
-        return sum + (h.actualTime * weight * h.similarity);
-      }, 0);
-      
-      const totalWeight = scoredHistory.reduce((sum, h, idx) => {
-        const weight = 1 / (idx + 1);
-        return sum + (weight * h.similarity);
-      }, 0);
-      
-      return Math.round(weightedSum / totalWeight);
+    // Step 1: Check for global data (≥3 completions)
+    try {
+      const globalData = await apiCall(`/tasks/global-estimate/${encodeURIComponent(title)}`, 'GET');
+      if (globalData.estimate) {
+        console.log(`✅ Global estimate for "${title}": ${globalData.estimate} min (${globalData.completionCount} completions)`);
+        return globalData.estimate;
+      }
+    } catch (error) {
+      console.log('No global data available');
     }
 
-    // Fallback to defaults if no similar tasks found
-    const defaults = {
-      homework: 20,
-      lab: 35,
-      reading: 25,
-      essay: 40,
-      project: 45,
-      'test-prep': 30,
-      general: 20
-    };
-    return defaults[type] || 20;
+    // Step 2: Check for 'Lab'
+    if (lower.includes('lab')) {
+      console.log(`🔬 Lab detected: "${title}" → 60 min`);
+      return 60;
+    }
+
+    // Step 3: Check for 'Summative', 'Assessment', or 'Project'
+    if (lower.includes('summative') || lower.includes('assessment') || lower.includes('project')) {
+      console.log(`📝 Major task detected: "${title}" → 60 min`);
+      return 60;
+    }
+
+    // Step 4: Check for '[OSG Accelerate]'
+    if (lower.includes('[osg accelerate]')) {
+      console.log(`⚡ OSG Accelerate detected: "${title}" → 5 min`);
+      return 5;
+    }
+
+    // Step 5: Check for Quiz/Exam/Test (use user's personal average)
+    if (lower.includes('quiz') || lower.includes('exam') || lower.includes('test')) {
+      const testHistory = completionHistory.filter(h => {
+        const hLower = h.taskTitle.toLowerCase();
+        return hLower.includes('quiz') || hLower.includes('exam') || hLower.includes('test');
+      });
+
+      if (testHistory.length > 0) {
+        const avgTime = Math.round(
+          testHistory.reduce((sum, h) => sum + h.actualTime, 0) / testHistory.length
+        );
+        console.log(`📊 Test average from user history: "${title}" → ${avgTime} min`);
+        return avgTime;
+      }
+    }
+
+    // Step 6: Check for keyword matches (user's personal history)
+    const keywords = extractKeywords(title);
+    if (keywords.length > 0) {
+      const matchingHistory = completionHistory.filter(h => {
+        const hKeywords = extractKeywords(h.taskTitle);
+        return keywords.some(k => hKeywords.includes(k));
+      });
+
+      if (matchingHistory.length > 0) {
+        const avgTime = Math.round(
+          matchingHistory.reduce((sum, h) => sum + h.actualTime, 0) / matchingHistory.length
+        );
+        console.log(`🔑 Keyword match from user history: "${title}" → ${avgTime} min`);
+        return avgTime;
+      }
+    }
+
+    // Step 7: Default to 20 minutes
+    console.log(`⏱️ Default estimate: "${title}" → 20 min`);
+    return 20;
   };
 
-  // Generate sessions
+  // Generate sessions (ENHANCED: excludes Homeroom tasks)
   const generateSessions = (taskList, scheduleData) => {
     console.log('Generating sessions with:', { taskList, scheduleData });
     
@@ -461,7 +499,10 @@ const PlanAssist = () => {
       return;
     }
 
-    const incompleteTasks = taskList.filter(t => !t.completed).sort((a, b) => a.dueDate - b.dueDate);
+    // Filter out completed tasks AND Homeroom tasks
+    const incompleteTasks = taskList
+      .filter(t => !t.completed && !t.title.toLowerCase().includes('homeroom'))
+      .sort((a, b) => a.dueDate - b.dueDate);
     
     if (incompleteTasks.length === 0) {
       console.log('No incomplete tasks to schedule');
@@ -474,7 +515,19 @@ const PlanAssist = () => {
 
     const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     
+    // Get current day to filter out old sessions
+    const today = new Date();
+    const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const currentDayName = days[currentDayIndex - 1]; // Adjust for Monday = 0
+    
     for (const day of days) {
+      // Skip days before today
+      const dayIndex = days.indexOf(day);
+      const todayIndex = days.indexOf(currentDayName);
+      if (todayIndex !== -1 && dayIndex < todayIndex) {
+        continue;
+      }
+
       if (!scheduleData[day]) continue;
       
       const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
@@ -509,7 +562,6 @@ const PlanAssist = () => {
         }
       }
       
-      // Stop if all tasks are scheduled
       if (taskIndex >= incompleteTasks.length) break;
     }
 
@@ -517,7 +569,7 @@ const PlanAssist = () => {
     setSessions(newSessions);
   };
 
-  // Update task estimate with immediate regeneration
+  // Update task estimate (NO AUTO-RESCHEDULE)
   const updateTaskEstimate = async (taskId, estimate) => {
     try {
       await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { userEstimate: estimate });
@@ -527,13 +579,39 @@ const PlanAssist = () => {
       );
       
       setTasks(updatedTasks);
-      
-      // IMMEDIATE RESCHEDULE
-      console.log('🔄 Rescheduling sessions after estimate override...');
-      generateSessions(updatedTasks, accountSetup.schedule);
+      setHasUnsavedChanges(true);
     } catch (error) {
       console.error('Failed to update estimate:', error);
     }
+  };
+
+  // NEW: Manual task completion with confirmation
+  const handleManualComplete = async (taskId) => {
+    try {
+      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
+      
+      const updatedTasks = tasks.map(t => 
+        t.id === taskId ? { ...t, completed: true } : t
+      );
+      
+      setTasks(updatedTasks);
+      setShowCompleteConfirm(null);
+      
+      // Auto-reschedule after manual completion
+      console.log('🔄 Rescheduling after manual completion...');
+      generateSessions(updatedTasks, accountSetup.schedule);
+    } catch (error) {
+      console.error('Failed to complete task:', error);
+      alert('Failed to complete task');
+    }
+  };
+
+  // NEW: Save and Adjust Plan button handler
+  const handleSaveAndAdjustPlan = () => {
+    console.log('💾 Saving and adjusting plan...');
+    generateSessions(tasks, accountSetup.schedule);
+    setHasUnsavedChanges(false);
+    setCurrentPage('hub');
   };
 
   // Session management
@@ -545,6 +623,62 @@ const PlanAssist = () => {
     setIsTimerRunning(true);
     setSessionCompletions([]);
     setCurrentPage('session-active');
+  };
+
+  // NEW: Resume session
+  const resumeSession = async () => {
+    try {
+      const sessionStateData = await apiCall('/sessions/saved-state', 'GET');
+      
+      if (!sessionStateData.sessionId) {
+        alert('No saved session found');
+        return;
+      }
+
+      // Find the session
+      const session = sessions.find(s => s.id === sessionStateData.sessionId);
+      if (!session) {
+        alert('Session no longer exists');
+        await apiCall('/sessions/saved-state', 'DELETE');
+        return;
+      }
+
+      setCurrentSession(session);
+      setSessionTime(sessionStateData.remainingTime);
+      setCurrentTaskIndex(sessionStateData.currentTaskIndex);
+      setTaskStartTime(sessionStateData.taskStartTime);
+      setSessionCompletions(sessionStateData.completions);
+      setIsTimerRunning(true);
+      setCurrentPage('session-active');
+
+      console.log('▶️ Resumed session:', sessionStateData);
+    } catch (error) {
+      console.error('Failed to resume session:', error);
+      alert('Failed to resume session');
+    }
+  };
+
+  // NEW: Save session state and pause
+  const pauseSession = async () => {
+    try {
+      setIsTimerRunning(false);
+      
+      await apiCall('/sessions/save-state', 'POST', {
+        sessionId: currentSession.id,
+        day: currentSession.day,
+        period: currentSession.period,
+        remainingTime: sessionTime,
+        currentTaskIndex: currentTaskIndex,
+        taskStartTime: taskStartTime,
+        completions: sessionCompletions
+      });
+
+      console.log('⏸️ Session paused and saved');
+      setCurrentPage('sessions');
+    } catch (error) {
+      console.error('Failed to save session state:', error);
+      alert('Failed to pause session');
+    }
   };
 
   useEffect(() => {
@@ -606,18 +740,18 @@ const PlanAssist = () => {
       totalTime: Math.round((3600 - sessionTime) / 60)
     });
 
-    // Save to backend
     try {
       await apiCall('/sessions/complete', 'POST', {
         completions: sessionCompletions,
         day: currentSession.day,
         period: currentSession.period
       });
+
+      // Clear saved session state
+      await apiCall('/sessions/saved-state', 'DELETE');
       
-      // CRITICAL: Reload tasks and regenerate sessions with new learning
       console.log('📚 Session complete! Applying learnings and rescheduling...');
       
-      // Reload tasks from backend (includes completed status)
       const tasksData = await apiCall('/tasks', 'GET');
       const loadedTasks = tasksData.map(t => ({
         id: t.id,
@@ -630,23 +764,19 @@ const PlanAssist = () => {
         type: t.task_type
       }));
       
-      // Re-estimate ALL incomplete tasks with new learning
-      const reestimatedTasks = loadedTasks.map(task => {
+      const reestimatedTasks = await Promise.all(loadedTasks.map(async task => {
         if (task.completed) return task;
         
-        // Recalculate estimate using updated completion history
-        const newEstimate = estimateTaskTime(task.title);
+        const newEstimate = await estimateTaskTime(task.title);
         console.log(`📊 Reestimated "${task.title}": ${task.estimatedTime}min → ${newEstimate}min`);
         
         return {
           ...task,
           estimatedTime: newEstimate
         };
-      });
+      }));
       
       setTasks(reestimatedTasks);
-      
-      // Regenerate sessions with new estimates
       generateSessions(reestimatedTasks, accountSetup.schedule);
       
       console.log('✅ Rescheduling complete!');
@@ -791,6 +921,7 @@ const PlanAssist = () => {
           >
             <List className="w-5 h-5" />
             <span className="font-medium">Tasks</span>
+            {hasUnsavedChanges && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
           </button>
           <button
             onClick={() => setCurrentPage('sessions')}
@@ -919,7 +1050,7 @@ const PlanAssist = () => {
     </div>
   );
 
-  // RENDER: Task List
+  // RENDER: Task List (ENHANCED with checkboxes and Save button)
   const renderTasks = () => (
     <div className="max-w-5xl mx-auto p-6">
       <div className="bg-white rounded-xl shadow-md p-6">
@@ -971,10 +1102,31 @@ const PlanAssist = () => {
           </div>
         )}
 
+        {hasUnsavedChanges && (
+          <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm flex items-center justify-between">
+            <p className="text-orange-800">
+              <strong>Unsaved Changes:</strong> Click "Save and Adjust Plan" to apply your changes.
+            </p>
+            <button
+              onClick={handleSaveAndAdjustPlan}
+              className="bg-orange-600 text-white px-4 py-2 rounded-lg hover:bg-orange-700 font-medium flex items-center gap-2"
+            >
+              <Save className="w-4 h-4" />
+              Save and Adjust Plan
+            </button>
+          </div>
+        )}
+
         <div className="space-y-3">
           {tasks.filter(t => !t.completed).map(task => (
             <div key={task.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
-              <div className="flex items-start justify-between">
+              <div className="flex items-start gap-4">
+                <input
+                  type="checkbox"
+                  checked={false}
+                  onChange={() => setShowCompleteConfirm(task.id)}
+                  className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
+                />
                 <div className="flex-1">
                   <h3 className="font-semibold text-gray-900 mb-2">{task.title}</h3>
                   <div className="flex items-center gap-4 text-sm text-gray-600">
@@ -983,6 +1135,11 @@ const PlanAssist = () => {
                       <Brain className="w-4 h-4" />
                       AI: {task.estimatedTime} min
                     </span>
+                    {task.title.toLowerCase().includes('homeroom') && (
+                      <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                        Not Scheduled
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1010,71 +1167,143 @@ const PlanAssist = () => {
             <p className="text-gray-600">No pending tasks</p>
           </div>
         )}
-      </div>
-    </div>
-  );
 
-  // RENDER: Sessions
-  const renderSessions = () => (
-    <div className="max-w-5xl mx-auto p-6">
-      <div className="bg-white rounded-xl shadow-md p-6">
-        <div className="mb-6">
-          <h2 className="text-2xl font-bold text-gray-900 mb-2">Study Sessions</h2>
-          <p className="text-gray-600">Your scheduled study periods</p>
-        </div>
-
-        <div className="space-y-4">
-          {sessions.map(session => (
-            <div key={session.id} className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition-colors">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">
-                    {session.day} - Period {session.period}
-                  </h3>
-                  <p className="text-sm text-gray-600">
-                    {session.tasks.length} tasks • ~{session.totalTime} minutes
-                  </p>
-                </div>
-                <button
-                  onClick={() => startSession(session)}
-                  className="bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2"
-                >
-                  <Play className="w-5 h-5" />
-                  Start Session
-                </button>
-              </div>
-
-              <div className="space-y-2">
-                {session.tasks.map((task, idx) => (
-                  <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                    <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                      {idx + 1}
-                    </span>
-                    <div className="flex-1">
-                      <p className="font-medium text-gray-900">{task.title}</p>
-                      <p className="text-sm text-gray-600">
-                        {task.userEstimate || task.estimatedTime} min
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {sessions.length === 0 && (
-          <div className="text-center py-12">
-            <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-xl font-bold text-gray-900 mb-2">No Sessions Scheduled</h3>
-            <p className="text-gray-600">Add tasks and set up your schedule to generate sessions</p>
+        {!hasUnsavedChanges && tasks.filter(t => !t.completed).length > 0 && (
+          <div className="mt-6 flex justify-end">
+            <button
+              onClick={handleSaveAndAdjustPlan}
+              className="bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 flex items-center gap-2"
+            >
+              <Save className="w-5 h-5" />
+              Save and Adjust Plan
+            </button>
           </div>
         )}
       </div>
+
+      {/* Confirmation Dialog */}
+      {showCompleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl p-6 max-w-md mx-4">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Complete Task?</h3>
+            <p className="text-gray-600 mb-6">
+              Mark "{tasks.find(t => t.id === showCompleteConfirm)?.title}" as complete? This will remove it from your sessions.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCompleteConfirm(null)}
+                className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleManualComplete(showCompleteConfirm)}
+                className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2"
+              >
+                <Check className="w-5 h-5" />
+                Complete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
-  // RENDER: Active Session
+  // RENDER: Sessions (ENHANCED with resume capability)
+  const renderSessions = async () => {
+    // Check for saved session
+    let savedSession = null;
+    try {
+      const sessionStateData = await apiCall('/sessions/saved-state', 'GET');
+      if (sessionStateData.sessionId) {
+        savedSession = sessionStateData;
+      }
+    } catch (error) {
+      console.log('No saved session');
+    }
+
+    return (
+      <div className="max-w-5xl mx-auto p-6">
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-2">Study Sessions</h2>
+            <p className="text-gray-600">Your scheduled study periods</p>
+          </div>
+
+          {savedSession && (
+            <div className="mb-6 p-4 bg-blue-50 border-2 border-blue-300 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-bold text-blue-900 mb-1">Resume Session</h3>
+                  <p className="text-sm text-blue-700">
+                    {savedSession.day} - Period {savedSession.period} ({Math.floor(savedSession.remainingTime / 60)} min remaining)
+                  </p>
+                </div>
+                <button
+                  onClick={resumeSession}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2"
+                >
+                  <Play className="w-5 h-5" />
+                  Resume
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {sessions.map(session => (
+              <div key={session.id} className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition-colors">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      {session.day} - Period {session.period}
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      {session.tasks.length} tasks • ~{session.totalTime} minutes
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => startSession(session)}
+                    className="bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2"
+                  >
+                    <Play className="w-5 h-5" />
+                    Start Session
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  {session.tasks.map((task, idx) => (
+                    <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                      <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900">{task.title}</p>
+                        <p className="text-sm text-gray-600">
+                          {task.userEstimate || task.estimatedTime} min
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {sessions.length === 0 && (
+            <div className="text-center py-12">
+              <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-gray-900 mb-2">No Sessions Scheduled</h3>
+              <p className="text-gray-600">Add tasks and set up your schedule to generate sessions</p>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // RENDER: Active Session (ENHANCED with pause button)
   const renderActiveSession = () => {
     if (!currentSession) return null;
     const currentTask = currentSession.tasks[currentTaskIndex];
@@ -1158,13 +1387,30 @@ const PlanAssist = () => {
           <div className="flex gap-4 justify-center">
             <button
               onClick={() => setIsTimerRunning(!isTimerRunning)}
-              className="bg-white text-purple-600 px-6 py-3 rounded-lg font-semibold hover:bg-purple-50"
+              className="bg-white text-purple-600 px-6 py-3 rounded-lg font-semibold hover:bg-purple-50 flex items-center gap-2"
             >
-              {isTimerRunning ? 'Pause' : 'Resume'}
+              {isTimerRunning ? (
+                <>
+                  <Pause className="w-5 h-5" />
+                  Pause Timer
+                </>
+              ) : (
+                <>
+                  <Play className="w-5 h-5" />
+                  Resume Timer
+                </>
+              )}
+            </button>
+            <button
+              onClick={pauseSession}
+              className="bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-800 flex items-center gap-2"
+            >
+              <X className="w-5 h-5" />
+              Save & Exit
             </button>
             <button
               onClick={() => endSession(false)}
-              className="bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-800"
+              className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700"
             >
               End Session
             </button>
