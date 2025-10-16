@@ -983,7 +983,6 @@
       </div>
     </div>
   );
-};
 
 export default PlanAssist;// PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
 // App.jsx
