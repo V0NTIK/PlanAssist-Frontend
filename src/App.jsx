@@ -237,6 +237,9 @@ const PlanAssist = () => {
     const tasks = [];
     const lines = icsText.split('\n');
     let currentEvent = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim();
       if (line === 'BEGIN:VEVENT') {
@@ -255,11 +258,16 @@ const PlanAssist = () => {
       } else if (line.startsWith('DESCRIPTION:')) {
         currentEvent.description = line.substring(12);
       } else if (line === 'END:VEVENT' && currentEvent.title) {
-        tasks.push({
-          title: currentEvent.title,
-          description: currentEvent.description || '',
-          dueDate: currentEvent.dueDate || new Date(),
-        });
+        const dueDate = new Date(currentEvent.dueDate || new Date());
+        dueDate.setHours(0, 0, 0, 0);
+        // Only add tasks that are NOT past due
+        if (dueDate >= today) {
+          tasks.push({
+            title: currentEvent.title,
+            description: currentEvent.description || '',
+            dueDate: currentEvent.dueDate || new Date(),
+          });
+        }
       }
     }
     return tasks;
@@ -314,7 +322,17 @@ const PlanAssist = () => {
     setIsLoadingTasks(true);
     try {
       const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
-      const newTasks = data.tasks.map((t, idx) => ({
+      
+      // Filter out past due tasks
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const filteredTasks = data.tasks.filter(t => {
+        const dueDate = new Date(t.dueDate);
+        dueDate.setHours(0, 0, 0, 0);
+        return dueDate >= today;
+      });
+
+      const newTasks = filteredTasks.map((t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
         description: t.description,
@@ -411,11 +429,18 @@ const PlanAssist = () => {
     if (!scheduleData || Object.keys(scheduleData).length === 0) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const incompleteTasks = taskList.filter(t => {
+    
+    // Remove past due tasks from the task list
+    const validTasks = taskList.filter(t => {
       const dueDate = new Date(t.dueDate);
       dueDate.setHours(0, 0, 0, 0);
-      return !t.completed && !t.title.toLowerCase().includes('homeroom') && dueDate >= today;
+      return dueDate >= today;
+    });
+
+    const incompleteTasks = validTasks.filter(t => {
+      return !t.completed && !t.title.toLowerCase().includes('homeroom');
     }).sort((a, b) => a.dueDate - b.dueDate);
+    
     if (incompleteTasks.length === 0) {
       setSessions([]);
       return;
@@ -484,8 +509,11 @@ const PlanAssist = () => {
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
+      
+      const taskIndex = tasks.findIndex(t => t.id === taskId);
       const totalTime = task.userEstimate || task.estimatedTime;
       const timePerSegment = Math.round(totalTime / splitSegments.length);
+      
       const newTasks = splitSegments.map((seg, idx) => ({
         id: Date.now() + idx,
         title: `${task.title} - ${seg.name}`,
@@ -496,7 +524,11 @@ const PlanAssist = () => {
         completed: false,
         type: task.type
       }));
-      const updatedTasks = tasks.filter(t => t.id !== taskId).concat(newTasks);
+      
+      // Insert new tasks at the same position as the original task
+      const updatedTasks = [...tasks];
+      updatedTasks.splice(taskIndex, 1, ...newTasks);
+      
       await apiCall('/tasks', 'POST', { tasks: updatedTasks.filter(t => !t.completed) });
       setTasks(updatedTasks);
       setShowSplitTask(null);
