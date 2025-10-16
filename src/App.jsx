@@ -1,8 +1,8 @@
 // PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
-// App.jsx
+// App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -24,7 +24,8 @@ const PlanAssist = () => {
     grade: '',
     canvasUrl: '',
     presentPeriods: '2-6',
-    schedule: {}
+    schedule: {},
+    classColors: {}
   });
   const [tasks, setTasks] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -44,6 +45,9 @@ const PlanAssist = () => {
   const [showSplitTask, setShowSplitTask] = useState(null);
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
   const [completedSessionIds, setCompletedSessionIds] = useState([]);
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const [feedbackText, setFeedbackText] = useState('');
+  const [feedbackSending, setFeedbackSending] = useState(false);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -54,6 +58,47 @@ const PlanAssist = () => {
     }
     return periods;
   }, [accountSetup.presentPeriods]);
+
+  // Extract class name from task title
+  const extractClassName = (title) => {
+    const match = title.match(/\[([^\]]+)\]/);
+    return match ? match[1] : 'No Class';
+  };
+
+  // Get color for a class
+  const getClassColor = (className) => {
+    if (accountSetup.classColors[className]) {
+      return accountSetup.classColors[className];
+    }
+    // Generate a consistent color based on class name
+    const colors = ['#3b82f6', '#8b5cf6', '#ec4899', '#f59e0b', '#10b981', '#06b6d4', '#6366f1', '#14b8a6'];
+    let hash = 0;
+    for (let i = 0; i < className.length; i++) {
+      hash = className.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+  };
+
+  // Group tasks by day and due date
+  const groupTasksByDay = (taskList) => {
+    const grouped = {};
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    taskList.forEach(task => {
+      const dueDate = new Date(task.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      if (!task.completed && dueDate >= today) {
+        const dayKey = dueDate.toDateString();
+        if (!grouped[dayKey]) {
+          grouped[dayKey] = [];
+        }
+        grouped[dayKey].push(task);
+      }
+    });
+    
+    return grouped;
+  };
 
   // API helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
@@ -69,14 +114,20 @@ const PlanAssist = () => {
     return response.json();
   };
 
+// PART 2: Auth and Data Loading Functions
+
   // Check for existing session on mount
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
+    const savedColors = localStorage.getItem('classColors');
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
       setIsAuthenticated(true);
+      if (savedColors) {
+        setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
+      }
       loadUserData(savedToken);
     }
   }, []);
@@ -88,13 +139,15 @@ const PlanAssist = () => {
         headers: { 'Authorization': `Bearer ${authToken}` }
       }).then(r => r.json());
 
+      const savedColors = localStorage.getItem('classColors');
       if (setupData.grade) {
         setAccountSetup({
           name: JSON.parse(localStorage.getItem('user')).name,
           grade: setupData.grade || '',
           canvasUrl: setupData.canvasUrl || '',
           presentPeriods: setupData.presentPeriods || '2-6',
-          schedule: setupData.schedule || {}
+          schedule: setupData.schedule || {},
+          classColors: savedColors ? JSON.parse(savedColors) : {}
         });
       }
 
@@ -226,12 +279,38 @@ const PlanAssist = () => {
         presentPeriods: accountSetup.presentPeriods,
         schedule: accountSetup.schedule
       });
+      localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
       if (accountSetup.canvasUrl) await fetchCanvasTasks();
       setCurrentPage('hub');
     } catch (error) {
       alert('Failed to save settings: ' + error.message);
     }
   };
+
+  const handleSendFeedback = async () => {
+    if (!feedbackText.trim()) {
+      alert('Please enter your feedback');
+      return;
+    }
+    
+    setFeedbackSending(true);
+    try {
+      await apiCall('/feedback', 'POST', {
+        feedback: feedbackText,
+        userEmail: user.email,
+        userName: accountSetup.name
+      });
+      alert('Thank you! Your feedback has been sent.');
+      setFeedbackText('');
+      setShowFeedbackForm(false);
+    } catch (error) {
+      alert('Failed to send feedback. Please try again or email directly.');
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
+
+// PART 3: Task Loading and Processing Functions
 
   const parseICSFile = (icsText) => {
     const tasks = [];
@@ -260,7 +339,6 @@ const PlanAssist = () => {
       } else if (line === 'END:VEVENT' && currentEvent.title) {
         const dueDate = new Date(currentEvent.dueDate || new Date());
         dueDate.setHours(0, 0, 0, 0);
-        // Only add tasks that are NOT past due
         if (dueDate >= today) {
           tasks.push({
             title: currentEvent.title,
@@ -280,6 +358,10 @@ const PlanAssist = () => {
     try {
       const text = await file.text();
       const parsedTasks = parseICSFile(text);
+      
+      const existingCompletedTasks = tasks.filter(t => t.completed);
+      const existingSplitTasks = tasks.filter(t => t.title.includes(' - Part ') || t.title.includes(' - Segment '));
+      
       const newTasks = parsedTasks.map((t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
@@ -290,10 +372,20 @@ const PlanAssist = () => {
         completed: false,
         type: detectTaskType(t.title)
       }));
-      for (let i = 0; i < newTasks.length; i++) {
-        newTasks[i].estimatedTime = await estimateTaskTime(newTasks[i].title);
+      
+      const filteredNewTasks = newTasks.filter(newTask => {
+        return !existingSplitTasks.some(splitTask => {
+          const baseTitle = splitTask.title.split(' - Part ')[0].split(' - Segment ')[0];
+          return newTask.title === baseTitle;
+        });
+      });
+      
+      for (let i = 0; i < filteredNewTasks.length; i++) {
+        filteredNewTasks[i].estimatedTime = await estimateTaskTime(filteredNewTasks[i].title);
       }
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
+      
+      const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
       const tasksWithIds = saveResult.tasks.map(t => ({
         id: t.id,
         title: t.title,
@@ -306,7 +398,7 @@ const PlanAssist = () => {
       }));
       setTasks(tasksWithIds);
       setHasUnsavedChanges(false);
-      alert(`Loaded ${tasksWithIds.length} tasks from file!`);
+      alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
     } catch (error) {
       alert('Failed to parse calendar file: ' + error.message);
     } finally {
@@ -323,7 +415,6 @@ const PlanAssist = () => {
     try {
       const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
       
-      // Filter out past due tasks
       const today = new Date();
       today.setHours(0, 0, 0, 0);
       const filteredTasks = data.tasks.filter(t => {
@@ -331,6 +422,9 @@ const PlanAssist = () => {
         dueDate.setHours(0, 0, 0, 0);
         return dueDate >= today;
       });
+
+      const existingCompletedTasks = tasks.filter(t => t.completed);
+      const existingSplitTasks = tasks.filter(t => t.title.includes(' - Part ') || t.title.includes(' - Segment '));
 
       const newTasks = filteredTasks.map((t, idx) => ({
         id: Date.now() + idx,
@@ -342,10 +436,20 @@ const PlanAssist = () => {
         completed: false,
         type: detectTaskType(t.title)
       }));
-      for (let i = 0; i < newTasks.length; i++) {
-        newTasks[i].estimatedTime = await estimateTaskTime(newTasks[i].title);
+      
+      const filteredNewTasks = newTasks.filter(newTask => {
+        return !existingSplitTasks.some(splitTask => {
+          const baseTitle = splitTask.title.split(' - Part ')[0].split(' - Segment ')[0];
+          return newTask.title === baseTitle;
+        });
+      });
+      
+      for (let i = 0; i < filteredNewTasks.length; i++) {
+        filteredNewTasks[i].estimatedTime = await estimateTaskTime(filteredNewTasks[i].title);
       }
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: newTasks });
+      
+      const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
       const tasksWithIds = saveResult.tasks.map(t => ({
         id: t.id,
         title: t.title,
@@ -358,7 +462,7 @@ const PlanAssist = () => {
       }));
       setTasks(tasksWithIds);
       setHasUnsavedChanges(false);
-      alert(`Loaded ${tasksWithIds.length} tasks from Canvas!`);
+      alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
     } catch (error) {
       alert('Failed to fetch Canvas calendar: ' + error.message);
     } finally {
@@ -425,12 +529,13 @@ const PlanAssist = () => {
     return 20;
   };
 
+// PART 4: Session and Task Management Functions
+
   const generateSessions = (taskList, scheduleData) => {
     if (!scheduleData || Object.keys(scheduleData).length === 0) return;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
-    // Remove past due tasks from the task list
     const validTasks = taskList.filter(t => {
       const dueDate = new Date(t.dueDate);
       dueDate.setHours(0, 0, 0, 0);
@@ -525,7 +630,6 @@ const PlanAssist = () => {
         type: task.type
       }));
       
-      // Insert new tasks at the same position as the original task
       const updatedTasks = [...tasks];
       updatedTasks.splice(taskIndex, 1, ...newTasks);
       
@@ -702,6 +806,8 @@ const PlanAssist = () => {
     }
   }, [accountSetup.presentPeriods]);
 
+// PART 5: Login Screen and Hub Page JSX
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-6">
@@ -852,6 +958,9 @@ const PlanAssist = () => {
             )}
           </div>
         )}
+
+// PART 7: Tasks Page JSX (Continued)
+
         {currentPage === 'tasks' && (
           <div className="max-w-5xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-6">
@@ -884,7 +993,7 @@ const PlanAssist = () => {
               {accountSetup.canvasUrl && (
                 <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
                   <p className="text-blue-800">
-                    <strong>Tip:</strong> If Sync from URL does not work, download your Canvas calendar as an ICS file and use Upload ICS File instead.
+                    <strong>Tip:</strong> Sync from URL preserves completed tasks and split tasks. Only new tasks will be added.
                   </p>
                 </div>
               )}
@@ -899,55 +1008,105 @@ const PlanAssist = () => {
                   </button>
                 </div>
               )}
-              <div className="space-y-3">
+              <div className="space-y-6">
                 {(() => {
-                  const today = new Date();
-                  today.setHours(0, 0, 0, 0);
-                  const visibleTasks = tasks.filter(t => {
-                    const dueDate = new Date(t.dueDate);
-                    dueDate.setHours(0, 0, 0, 0);
-                    return !t.completed && dueDate >= today;
-                  });
-                  return visibleTasks.map(task => {
-                    const isHomeroom = task.title.toLowerCase().includes('homeroom');
+                  const groupedTasks = groupTasksByDay(tasks);
+                  const sortedDays = Object.keys(groupedTasks).sort((a, b) => new Date(a) - new Date(b));
+                  
+                  return sortedDays.map(dayKey => {
+                    const dayTasks = groupedTasks[dayKey];
+                    const date = new Date(dayKey);
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                    
                     return (
-                      <div key={task.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
-                        <div className="flex items-start gap-4">
-                          <input type="checkbox" checked={false} onChange={() => setShowCompleteConfirm(task.id)} className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer" />
-                          <div className="flex-1">
-                            <h3 className="font-semibold text-gray-900 mb-2">{task.title}</h3>
-                            <div className="flex items-center gap-4 text-sm text-gray-600">
-                              <span>Due: {task.dueDate.toLocaleDateString()}</span>
-                              {task.estimatedTime > 0 && (
-                                <span className="flex items-center gap-1">
-                                  <Brain className="w-4 h-4" />
-                                  AI: {task.estimatedTime} min
-                                </span>
-                              )}
-                              {isHomeroom && (
-                                <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
-                                  Not Scheduled
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                      <div key={dayKey}>
+                        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl p-4 mb-3 shadow-md">
                           <div className="flex items-center gap-2">
-                            {!isHomeroom && (
-                              <>
-                                <input type="number" value={task.userEstimate || ''} onChange={(e) => {
-                                  const val = e.target.value ? parseInt(e.target.value) : null;
-                                  updateTaskEstimate(task.id, val);
-                                }} placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                                <span className="text-sm text-gray-500">min</span>
-                                <button onClick={() => {
-                                  setShowSplitTask(task.id);
-                                  setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
-                                }} className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" title="Split into segments">
-                                  Split
-                                </button>
-                              </>
-                            )}
+                            <Calendar className="w-5 h-5" />
+                            <h3 className="text-lg font-bold">{dayName}</h3>
                           </div>
+                        </div>
+                        <div className="space-y-3 ml-4">
+                          {dayTasks.map(task => {
+                            const isHomeroom = task.title.toLowerCase().includes('homeroom');
+                            const taskTime = task.userEstimate || task.estimatedTime;
+                            const minHeight = Math.max(60, Math.min(150, taskTime * 2));
+                            const className = extractClassName(task.title);
+                            const classColor = getClassColor(className);
+                            
+                            return (
+                              <div 
+                                key={task.id} 
+                                className="border-2 rounded-lg p-4 hover:shadow-lg transition-all"
+                                style={{ 
+                                  minHeight: `${minHeight}px`,
+                                  borderColor: classColor,
+                                  backgroundColor: `${classColor}15`
+                                }}
+                              >
+                                <div className="flex items-start gap-4 h-full">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={false} 
+                                    onChange={() => setShowCompleteConfirm(task.id)} 
+                                    className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
+                                    style={{ accentColor: classColor }}
+                                  />
+                                  <div className="flex-1">
+                                    <div className="flex items-start justify-between mb-2">
+                                      <h3 className="font-semibold text-gray-900 flex-1">{task.title}</h3>
+                                      <div 
+                                        className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2"
+                                        style={{ backgroundColor: classColor }}
+                                      >
+                                        {className}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                                      {task.estimatedTime > 0 && (
+                                        <span className="flex items-center gap-1">
+                                          <Brain className="w-4 h-4" />
+                                          AI: {task.estimatedTime} min
+                                        </span>
+                                      )}
+                                      {isHomeroom && (
+                                        <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                                          Not Scheduled
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    {!isHomeroom && (
+                                      <>
+                                        <input 
+                                          type="number" 
+                                          value={task.userEstimate || ''} 
+                                          onChange={(e) => {
+                                            const val = e.target.value ? parseInt(e.target.value) : null;
+                                            updateTaskEstimate(task.id, val);
+                                          }} 
+                                          placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} 
+                                          className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" 
+                                        />
+                                        <span className="text-sm text-gray-500">min</span>
+                                        <button 
+                                          onClick={() => {
+                                            setShowSplitTask(task.id);
+                                            setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                                          }} 
+                                          className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" 
+                                          title="Split into segments"
+                                        >
+                                          Split
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
@@ -955,14 +1114,8 @@ const PlanAssist = () => {
                 })()}
               </div>
               {(() => {
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
-                const visibleTasks = tasks.filter(t => {
-                  const dueDate = new Date(t.dueDate);
-                  dueDate.setHours(0, 0, 0, 0);
-                  return !t.completed && dueDate >= today;
-                });
-                return visibleTasks.length === 0 ? (
+                const groupedTasks = groupTasksByDay(tasks);
+                return Object.keys(groupedTasks).length === 0 ? (
                   <div className="text-center py-12">
                     <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
                     <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
@@ -1000,11 +1153,17 @@ const PlanAssist = () => {
                   <div className="space-y-3 mb-4">
                     {splitSegments.map((seg, idx) => (
                       <div key={idx} className="flex gap-2">
-                        <input type="text" value={seg.name} onChange={(e) => {
-                          const newSegs = [...splitSegments];
-                          newSegs[idx].name = e.target.value;
-                          setSplitSegments(newSegs);
-                        }} placeholder={`Segment ${idx + 1} name`} className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" />
+                        <input 
+                          type="text" 
+                          value={seg.name} 
+                          onChange={(e) => {
+                            const newSegs = [...splitSegments];
+                            newSegs[idx].name = e.target.value;
+                            setSplitSegments(newSegs);
+                          }} 
+                          placeholder={`Segment ${idx + 1} name`} 
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" 
+                        />
                         {splitSegments.length > 1 && (
                           <button onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))} className="text-red-600 hover:text-red-800">
                             <X className="w-5 h-5" />
@@ -1032,6 +1191,9 @@ const PlanAssist = () => {
             )}
           </div>
         )}
+
+// PART 8: Sessions Page and Active Session JSX
+
         {currentPage === 'sessions' && (
           <div className="max-w-5xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-6">
@@ -1231,6 +1393,9 @@ const PlanAssist = () => {
             </div>
           )
         )}
+
+// PART 9: Settings Page and Feedback Modal - FINAL PART
+
         {currentPage === 'settings' && (
           <div className="max-w-4xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-8">
@@ -1308,6 +1473,40 @@ const PlanAssist = () => {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Class Colors (Optional)
+                  </label>
+                  <p className="text-xs text-gray-500 mb-3">Customize colors for your classes. Default colors are automatically assigned.</p>
+                  <div className="space-y-2">
+                    {Array.from(new Set(tasks.map(t => extractClassName(t.title)))).map(className => (
+                      <div key={className} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg">
+                        <input 
+                          type="color" 
+                          value={accountSetup.classColors[className] || getClassColor(className)}
+                          onChange={(e) => {
+                            const newColors = { ...accountSetup.classColors };
+                            newColors[className] = e.target.value;
+                            setAccountSetup(prev => ({ ...prev, classColors: newColors }));
+                          }}
+                          className="w-10 h-10 rounded cursor-pointer"
+                        />
+                        <span className="flex-1 font-medium text-gray-700">{className}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t pt-6">
+                  <button
+                    onClick={() => setShowFeedbackForm(true)}
+                    className="w-full bg-blue-100 text-blue-700 py-3 rounded-lg font-semibold hover:bg-blue-200 flex items-center justify-center gap-2"
+                  >
+                    <Send className="w-5 h-5" />
+                    Submit Feedback or Bug Report
+                  </button>
+                </div>
+
                 <div className="flex gap-4 pt-4">
                   <button
                     onClick={() => setCurrentPage('hub')}
@@ -1327,8 +1526,68 @@ const PlanAssist = () => {
           </div>
         )}
       </div>
+      
+      {showFeedbackForm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-2xl w-full">
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Submit Feedback</h3>
+            <p className="text-gray-600 mb-4">
+              Have a suggestion, found a bug, or want to request a feature? Let us know!
+            </p>
+            <textarea
+              value={feedbackText}
+              onChange={(e) => setFeedbackText(e.target.value)}
+              placeholder="Describe your feedback, bug report, or feature request..."
+              className="w-full h-40 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 mb-4"
+            />
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowFeedbackForm(false);
+                  setFeedbackText('');
+                }}
+                className="flex-1 bg-gray-200 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendFeedback}
+                disabled={feedbackSending}
+                className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-4 py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {feedbackSending ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-5 h-5" />
+                    Send Feedback
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default PlanAssist;
+
+// ============================================
+// END OF COMPONENT - All 9 parts complete!
+// ============================================
+
+// To assemble the complete file:
+// 1. Copy Part 1 (imports and state)
+// 2. Add Part 2 (auth and data loading)
+// 3. Add Part 3 (task loading)
+// 4. Add Part 4 (session management)
+// 5. Add Part 5 (login screen and hub)
+// 6. Add Part 7 (tasks page)
+// 7. Add Part 8 (sessions and active session)
+// 8. Add Part 9 (settings and feedback modal)
+// 9. Close with export default PlanAssist;
