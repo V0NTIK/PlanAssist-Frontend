@@ -418,62 +418,65 @@
           )}
 
           <div className="space-y-3">
-            {visibleTasks.map(task => (
-              <div key={task.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
-                <div className="flex items-start gap-4">
-                  <input
-                    type="checkbox"
-                    checked={false}
-                    onChange={() => setShowCompleteConfirm(task.id)}
-                    className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
-                  />
-                  <div className="flex-1">
-                    <h3 className="font-semibold text-gray-900 mb-2">{task.title}</h3>
-                    <div className="flex items-center gap-4 text-sm text-gray-600">
-                      <span>Due: {task.dueDate.toLocaleDateString()}</span>
-                      {task.estimatedTime > 0 && (
-                        <span className="flex items-center gap-1">
-                          <Brain className="w-4 h-4" />
-                          AI: {task.estimatedTime} min
-                        </span>
-                      )}
-                      {task.title.toLowerCase().includes('homeroom') && (
-                        <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
-                          Not Scheduled
-                        </span>
+            {visibleTasks.map(task => {
+              const isHomeroom = task.title.toLowerCase().includes('homeroom');
+              return (
+                <div key={task.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
+                  <div className="flex items-start gap-4">
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onChange={() => setShowCompleteConfirm(task.id)}
+                      className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-gray-900 mb-2">{task.title}</h3>
+                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                        <span>Due: {task.dueDate.toLocaleDateString()}</span>
+                        {task.estimatedTime > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Brain className="w-4 h-4" />
+                            AI: {task.estimatedTime} min
+                          </span>
+                        )}
+                        {isHomeroom && (
+                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                            Not Scheduled
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!isHomeroom && (
+                        <>
+                          <input
+                            type="number"
+                            value={task.userEstimate || ''}
+                            onChange={(e) => {
+                              const val = e.target.value ? parseInt(e.target.value) : null;
+                              updateTaskEstimate(task.id, val);
+                            }}
+                            placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'}
+                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                          />
+                          <span className="text-sm text-gray-500">min</span>
+                          <button
+                            onClick={() => {
+                              setShowSplitTask(task.id);
+                              setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                            }}
+                            className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium"
+                            title="Split into segments"
+                          >
+                            Split
+                          </button>
+                        </>
                       )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {!task.title.toLowerCase().includes('homeroom') && (
-                      <>
-                        <input
-                          type="number"
-                          value={task.userEstimate || ''}
-                          onChange={(e) => {
-                            const val = e.target.value ? parseInt(e.target.value) : null;
-                            updateTaskEstimate(task.id, val);
-                          }}
-                          placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'}
-                          className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                        />
-                        <span className="text-sm text-gray-500">min</span>
-                        <button
-                          onClick={() => {
-                            setShowSplitTask(task.id);
-                            setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
-                          }}
-                          className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium"
-                          title="Split into segments"
-                        >
-                          Split
-                        </button>
-                      </>
-                    )}
-                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           {visibleTasks.length === 0 && (
