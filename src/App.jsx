@@ -342,7 +342,6 @@
 
   // RENDER: Task List (ENHANCED with checkboxes, split, and top Save button)
   const renderTasks = () => {
-    // Filter to show only today and future tasks
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     
@@ -406,7 +405,7 @@
           {hasUnsavedChanges && (
             <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
               <p className="text-orange-800 font-medium">
-                You have unsaved changes. Click Save and Adjust Plan to apply.
+                WARNING: You have unsaved changes. Click Save and Adjust Plan to apply.
               </p>
               <button
                 onClick={handleSaveAndAdjustPlan}
