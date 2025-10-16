@@ -492,7 +492,7 @@
             <div className="bg-white rounded-xl p-6 max-w-md mx-4">
               <h3 className="text-xl font-bold text-gray-900 mb-4">Complete Task?</h3>
               <p className="text-gray-600 mb-6">
-                Mark &quot;{tasks.find(t => t.id === showCompleteConfirm)?.title}&quot; as complete? This will remove it from your sessions.
+                Mark this task as complete? This will remove it from your sessions.
               </p>
               <div className="flex gap-3">
                 <button
@@ -519,7 +519,7 @@
             <div className="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
               <h3 className="text-xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
               <p className="text-gray-600 mb-4">
-                Split &quot;{tasks.find(t => t.id === showSplitTask)?.title}&quot; into multiple parts. Time will be divided equally.
+                Split this task into multiple parts. Time will be divided equally.
               </p>
               
               <div className="space-y-3 mb-4">
