@@ -526,59 +526,115 @@ const PlanAssist = () => {
   };
 
   const generateSessions = (taskList, scheduleData) => {
-    if (!scheduleData || Object.keys(scheduleData).length === 0) return;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const validTasks = taskList.filter(t => {
-      const dueDate = new Date(t.dueDate);
-      dueDate.setHours(0, 0, 0, 0);
-      return dueDate >= today;
-    });
+  console.log('generateSessions called with:', { taskList, scheduleData }); // Debug log
+  
+  if (!scheduleData || Object.keys(scheduleData).length === 0) {
+    console.log('No schedule data available');
+    setSessions([]);
+    return;
+  }
+  
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  // Remove past due tasks from the task list
+  const validTasks = taskList.filter(t => {
+    const dueDate = new Date(t.dueDate);
+    dueDate.setHours(0, 0, 0, 0);
+    return dueDate >= today;
+  });
 
-    const incompleteTasks = validTasks.filter(t => {
-      return !t.completed && !t.title.toLowerCase().includes('homeroom');
-    }).sort((a, b) => a.dueDate - b.dueDate);
+  console.log('Valid tasks (not past due):', validTasks.length);
+
+  const incompleteTasks = validTasks.filter(t => {
+    return !t.completed && !t.title.toLowerCase().includes('homeroom');
+  }).sort((a, b) => a.dueDate - b.dueDate);
+  
+  console.log('Incomplete tasks:', incompleteTasks.length);
+  
+  if (incompleteTasks.length === 0) {
+    console.log('No incomplete tasks to schedule');
+    setSessions([]);
+    return;
+  }
+  
+  const newSessions = [];
+  let taskIndex = 0;
+  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
+  
+  // Convert to our day array index (0 = Monday)
+  const currentDayArrayIndex = currentDayIndex === 0 ? -1 : currentDayIndex - 1;
+  
+  console.log('Today is:', days[currentDayArrayIndex] || 'Sunday', 'Day index:', currentDayArrayIndex);
+  
+  for (const day of days) {
+    const dayIndex = days.indexOf(day);
     
-    if (incompleteTasks.length === 0) {
-      setSessions([]);
-      return;
+    // Skip days that have already passed this week
+    if (currentDayArrayIndex !== -1 && dayIndex < currentDayArrayIndex) {
+      console.log(`Skipping ${day} - already passed this week`);
+      continue;
     }
-    const newSessions = [];
-    let taskIndex = 0;
-    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const currentDayIndex = today.getDay();
-    const currentDayName = days[currentDayIndex - 1];
-    for (const day of days) {
-      const dayIndex = days.indexOf(day);
-      const todayIndex = days.indexOf(currentDayName);
-      if (todayIndex !== -1 && dayIndex < todayIndex) continue;
-      if (!scheduleData[day]) continue;
-      const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
-      for (const period of periods) {
-        const sessionId = `${day}-${period}`;
-        if (completedSessionIds.includes(sessionId)) continue;
-        if (scheduleData[day][period] === 'Study') {
-          const sessionTasks = [];
-          let totalTime = 0;
-          while (taskIndex < incompleteTasks.length && totalTime < 60) {
-            const task = incompleteTasks[taskIndex];
-            const taskTime = task.userEstimate || task.estimatedTime;
-            if (totalTime + taskTime <= 60) {
-              sessionTasks.push(task);
-              totalTime += taskTime;
-              taskIndex++;
-            } else break;
-          }
-          if (sessionTasks.length > 0) {
-            newSessions.push({ id: sessionId, day, period: parseInt(period), tasks: sessionTasks, totalTime });
+    
+    if (!scheduleData[day]) {
+      console.log(`No schedule for ${day}`);
+      continue;
+    }
+    
+    const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
+    console.log(`${day} has periods:`, periods);
+    
+    for (const period of periods) {
+      const sessionId = `${day}-${period}`;
+      
+      if (completedSessionIds.includes(sessionId)) {
+        console.log(`Session ${sessionId} already completed, skipping`);
+        continue;
+      }
+      
+      const periodType = scheduleData[day][period];
+      console.log(`${sessionId} is type: ${periodType}`);
+      
+      if (periodType === 'Study') {
+        const sessionTasks = [];
+        let totalTime = 0;
+        
+        while (taskIndex < incompleteTasks.length && totalTime < 60) {
+          const task = incompleteTasks[taskIndex];
+          const taskTime = task.userEstimate || task.estimatedTime;
+          
+          if (totalTime + taskTime <= 60) {
+            sessionTasks.push(task);
+            totalTime += taskTime;
+            taskIndex++;
+          } else {
+            break;
           }
         }
+        
+        if (sessionTasks.length > 0) {
+          console.log(`Created session ${sessionId} with ${sessionTasks.length} tasks (${totalTime} min)`);
+          newSessions.push({ 
+            id: sessionId, 
+            day, 
+            period: parseInt(period), 
+            tasks: sessionTasks, 
+            totalTime 
+          });
+        }
       }
-      if (taskIndex >= incompleteTasks.length) break;
     }
-    setSessions(newSessions);
-  };
+    
+    if (taskIndex >= incompleteTasks.length) {
+      console.log('All tasks scheduled, stopping');
+      break;
+    }
+  }
+  
+  console.log('Total sessions created:', newSessions.length);
+  setSessions(newSessions);
+};
 
   const updateTaskEstimate = async (taskId, estimate) => {
     try {
