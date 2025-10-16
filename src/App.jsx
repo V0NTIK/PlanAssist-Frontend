@@ -380,6 +380,243 @@
                 className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50"
               >
                 {isLoadingTasks ? (
+                  <React.Fragment>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Loading...
+                  </React.Fragment>
+                ) : (
+                  <React.Fragment>
+                    <Upload className="w-4 h-4" />
+                    Sync from URL
+                  </React.Fragment>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {accountSetup.canvasUrl && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
+              <p className="text-blue-800">
+                <strong>Tip:</strong> If Sync from URL does not work, download your Canvas calendar as an ICS file and use Upload ICS File instead.
+              </p>
+            </div>
+          )}
+
+          {hasUnsavedChanges && (
+            <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
+              <p className="text-orange-800 font-medium">
+                WARNING: You have unsaved changes. Click Save and Adjust Plan to apply.
+              </p>
+              <button
+                onClick={handleSaveAndAdjustPlan}
+                className="bg-orange-600 text-white px-6 py-2 rounded-lg hover:bg-orange-700 font-semibold flex items-center gap-2 shadow-md"
+              >
+                <Save className="w-5 h-5" />
+                Save and Adjust Plan
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {visibleTasks.map(task => {
+              const isHomeroom = task.title.toLowerCase().includes('homeroom');
+              return (
+                <div key={task.id} className="border border-gray-200 rounded-lg p-4 hover:border-purple-300 transition-colors">
+                  <div className="flex items-start gap-4">
+                    <input
+                      type="checkbox"
+                      checked={false}
+                      onChange={() => setShowCompleteConfirm(task.id)}
+                      className="mt-1 w-5 h-5 text-purple-600 rounded focus:ring-purple-500 cursor-pointer"
+                    />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-gray-900 mb-2">{task.title}</h3>
+                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                        <span>Due: {task.dueDate.toLocaleDateString()}</span>
+                        {task.estimatedTime > 0 && (
+                          <span className="flex items-center gap-1">
+                            <Brain className="w-4 h-4" />
+                            AI: {task.estimatedTime} min
+                          </span>
+                        )}
+                        {isHomeroom && (
+                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                            Not Scheduled
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!isHomeroom && (
+                        <React.Fragment>
+                          <input
+                            type="number"
+                            value={task.userEstimate || ''}
+                            onChange={(e) => {
+                              const val = e.target.value ? parseInt(e.target.value) : null;
+                              updateTaskEstimate(task.id, val);
+                            }}
+                            placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'}
+                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                          />
+                          <span className="text-sm text-gray-500">min</span>
+                          <button
+                            onClick={() => {
+                              setShowSplitTask(task.id);
+                              setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                            }}
+                            className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium"
+                            title="Split into segments"
+                          >
+                            Split
+                          </button>
+                        </React.Fragment>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {visibleTasks.length === 0 && (
+            <div className="text-center py-12">
+              <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+              <p className="text-gray-600">No pending tasks</p>
+            </div>
+          )}
+        </div>
+
+        {showCompleteConfirm && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-md mx-4">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Complete Task?</h3>
+              <p className="text-gray-600 mb-6">
+                Mark this task as complete? This will remove it from your sessions.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowCompleteConfirm(null)}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleManualComplete(showCompleteConfirm)}
+                  className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center justify-center gap-2"
+                >
+                  <Check className="w-5 h-5" />
+                  Complete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showSplitTask && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
+              <p className="text-gray-600 mb-4">
+                Split this task into multiple parts. Time will be divided equally.
+              </p>
+              
+              <div className="space-y-3 mb-4">
+                {splitSegments.map((seg, idx) => (
+                  <div key={idx} className="flex gap-2">
+                    <input
+                      type="text"
+                      value={seg.name}
+                      onChange={(e) => {
+                        const newSegs = [...splitSegments];
+                        newSegs[idx].name = e.target.value;
+                        setSplitSegments(newSegs);
+                      }}
+                      placeholder={`Segment ${idx + 1} name`}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+                    />
+                    {splitSegments.length > 1 && (
+                      <button
+                        onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <X className="w-5 h-5" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={() => setSplitSegments([...splitSegments, { name: `Part ${splitSegments.length + 1}` }])}
+                className="w-full mb-4 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-200 font-medium"
+              >
+                + Add Segment
+              </button>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowSplitTask(null);
+                    setSplitSegments([{ name: 'Part 1' }]);
+                  }}
+                  className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSplitTask(showSplitTask)}
+                  className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium"
+                >
+                  Split Task
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const renderTasks = () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const visibleTasks = tasks.filter(t => {
+      const dueDate = new Date(t.dueDate);
+      dueDate.setHours(0, 0, 0, 0);
+      return !t.completed && dueDate >= today;
+    });
+
+    return (
+      <div className="max-w-5xl mx-auto p-6">
+        <div className="bg-white rounded-xl shadow-md p-6">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
+              <p className="text-gray-600">Manage your upcoming tasks</p>
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="file"
+                accept=".ics"
+                onChange={handleICSUpload}
+                className="hidden"
+                id="ics-upload"
+              />
+              <label
+                htmlFor="ics-upload"
+                className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer"
+              >
+                <Upload className="w-4 h-4" />
+                Upload ICS File
+              </label>
+              <button
+                onClick={fetchCanvasTasks}
+                disabled={isLoadingTasks}
+                className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50"
+              >
+                {isLoadingTasks ? (
                   <>
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                     Loading...
@@ -983,6 +1220,7 @@
       </div>
     </div>
   );
+};
 
 export default PlanAssist;// PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
 // App.jsx
