@@ -45,6 +45,16 @@ const PlanAssist = () => {
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
   const [completedSessionIds, setCompletedSessionIds] = useState([]);
 
+  // Calculate selected periods based on presentPeriods
+  const selectedPeriods = React.useMemo(() => {
+    const [start, end] = accountSetup.presentPeriods.split('-').map(Number);
+    const periods = [];
+    for (let i = start; i <= end; i++) {
+      periods.push(i);
+    }
+    return periods;
+  }, [accountSetup.presentPeriods]);
+
   // API helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
     const headers = { 'Content-Type': 'application/json' };
@@ -1219,69 +1229,71 @@ const PlanAssist = () => {
                 </div>
 
                 <div>
-              <label className="block text-sm font-medium text-gray-700 mb-3">
-                Weekly Schedule
-              </label>
-              <div className="border border-gray-300 rounded-lg overflow-hidden">
-                <table className="w-full">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Day</th>
-                      {selectedPeriods.map(period => (
-                        <th key={period} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                          P{period}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
-                      <tr key={day} className="border-t">
-                        <td className="px-4 py-3 font-medium text-gray-900">{day}</td>
-                        {selectedPeriods.map(period => (
-                          <td key={period} className="px-4 py-3 text-center">
-                            <select
-                              value={accountSetup.schedule[day]?.[period] || 'Study'}
-                              onChange={(e) => {
-                                const newSchedule = { ...accountSetup.schedule };
-                                if (!newSchedule[day]) newSchedule[day] = {};
-                                newSchedule[day][period] = e.target.value;
-                                setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
-                              }}
-                              className={`px-3 py-2 rounded-lg font-medium ${
-                                accountSetup.schedule[day]?.[period] === 'Study'
-                                  ? 'bg-green-100 text-green-800'
-                                  : 'bg-blue-100 text-blue-800'
-                              }`}
-                            >
-                              <option value="Study">Study</option>
-                              <option value="Lesson">Lesson</option>
-                            </select>
-                          </td>
+                  <label className="block text-sm font-medium text-gray-700 mb-3">
+                    Weekly Schedule
+                  </label>
+                  <div className="border border-gray-300 rounded-lg overflow-hidden">
+                    <table className="w-full">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Day</th>
+                          {selectedPeriods.map(period => (
+                            <th key={period} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
+                              P{period}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
+                          <tr key={day} className="border-t">
+                            <td className="px-4 py-3 font-medium text-gray-900">{day}</td>
+                            {selectedPeriods.map(period => (
+                              <td key={period} className="px-4 py-3 text-center">
+                                <select
+                                  value={accountSetup.schedule[day]?.[period] || 'Study'}
+                                  onChange={(e) => {
+                                    const newSchedule = { ...accountSetup.schedule };
+                                    if (!newSchedule[day]) newSchedule[day] = {};
+                                    newSchedule[day][period] = e.target.value;
+                                    setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
+                                  }}
+                                  className={`px-3 py-2 rounded-lg font-medium ${
+                                    accountSetup.schedule[day]?.[period] === 'Study'
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-blue-100 text-blue-800'
+                                  }`}
+                                >
+                                  <option value="Study">Study</option>
+                                  <option value="Lesson">Lesson</option>
+                                </select>
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-4">
+                  <button
+                    onClick={() => setCurrentPage('hub')}
+                    className="flex-1 border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveAccountSetup}
+                    className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700"
+                  >
+                    Save Settings
+                  </button>
+                </div>
               </div>
             </div>
-
-            <div className="flex gap-4 pt-4">
-              <button
-                onClick={() => setCurrentPage('hub')}
-                className="flex-1 border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={saveAccountSetup}
-                className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700"
-              >
-                Save Settings
-              </button>
-            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
