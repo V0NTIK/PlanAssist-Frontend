@@ -982,9 +982,8 @@
       </div>
     </div>
   );
-};
 
-export default PlanAssist;// PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
+export default PlanAssist; // PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
 // App.jsx
 
 import React, { useState, useEffect } from 'react';
@@ -1790,3 +1789,4 @@ const PlanAssist = () => {
   };
 
   const endSession = async (timeExpired)
+};
