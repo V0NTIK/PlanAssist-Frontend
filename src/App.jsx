@@ -1456,29 +1456,33 @@ const PlanAssist = () => {
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Class Colors (Optional)
-                  </label>
-                  <p className="text-xs text-gray-500 mb-3">Customize colors for your classes. Default colors are automatically assigned.</p>
-                  <div className="space-y-2">
-                    {Array.from(new Set(tasks.map(t => extractClassName(t.title)))).map(className => (
-                      <div key={className} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg">
-                        <input 
-                          type="color" 
-                          value={accountSetup.classColors[className] || getClassColor(className)}
-                          onChange={(e) => {
-                            const newColors = { ...accountSetup.classColors };
-                            newColors[className] = e.target.value;
-                            setAccountSetup(prev => ({ ...prev, classColors: newColors }));
-                          }}
-                          className="w-10 h-10 rounded cursor-pointer"
-                        />
-                        <span className="flex-1 font-medium text-gray-700">{className}</span>
-                      </div>
-                    ))}
+                {tasks.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Class Colors (Optional)
+                    </label>
+                    <p className="text-xs text-gray-500 mb-3">Customize colors for your classes. Changes save automatically.</p>
+                    <div className="space-y-2">
+                      {Array.from(new Set(tasks.map(t => extractClassName(t.title)))).map(className => (
+                        <div key={className} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg">
+                          <input 
+                            type="color" 
+                            value={accountSetup.classColors[className] || getClassColor(className)}
+                            onChange={(e) => {
+                              const newColors = { ...accountSetup.classColors };
+                              newColors[className] = e.target.value;
+                              setAccountSetup(prev => ({ ...prev, classColors: newColors }));
+                              // Save immediately to localStorage
+                              localStorage.setItem('classColors', JSON.stringify(newColors));
+                            }}
+                            className="w-10 h-10 rounded cursor-pointer"
+                          />
+                          <span className="flex-1 font-medium text-gray-700">{className}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 <div className="border-t pt-6">
                   <button
