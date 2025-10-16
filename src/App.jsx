@@ -398,7 +398,7 @@
           {accountSetup.canvasUrl && (
             <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
               <p className="text-blue-800">
-                <strong>Tip:</strong> If &quot;Sync from URL&quot; doesn&apos;t work, download your Canvas calendar as an ICS file and use &quot;Upload ICS File&quot; instead.
+                <strong>Tip:</strong> If Sync from URL does not work, download your Canvas calendar as an ICS file and use Upload ICS File instead.
               </p>
             </div>
           )}
@@ -406,7 +406,7 @@
           {hasUnsavedChanges && (
             <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
               <p className="text-orange-800 font-medium">
-                ⚠️ You have unsaved changes. Click &quot;Save and Adjust Plan&quot; to apply.
+                You have unsaved changes. Click Save and Adjust Plan to apply.
               </p>
               <button
                 onClick={handleSaveAndAdjustPlan}
