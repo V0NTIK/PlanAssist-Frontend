@@ -113,9 +113,7 @@ const PlanAssist = () => {
     }
     return response.json();
   };
-
-// PART 2: Auth and Data Loading Functions
-
+  
   // Check for existing session on mount
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
@@ -309,8 +307,6 @@ const PlanAssist = () => {
       setFeedbackSending(false);
     }
   };
-
-// PART 3: Task Loading and Processing Functions
 
   const parseICSFile = (icsText) => {
     const tasks = [];
@@ -528,8 +524,6 @@ const PlanAssist = () => {
     }
     return 20;
   };
-
-// PART 4: Session and Task Management Functions
 
   const generateSessions = (taskList, scheduleData) => {
     if (!scheduleData || Object.keys(scheduleData).length === 0) return;
@@ -806,8 +800,6 @@ const PlanAssist = () => {
     }
   }, [accountSetup.presentPeriods]);
 
-// PART 5: Login Screen and Hub Page JSX
-
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-6">
@@ -958,9 +950,6 @@ const PlanAssist = () => {
             )}
           </div>
         )}
-
-// PART 7: Tasks Page JSX (Continued)
-
         {currentPage === 'tasks' && (
           <div className="max-w-5xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-6">
@@ -1191,9 +1180,6 @@ const PlanAssist = () => {
             )}
           </div>
         )}
-
-// PART 8: Sessions Page and Active Session JSX
-
         {currentPage === 'sessions' && (
           <div className="max-w-5xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-6">
@@ -1393,9 +1379,6 @@ const PlanAssist = () => {
             </div>
           )
         )}
-
-// PART 9: Settings Page and Feedback Modal - FINAL PART
-
         {currentPage === 'settings' && (
           <div className="max-w-4xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-8">
@@ -1576,18 +1559,3 @@ const PlanAssist = () => {
 };
 
 export default PlanAssist;
-
-// ============================================
-// END OF COMPONENT - All 9 parts complete!
-// ============================================
-
-// To assemble the complete file:
-// 1. Copy Part 1 (imports and state)
-// 2. Add Part 2 (auth and data loading)
-// 3. Add Part 3 (task loading)
-// 4. Add Part 4 (session management)
-// 5. Add Part 5 (login screen and hub)
-// 6. Add Part 7 (tasks page)
-// 7. Add Part 8 (sessions and active session)
-// 8. Add Part 9 (settings and feedback modal)
-// 9. Close with export default PlanAssist;
