@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -48,6 +48,10 @@ const PlanAssist = () => {
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
+  const [priorityLocked, setPriorityLocked] = useState(false);
+  const [draggedTask, setDraggedTask] = useState(null);
+  const [dragOverTask, setDragOverTask] = useState(null);
+  const [newTasks, setNewTasks] = useState([]);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -154,19 +158,40 @@ const PlanAssist = () => {
       }).then(r => r.json());
 
       if (tasksData.length > 0) {
-        const loadedTasks = tasksData.map(t => ({
+        const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
           id: t.id,
           title: t.title,
           description: t.description,
           dueDate: new Date(t.due_date),
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimate,
+          priorityOrder: t.priority_order,
           completed: t.completed,
           type: t.task_type
         }));
+        
+        const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          dueDate: new Date(t.due_date),
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimate,
+          priorityOrder: t.priority_order,
+          completed: t.completed,
+          type: t.task_type
+        }));
+        
         setTasks(loadedTasks);
+        setNewTasks(loadedNewTasks);
         generateSessions(loadedTasks, setupData.schedule || {});
       }
+
+      // Fetch priority lock status
+      const priorityLockData = await fetch(`${API_URL}/user/priority-lock`, {
+        headers: { 'Authorization': `Bearer ${authToken}` }
+      }).then(r => r.json());
+      setPriorityLocked(priorityLockData.locked || false);
 
       const historyData = await fetch(`${API_URL}/learning`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -382,19 +407,41 @@ const PlanAssist = () => {
       
       const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
       const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
-      const tasksWithIds = saveResult.tasks.map(t => ({
+      
+      // Separate new and existing tasks based on is_new flag
+      const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.due_date),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimate,
+        priorityOrder: t.priority_order,
         completed: t.completed,
         type: t.task_type
       }));
-      setTasks(tasksWithIds);
+      
+      const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        dueDate: new Date(t.due_date),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimate,
+        priorityOrder: t.priority_order,
+        completed: t.completed,
+        type: t.task_type
+      }));
+      
+      setTasks(updatedTasks);
+      setNewTasks(updatedNewTasks);
       setHasUnsavedChanges(false);
-      alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
+      
+      if (updatedNewTasks.length > 0 && priorityLocked) {
+        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
+      } else {
+        alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
+      }
     } catch (error) {
       alert('Failed to parse calendar file: ' + error.message);
     } finally {
@@ -446,19 +493,41 @@ const PlanAssist = () => {
       
       const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
       const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
-      const tasksWithIds = saveResult.tasks.map(t => ({
+      
+      // Separate new and existing tasks based on is_new flag
+      const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.due_date),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimate,
+        priorityOrder: t.priority_order,
         completed: t.completed,
         type: t.task_type
       }));
-      setTasks(tasksWithIds);
+      
+      const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        dueDate: new Date(t.due_date),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimate,
+        priorityOrder: t.priority_order,
+        completed: t.completed,
+        type: t.task_type
+      }));
+      
+      setTasks(updatedTasks);
+      setNewTasks(updatedNewTasks);
       setHasUnsavedChanges(false);
-      alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
+      
+      if (updatedNewTasks.length > 0 && priorityLocked) {
+        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
+      } else {
+        alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
+      }
     } catch (error) {
       alert('Failed to fetch Canvas calendar: ' + error.message);
     } finally {
@@ -692,6 +761,105 @@ const PlanAssist = () => {
     } catch (error) {
       console.error('Failed to split task:', error);
       alert('Failed to split task');
+    }
+  };
+
+  // Priority lock and drag-and-drop functions
+  const togglePriorityLock = async () => {
+    try {
+      const newLockedState = !priorityLocked;
+      await apiCall('/user/priority-lock', 'PATCH', { locked: newLockedState });
+      setPriorityLocked(newLockedState);
+      
+      if (!newLockedState) {
+        // If unlocking, merge new tasks into main list and regenerate
+        setTasks([...tasks, ...newTasks]);
+        setNewTasks([]);
+        setHasUnsavedChanges(true);
+      }
+    } catch (error) {
+      console.error('Failed to toggle priority lock:', error);
+      alert('Failed to toggle priority lock');
+    }
+  };
+
+  const handleDragStart = (e, task) => {
+    setDraggedTask(task);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, task) => {
+    e.preventDefault();
+    if (draggedTask && draggedTask.id !== task.id) {
+      setDragOverTask(task);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedTask(null);
+    setDragOverTask(null);
+  };
+
+  const handleDrop = async (e, dropTask) => {
+    e.preventDefault();
+    if (!draggedTask || draggedTask.id === dropTask.id) return;
+
+    const reorderedTasks = [...tasks];
+    const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
+    const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
+
+    // Remove dragged task and insert at new position
+    const [removed] = reorderedTasks.splice(draggedIndex, 1);
+    reorderedTasks.splice(dropIndex, 0, removed);
+
+    setTasks(reorderedTasks);
+    
+    // Send new order to backend
+    try {
+      const taskOrder = reorderedTasks.map(t => t.id);
+      await apiCall('/tasks/reorder', 'POST', { taskOrder });
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to save task order:', error);
+      alert('Failed to save task order');
+    }
+
+    setDraggedTask(null);
+    setDragOverTask(null);
+  };
+
+  const moveNewTaskToMain = async (taskId) => {
+    const taskToMove = newTasks.find(t => t.id === taskId);
+    if (!taskToMove) return;
+
+    try {
+      // Clear the is_new flag
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [taskId] });
+      
+      // Move to main list
+      setNewTasks(newTasks.filter(t => t.id !== taskId));
+      setTasks([...tasks, taskToMove]);
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to move task:', error);
+      alert('Failed to move task');
+    }
+  };
+
+  const clearAllNewTasks = async () => {
+    if (newTasks.length === 0) return;
+    
+    try {
+      const taskIds = newTasks.map(t => t.id);
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
+      
+      // Move all to main list
+      setTasks([...tasks, ...newTasks]);
+      setNewTasks([]);
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to clear new tasks:', error);
+      alert('Failed to clear new tasks');
     }
   };
 
@@ -1014,7 +1182,15 @@ const PlanAssist = () => {
                   <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
                   <p className="text-gray-600">Manage your upcoming tasks</p>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                  <button 
+                    onClick={togglePriorityLock}
+                    className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 ${priorityLocked ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' : 'bg-gray-100 text-gray-700'}`}
+                    title={priorityLocked ? 'Priority Lock ON - New tasks go to sidebar' : 'Priority Lock OFF - Tasks sorted by deadline'}
+                  >
+                    {priorityLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                    {priorityLocked ? 'Locked' : 'Unlocked'}
+                  </button>
                   <input type="file" accept=".ics" onChange={handleICSUpload} className="hidden" id="ics-upload" />
                   <label htmlFor="ics-upload" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer">
                     <Upload className="w-4 h-4" />
@@ -1053,121 +1229,297 @@ const PlanAssist = () => {
                   </button>
                 </div>
               )}
+              {newTasks.length > 0 && priorityLocked && (
+                <div className="mb-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-5 h-5 text-yellow-700" />
+                      <h3 className="text-lg font-bold text-yellow-900">📬 New Tasks ({newTasks.length})</h3>
+                    </div>
+                    <button 
+                      onClick={clearAllNewTasks}
+                      className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 font-medium text-sm"
+                    >
+                      Add All to List
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {newTasks.map((task, index) => {
+                      const className = extractClassName(task.title);
+                      const classColor = getClassColor(className);
+                      const dueDate = new Date(task.dueDate);
+                      const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      
+                      return (
+                        <div 
+                          key={task.id}
+                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 flex items-center justify-between hover:shadow-md transition-all"
+                        >
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-gray-900">{task.title}</span>
+                              <span className="text-xs text-gray-500">Due: {dayName}</span>
+                            </div>
+                            <div className="flex items-center gap-2 text-sm text-gray-600">
+                              <span className="flex items-center gap-1">
+                                <Brain className="w-3 h-3" />
+                                {task.estimatedTime} min
+                              </span>
+                              <div 
+                                className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
+                                style={{ backgroundColor: classColor }}
+                              >
+                                {className}
+                              </div>
+                            </div>
+                          </div>
+                          <button 
+                            onClick={() => moveNewTaskToMain(task.id)}
+                            className="ml-4 bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 text-sm font-medium"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="space-y-6">
                 {(() => {
-                  const groupedTasks = groupTasksByDay(tasks);
-                  const sortedDays = Object.keys(groupedTasks).sort((a, b) => new Date(a) - new Date(b));
-                  
-                  return sortedDays.map(dayKey => {
-                    const dayTasks = groupedTasks[dayKey];
-                    const date = new Date(dayKey);
-                    const dayName = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                  // If priority locked, tasks are already ordered - don't group by day
+                  if (priorityLocked) {
+                    const incompleteTasks = tasks.filter(t => !t.completed);
                     
-                    return (
-                      <div key={dayKey}>
-                        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl p-4 mb-3 shadow-md">
-                          <div className="flex items-center gap-2">
-                            <Calendar className="w-5 h-5" />
-                            <h3 className="text-lg font-bold">{dayName}</h3>
-                          </div>
+                    if (incompleteTasks.length === 0) {
+                      return (
+                        <div className="text-center py-12">
+                          <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+                          <p className="text-gray-600">No pending tasks</p>
                         </div>
-                        <div className="space-y-3 ml-4">
-                          {dayTasks.map(task => {
-                            const isHomeroom = task.title.toLowerCase().includes('homeroom');
-                            const taskTime = task.userEstimate || task.estimatedTime;
-                            const minHeight = Math.max(60, Math.min(150, taskTime * 2));
-                            const className = extractClassName(task.title);
-                            const classColor = getClassColor(className);
-                            
-                            return (
-                              <div 
-                                key={task.id} 
-                                className="border-2 rounded-lg p-4 hover:shadow-lg transition-all"
-                                style={{ 
-                                  minHeight: `${minHeight}px`,
-                                  borderColor: classColor,
-                                  backgroundColor: `${classColor}15`
-                                }}
-                              >
-                                <div className="flex items-start gap-4 h-full">
-                                  <input 
-                                    type="checkbox" 
-                                    checked={false} 
-                                    onChange={() => setShowCompleteConfirm(task.id)} 
-                                    className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
-                                    style={{ accentColor: classColor }}
-                                  />
-                                  <div className="flex-1">
-                                    <div className="flex items-start justify-between mb-2">
-                                      <h3 className="font-semibold text-gray-900 flex-1">{task.title}</h3>
-                                      <div 
-                                        className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2"
-                                        style={{ backgroundColor: classColor }}
-                                      >
-                                        {className}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-4 text-sm text-gray-600">
-                                      {task.estimatedTime > 0 && (
-                                        <span className="flex items-center gap-1">
-                                          <Brain className="w-4 h-4" />
-                                          AI: {task.estimatedTime} min
-                                        </span>
-                                      )}
-                                      {isHomeroom && (
-                                        <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
-                                          Not Scheduled
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    {!isHomeroom && (
-                                      <>
-                                        <input 
-                                          type="number" 
-                                          value={task.userEstimate || ''} 
-                                          onChange={(e) => {
-                                            const val = e.target.value ? parseInt(e.target.value) : null;
-                                            updateTaskEstimate(task.id, val);
-                                          }} 
-                                          placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} 
-                                          className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" 
-                                        />
-                                        <span className="text-sm text-gray-500">min</span>
-                                        <button 
-                                          onClick={() => {
-                                            setShowSplitTask(task.id);
-                                            setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
-                                          }} 
-                                          className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" 
-                                          title="Split into segments"
-                                        >
-                                          Split
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
+                      );
+                    }
+                    
+                    return incompleteTasks.map((task, index) => {
+                      const isHomeroom = task.title.toLowerCase().includes('homeroom');
+                      const taskTime = task.userEstimate || task.estimatedTime;
+                      const minHeight = Math.max(60, Math.min(150, taskTime * 2));
+                      const className = extractClassName(task.title);
+                      const classColor = getClassColor(className);
+                      const dueDate = new Date(task.dueDate);
+                      const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      
+                      return (
+                        <div 
+                          key={task.id}
+                          draggable={true}
+                          onDragStart={(e) => handleDragStart(e, task)}
+                          onDragOver={(e) => handleDragOver(e, task)}
+                          onDragEnd={handleDragEnd}
+                          onDrop={(e) => handleDrop(e, task)}
+                          className={`border-2 rounded-lg p-4 transition-all cursor-move ${
+                            dragOverTask?.id === task.id ? 'opacity-50 scale-95' : 'hover:shadow-lg'
+                          }`}
+                          style={{ 
+                            minHeight: `${minHeight}px`,
+                            borderColor: classColor,
+                            backgroundColor: `${classColor}15`
+                          }}
+                        >
+                          <div className="flex items-start gap-4 h-full">
+                            <div className="flex flex-col items-center gap-2">
+                              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
+                                {index + 1}
+                              </div>
+                              <GripVertical className="w-5 h-5 text-gray-400" />
+                            </div>
+                            <input 
+                              type="checkbox" 
+                              checked={false} 
+                              onChange={() => setShowCompleteConfirm(task.id)} 
+                              className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
+                              style={{ accentColor: classColor }}
+                            />
+                            <div className="flex-1">
+                              <div className="flex items-start justify-between mb-2">
+                                <div className="flex-1">
+                                  <h3 className="font-semibold text-gray-900">{task.title}</h3>
+                                  <span className="text-xs text-gray-500">Due: {dayName}</span>
+                                </div>
+                                <div 
+                                  className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2"
+                                  style={{ backgroundColor: classColor }}
+                                >
+                                  {className}
                                 </div>
                               </div>
-                            );
-                          })}
+                              <div className="flex items-center gap-4 text-sm text-gray-600">
+                                {task.estimatedTime > 0 && (
+                                  <span className="flex items-center gap-1">
+                                    <Brain className="w-4 h-4" />
+                                    AI: {task.estimatedTime} min
+                                  </span>
+                                )}
+                                {isHomeroom && (
+                                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                                    Not Scheduled
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {!isHomeroom && (
+                                <>
+                                  <input 
+                                    type="number" 
+                                    value={task.userEstimate || ''} 
+                                    onChange={(e) => {
+                                      const val = e.target.value ? parseInt(e.target.value) : null;
+                                      updateTaskEstimate(task.id, val);
+                                    }} 
+                                    placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} 
+                                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" 
+                                  />
+                                  <span className="text-sm text-gray-500">min</span>
+                                  <button 
+                                    onClick={() => {
+                                      setShowSplitTask(task.id);
+                                      setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                                    }} 
+                                    className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" 
+                                    title="Split into segments"
+                                  >
+                                    Split
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  });
+                      );
+                    });
+                  } else {
+                    // Unlocked - group by day
+                    const groupedTasks = groupTasksByDay(tasks);
+                    const sortedDays = Object.keys(groupedTasks).sort((a, b) => new Date(a) - new Date(b));
+                    
+                    if (sortedDays.length === 0) {
+                      return (
+                        <div className="text-center py-12">
+                          <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                          <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+                          <p className="text-gray-600">No pending tasks</p>
+                        </div>
+                      );
+                    }
+                    
+                    let taskCounter = 0;
+                    return sortedDays.map(dayKey => {
+                      const dayTasks = groupedTasks[dayKey];
+                      const date = new Date(dayKey);
+                      const dayName = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                      
+                      return (
+                        <div key={dayKey}>
+                          <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl p-4 mb-3 shadow-md">
+                            <div className="flex items-center gap-2">
+                              <Calendar className="w-5 h-5" />
+                              <h3 className="text-lg font-bold">{dayName}</h3>
+                            </div>
+                          </div>
+                          <div className="space-y-3 ml-4">
+                            {dayTasks.map(task => {
+                              taskCounter++;
+                              const isHomeroom = task.title.toLowerCase().includes('homeroom');
+                              const taskTime = task.userEstimate || task.estimatedTime;
+                              const minHeight = Math.max(60, Math.min(150, taskTime * 2));
+                              const className = extractClassName(task.title);
+                              const classColor = getClassColor(className);
+                              
+                              return (
+                                <div 
+                                  key={task.id} 
+                                  className="border-2 rounded-lg p-4 hover:shadow-lg transition-all"
+                                  style={{ 
+                                    minHeight: `${minHeight}px`,
+                                    borderColor: classColor,
+                                    backgroundColor: `${classColor}15`
+                                  }}
+                                >
+                                  <div className="flex items-start gap-4 h-full">
+                                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
+                                      {taskCounter}
+                                    </div>
+                                    <input 
+                                      type="checkbox" 
+                                      checked={false} 
+                                      onChange={() => setShowCompleteConfirm(task.id)} 
+                                      className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
+                                      style={{ accentColor: classColor }}
+                                    />
+                                    <div className="flex-1">
+                                      <div className="flex items-start justify-between mb-2">
+                                        <h3 className="font-semibold text-gray-900 flex-1">{task.title}</h3>
+                                        <div 
+                                          className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2"
+                                          style={{ backgroundColor: classColor }}
+                                        >
+                                          {className}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-4 text-sm text-gray-600">
+                                        {task.estimatedTime > 0 && (
+                                          <span className="flex items-center gap-1">
+                                            <Brain className="w-4 h-4" />
+                                            AI: {task.estimatedTime} min
+                                          </span>
+                                        )}
+                                        {isHomeroom && (
+                                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
+                                            Not Scheduled
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      {!isHomeroom && (
+                                        <>
+                                          <input 
+                                            type="number" 
+                                            value={task.userEstimate || ''} 
+                                            onChange={(e) => {
+                                              const val = e.target.value ? parseInt(e.target.value) : null;
+                                              updateTaskEstimate(task.id, val);
+                                            }} 
+                                            placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} 
+                                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" 
+                                          />
+                                          <span className="text-sm text-gray-500">min</span>
+                                          <button 
+                                            onClick={() => {
+                                              setShowSplitTask(task.id);
+                                              setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                                            }} 
+                                            className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" 
+                                            title="Split into segments"
+                                          >
+                                            Split
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    });
+                  }
                 })()}
               </div>
-              {(() => {
-                const groupedTasks = groupTasksByDay(tasks);
-                return Object.keys(groupedTasks).length === 0 ? (
-                  <div className="text-center py-12">
-                    <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                    <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                    <p className="text-gray-600">No pending tasks</p>
-                  </div>
-                ) : null;
-              })()}
             </div>
             {showCompleteConfirm && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
