@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -52,6 +52,7 @@ const PlanAssist = () => {
   const [draggedTask, setDraggedTask] = useState(null);
   const [dragOverTask, setDragOverTask] = useState(null);
   const [newTasks, setNewTasks] = useState([]);
+  const [showTaskDescription, setShowTaskDescription] = useState(null);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -303,7 +304,15 @@ const PlanAssist = () => {
         schedule: accountSetup.schedule
       });
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
-      if (accountSetup.canvasUrl) await fetchCanvasTasks();
+      
+      // Fetch tasks and generate sessions if Canvas URL is provided
+      if (accountSetup.canvasUrl) {
+        await fetchCanvasTasks();
+        // Generate sessions after tasks are loaded
+        // Note: fetchCanvasTasks updates the tasks state, but we need to use the result
+        // Sessions will be generated in fetchCanvasTasks
+      }
+      
       setCurrentPage('hub');
     } catch (error) {
       alert('Failed to save settings: ' + error.message);
@@ -437,6 +446,9 @@ const PlanAssist = () => {
       setNewTasks(updatedNewTasks);
       setHasUnsavedChanges(false);
       
+      // Generate sessions with the newly loaded tasks
+      generateSessions(updatedTasks, accountSetup.schedule);
+      
       if (updatedNewTasks.length > 0 && priorityLocked) {
         alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
       } else {
@@ -522,6 +534,9 @@ const PlanAssist = () => {
       setTasks(updatedTasks);
       setNewTasks(updatedNewTasks);
       setHasUnsavedChanges(false);
+      
+      // Generate sessions with the newly loaded tasks
+      generateSessions(updatedTasks, accountSetup.schedule);
       
       if (updatedNewTasks.length > 0 && priorityLocked) {
         alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
@@ -821,7 +836,7 @@ const PlanAssist = () => {
       setHasUnsavedChanges(true);
     } catch (error) {
       console.error('Failed to save task order:', error);
-      alert('Failed to save task order');
+      // Don't show alert - reordering still works locally and will sync on next save
     }
 
     setDraggedTask(null);
@@ -1343,18 +1358,25 @@ const PlanAssist = () => {
                             />
                             <div className="flex-1">
                               <div className="flex items-start justify-between mb-2">
-                                <div className="flex-1">
+                                <div className="flex-1 flex items-center gap-2">
                                   <h3 className="font-semibold text-gray-900">{task.title}</h3>
-                                  <span className="text-xs text-gray-500">Due: {dayName}</span>
+                                  <button
+                                    onClick={() => setShowTaskDescription(task)}
+                                    className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                                    title="View description"
+                                  >
+                                    <Info className="w-4 h-4" />
+                                  </button>
                                 </div>
                                 <div 
-                                  className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2"
+                                  className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2 flex-shrink-0"
                                   style={{ backgroundColor: classColor }}
                                 >
                                   {className}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-4 text-sm text-gray-600">
+                              <span className="text-xs text-gray-500">Due: {dayName}</span>
+                              <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
                                 {task.estimatedTime > 0 && (
                                   <span className="flex items-center gap-1">
                                     <Brain className="w-4 h-4" />
@@ -1460,9 +1482,18 @@ const PlanAssist = () => {
                                     />
                                     <div className="flex-1">
                                       <div className="flex items-start justify-between mb-2">
-                                        <h3 className="font-semibold text-gray-900 flex-1">{task.title}</h3>
+                                        <div className="flex-1 flex items-center gap-2">
+                                          <h3 className="font-semibold text-gray-900">{task.title}</h3>
+                                          <button
+                                            onClick={() => setShowTaskDescription(task)}
+                                            className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                                            title="View description"
+                                          >
+                                            <Info className="w-4 h-4" />
+                                          </button>
+                                        </div>
                                         <div 
-                                          className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2"
+                                          className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2 flex-shrink-0"
                                           style={{ backgroundColor: classColor }}
                                         >
                                           {className}
@@ -1581,6 +1612,53 @@ const PlanAssist = () => {
                     </button>
                     <button onClick={() => handleSplitTask(showSplitTask)} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium">
                       Split Task
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showTaskDescription && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+                  <div className="flex items-start justify-between mb-4">
+                    <h3 className="text-xl font-bold text-gray-900 pr-8">{showTaskDescription.title}</h3>
+                    <button 
+                      onClick={() => setShowTaskDescription(null)} 
+                      className="text-gray-400 hover:text-gray-600 flex-shrink-0"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+                  <div className="mb-4 flex items-center gap-4 text-sm text-gray-600">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-4 h-4" />
+                      Due: {new Date(showTaskDescription.dueDate).toLocaleDateString('en-US', { 
+                        weekday: 'long', 
+                        month: 'short', 
+                        day: 'numeric' 
+                      })}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock className="w-4 h-4" />
+                      {showTaskDescription.userEstimate || showTaskDescription.estimatedTime} min
+                    </span>
+                  </div>
+                  <div className="border-t border-gray-200 pt-4">
+                    <h4 className="font-semibold text-gray-900 mb-2">Description:</h4>
+                    {showTaskDescription.description ? (
+                      <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">
+                        {showTaskDescription.description}
+                      </div>
+                    ) : (
+                      <p className="text-gray-400 italic">No description available</p>
+                    )}
+                  </div>
+                  <div className="mt-6 flex justify-end">
+                    <button 
+                      onClick={() => setShowTaskDescription(null)} 
+                      className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 font-medium"
+                    >
+                      Close
                     </button>
                   </div>
                 </div>
