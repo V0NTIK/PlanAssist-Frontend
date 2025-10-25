@@ -2100,8 +2100,9 @@ const PlanAssist = () => {
             </div>
           </div>
         )}
-        
-        {showFeedbackForm && (
+      </div>
+
+      {showFeedbackForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full">
             <h3 className="text-2xl font-bold text-gray-900 mb-4">Submit Feedback</h3>
@@ -2131,7 +2132,7 @@ const PlanAssist = () => {
               >
                 {feedbackSending ? (
                   <>
-                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     Sending...
                   </>
                 ) : (
@@ -2145,7 +2146,6 @@ const PlanAssist = () => {
           </div>
         </div>
       )}
-      </div>
     </div>
   );
 };
