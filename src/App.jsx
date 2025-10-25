@@ -53,6 +53,9 @@ const PlanAssist = () => {
   const [dragOverTask, setDragOverTask] = useState(null);
   const [newTasks, setNewTasks] = useState([]);
   const [showTaskDescription, setShowTaskDescription] = useState(null);
+  const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
+  const [draggedFromSidebar, setDraggedFromSidebar] = useState(false);
+  const [pendingSplitTasks, setPendingSplitTasks] = useState([]);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -444,14 +447,16 @@ const PlanAssist = () => {
       
       setTasks(updatedTasks);
       setNewTasks(updatedNewTasks);
-      setHasUnsavedChanges(false);
       
       // Generate sessions with the newly loaded tasks
       generateSessions(updatedTasks, accountSetup.schedule);
       
       if (updatedNewTasks.length > 0 && priorityLocked) {
-        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true); // Show Save prompt immediately
+        alert(`Found ${updatedNewTasks.length} new tasks. Drag them into your list to set priority.`);
       } else {
+        setHasUnsavedChanges(false);
         alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
       }
     } catch (error) {
@@ -533,14 +538,16 @@ const PlanAssist = () => {
       
       setTasks(updatedTasks);
       setNewTasks(updatedNewTasks);
-      setHasUnsavedChanges(false);
       
       // Generate sessions with the newly loaded tasks
       generateSessions(updatedTasks, accountSetup.schedule);
       
       if (updatedNewTasks.length > 0 && priorityLocked) {
-        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true); // Show Save prompt immediately
+        alert(`Found ${updatedNewTasks.length} new tasks. Drag them into your list to set priority.`);
       } else {
+        setHasUnsavedChanges(false);
         alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
       }
     } catch (error) {
@@ -767,12 +774,14 @@ const PlanAssist = () => {
       const updatedTasks = [...tasks];
       updatedTasks.splice(taskIndex, 1, ...newTasks);
       
-      await apiCall('/tasks', 'POST', { tasks: updatedTasks.filter(t => !t.completed) });
+      // Don't save to API immediately - only update local state
+      // User must click "Save and Adjust Plan" to persist changes
       setTasks(updatedTasks);
+      setPendingSplitTasks([...pendingSplitTasks, ...newTasks.map(t => t.id)]);
       setShowSplitTask(null);
       setSplitSegments([{ name: 'Part 1' }]);
       setHasUnsavedChanges(true);
-      alert(`Split "${task.title}" into ${splitSegments.length} segments`);
+      alert(`Split "${task.title}" into ${splitSegments.length} segments. Click "Save and Adjust Plan" to save.`);
     } catch (error) {
       console.error('Failed to split task:', error);
       alert('Failed to split task');
@@ -798,8 +807,9 @@ const PlanAssist = () => {
     }
   };
 
-  const handleDragStart = (e, task) => {
+  const handleDragStart = (e, task, fromSidebar = false) => {
     setDraggedTask(task);
+    setDraggedFromSidebar(fromSidebar);
     e.dataTransfer.effectAllowed = 'move';
   };
 
@@ -813,34 +823,59 @@ const PlanAssist = () => {
   const handleDragEnd = () => {
     setDraggedTask(null);
     setDragOverTask(null);
+    setDraggedFromSidebar(false);
   };
 
   const handleDrop = async (e, dropTask) => {
     e.preventDefault();
     if (!draggedTask || draggedTask.id === dropTask.id) return;
 
-    const reorderedTasks = [...tasks];
-    const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
-    const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
-
-    // Remove dragged task and insert at new position
-    const [removed] = reorderedTasks.splice(draggedIndex, 1);
-    reorderedTasks.splice(dropIndex, 0, removed);
-
-    setTasks(reorderedTasks);
-    
-    // Send new order to backend
-    try {
-      const taskOrder = reorderedTasks.map(t => t.id);
-      await apiCall('/tasks/reorder', 'POST', { taskOrder });
+    if (draggedFromSidebar) {
+      // Task from sidebar - insert at specific position
+      const updatedTasks = [...tasks];
+      const dropIndex = updatedTasks.findIndex(t => t.id === dropTask.id);
+      updatedTasks.splice(dropIndex, 0, draggedTask);
+      
+      // Remove from sidebar
+      setNewTasks(newTasks.filter(t => t.id !== draggedTask.id));
+      setTasks(updatedTasks);
+      
+      // Clear is_new flag
+      try {
+        await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [draggedTask.id] });
+      } catch (error) {
+        console.error('Failed to clear new flag:', error);
+      }
+      
+      // If no more new tasks, close sidebar
+      if (newTasks.length === 1) {
+        setNewTasksSidebarOpen(false);
+      }
+      
       setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to save task order:', error);
-      // Don't show alert - reordering still works locally and will sync on next save
+    } else {
+      // Regular reorder within main list
+      const reorderedTasks = [...tasks];
+      const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
+      const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
+
+      const [removed] = reorderedTasks.splice(draggedIndex, 1);
+      reorderedTasks.splice(dropIndex, 0, removed);
+
+      setTasks(reorderedTasks);
+      
+      try {
+        const taskOrder = reorderedTasks.map(t => t.id);
+        await apiCall('/tasks/reorder', 'POST', { taskOrder });
+        setHasUnsavedChanges(true);
+      } catch (error) {
+        console.error('Failed to save task order:', error);
+      }
     }
 
     setDraggedTask(null);
     setDragOverTask(null);
+    setDraggedFromSidebar(false);
   };
 
   const moveNewTaskToMain = async (taskId) => {
@@ -871,6 +906,7 @@ const PlanAssist = () => {
       // Move all to main list
       setTasks([...tasks, ...newTasks]);
       setNewTasks([]);
+      setNewTasksSidebarOpen(false);
       setHasUnsavedChanges(true);
     } catch (error) {
       console.error('Failed to clear new tasks:', error);
@@ -878,10 +914,24 @@ const PlanAssist = () => {
     }
   };
 
-  const handleSaveAndAdjustPlan = () => {
-    generateSessions(tasks, accountSetup.schedule);
-    setHasUnsavedChanges(false);
-    setCurrentPage('hub');
+  const closeSidebarWithoutSaving = () => {
+    // User closed sidebar without adding all tasks - don't save
+    setNewTasksSidebarOpen(false);
+    // Tasks remain in newTasks array for next time
+  };
+
+  const handleSaveAndAdjustPlan = async () => {
+    try {
+      // Save all tasks including split tasks to backend
+      await apiCall('/tasks', 'POST', { tasks: tasks.filter(t => !t.completed) });
+      generateSessions(tasks, accountSetup.schedule);
+      setHasUnsavedChanges(false);
+      setPendingSplitTasks([]);
+      setCurrentPage('hub');
+    } catch (error) {
+      console.error('Failed to save tasks:', error);
+      alert('Failed to save changes');
+    }
   };
 
   const startSession = (session) => {
@@ -1190,136 +1240,364 @@ const PlanAssist = () => {
           </div>
         )}
         {currentPage === 'tasks' && (
-          <div className="max-w-5xl mx-auto p-6">
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
-                  <p className="text-gray-600">Manage your upcoming tasks</p>
-                </div>
-                <div className="flex gap-2 items-center">
-                  <button 
-                    onClick={togglePriorityLock}
-                    className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 ${priorityLocked ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' : 'bg-gray-100 text-gray-700'}`}
-                    title={priorityLocked ? 'Priority Lock ON - New tasks go to sidebar' : 'Priority Lock OFF - Tasks sorted by deadline'}
-                  >
-                    {priorityLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                    {priorityLocked ? 'Locked' : 'Unlocked'}
-                  </button>
-                  <input type="file" accept=".ics" onChange={handleICSUpload} className="hidden" id="ics-upload" />
-                  <label htmlFor="ics-upload" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer">
-                    <Upload className="w-4 h-4" />
-                    Upload ICS File
-                  </label>
-                  <button onClick={fetchCanvasTasks} disabled={isLoadingTasks} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50">
-                    {isLoadingTasks ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Loading...
-                      </>
-                    ) : (
-                      <>
-                        <Upload className="w-4 h-4" />
-                        Sync from URL
-                      </>
+          <div className="flex h-[calc(100vh-80px)] overflow-hidden">
+            {/* Main Task List */}
+            <div className={`flex-1 transition-all duration-300 ${newTasksSidebarOpen ? 'mr-96' : 'mr-0'}`}>
+              <div className="h-full overflow-y-auto p-6">
+                <div className="max-w-4xl mx-auto">
+                  <div className="bg-white rounded-xl shadow-md p-6">
+                    {/* Header */}
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
+                        <p className="text-gray-600">Manage your upcoming tasks</p>
+                      </div>
+                      <div className="flex gap-2 items-center">
+                        <button 
+                          onClick={togglePriorityLock}
+                          className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all ${priorityLocked ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
+                          title={priorityLocked ? 'Priority Lock ON - New tasks go to sidebar' : 'Priority Lock OFF - Tasks sorted by deadline'}
+                        >
+                          {priorityLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                          {priorityLocked ? 'Locked' : 'Unlocked'}
+                        </button>
+                        <input type="file" accept=".ics" onChange={handleICSUpload} className="hidden" id="ics-upload" />
+                        <label htmlFor="ics-upload" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer transition-all">
+                          <Upload className="w-4 h-4" />
+                          <span className="hidden sm:inline">Upload ICS</span>
+                        </label>
+                        <button onClick={fetchCanvasTasks} disabled={isLoadingTasks} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50 transition-all">
+                          {isLoadingTasks ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              <span className="hidden sm:inline">Loading...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Upload className="w-4 h-4" />
+                              <span className="hidden sm:inline">Sync</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Save Warning */}
+                    {hasUnsavedChanges && (
+                      <div className="mb-4 p-4 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between animate-pulse">
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-5 h-5 text-orange-600" />
+                          <p className="text-orange-800 font-medium">
+                            Unsaved changes! Click to save and regenerate sessions.
+                          </p>
+                        </div>
+                        <button onClick={handleSaveAndAdjustPlan} className="bg-orange-600 text-white px-6 py-2 rounded-lg hover:bg-orange-700 font-semibold flex items-center gap-2 shadow-md transition-all">
+                          <Save className="w-5 h-5" />
+                          Save & Adjust
+                        </button>
+                      </div>
                     )}
-                  </button>
+
+                    {/* Task List Content */}
+                    <div className="space-y-4">
+                      {(() => {
+                        if (priorityLocked) {
+                          // LOCKED MODE - Flat draggable list
+                          const incompleteTasks = tasks.filter(t => !t.completed);
+                          
+                          if (incompleteTasks.length === 0) {
+                            return (
+                              <div className="text-center py-16">
+                                <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+                                <p className="text-gray-600">No pending tasks</p>
+                              </div>
+                            );
+                          }
+                          
+                          return incompleteTasks.map((task, index) => {
+                            const isHomeroom = task.title.toLowerCase().includes('homeroom');
+                            const className = extractClassName(task.title);
+                            const classColor = getClassColor(className);
+                            const dueDate = new Date(task.dueDate);
+                            const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                            
+                            return (
+                              <div 
+                                key={task.id}
+                                draggable={true}
+                                onDragStart={(e) => handleDragStart(e, task, false)}
+                                onDragOver={(e) => handleDragOver(e, task)}
+                                onDragEnd={handleDragEnd}
+                                onDrop={(e) => handleDrop(e, task)}
+                                className={`border-2 rounded-lg p-4 transition-all cursor-move ${
+                                  dragOverTask?.id === task.id ? 'opacity-50 scale-95 ring-4 ring-purple-300' : 'hover:shadow-lg'
+                                }`}
+                                style={{ 
+                                  borderColor: classColor,
+                                  backgroundColor: `${classColor}08`
+                                }}
+                              >
+                                <div className="flex items-start gap-3">
+                                  {/* Number Badge */}
+                                  <div className="flex flex-col items-center gap-2">
+                                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm shadow">
+                                      {index + 1}
+                                    </div>
+                                    <GripVertical className="w-5 h-5 text-gray-400" />
+                                  </div>
+                                  
+                                  {/* Checkbox */}
+                                  <input 
+                                    type="checkbox" 
+                                    checked={false} 
+                                    onChange={() => setShowCompleteConfirm(task.id)} 
+                                    className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
+                                    style={{ accentColor: classColor }}
+                                  />
+                                  
+                                  {/* Task Content */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between gap-2 mb-2">
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                                        <h3 className="font-semibold text-gray-900 truncate">{task.title}</h3>
+                                        <button
+                                          onClick={() => setShowTaskDescription(task)}
+                                          className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                                          title="View description"
+                                        >
+                                          <Info className="w-4 h-4" />
+                                        </button>
+                                      </div>
+                                      <div 
+                                        className="px-3 py-1 rounded-full text-xs font-bold text-white flex-shrink-0"
+                                        style={{ backgroundColor: classColor }}
+                                      >
+                                        {className}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-4 text-sm text-gray-600">
+                                      <span className="flex items-center gap-1">
+                                        <Calendar className="w-3 h-3" />
+                                        {dayName}
+                                      </span>
+                                      {task.estimatedTime > 0 && (
+                                        <span className="flex items-center gap-1">
+                                          <Brain className="w-3 h-3" />
+                                          {task.estimatedTime}m
+                                        </span>
+                                      )}
+                                      {isHomeroom && (
+                                        <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-xs font-medium">
+                                          Not Scheduled
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  
+                                  {/* Actions */}
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    {!isHomeroom && (
+                                      <>
+                                        <input 
+                                          type="number" 
+                                          value={task.userEstimate || ''} 
+                                          onChange={(e) => {
+                                            const val = e.target.value ? parseInt(e.target.value) : null;
+                                            updateTaskEstimate(task.id, val);
+                                          }} 
+                                          placeholder={task.estimatedTime.toString()} 
+                                          className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center" 
+                                        />
+                                        <span className="text-xs text-gray-500">min</span>
+                                        <button 
+                                          onClick={() => {
+                                            setShowSplitTask(task.id);
+                                            setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                                          }} 
+                                          className="text-purple-600 hover:text-purple-800 text-sm font-medium px-2 py-1 rounded hover:bg-purple-50" 
+                                          title="Split into segments"
+                                        >
+                                          Split
+                                        </button>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          });
+                        } else {
+                          // UNLOCKED MODE - Grouped by day
+                          const groupedTasks = groupTasksByDay(tasks);
+                          const sortedDays = Object.keys(groupedTasks).sort((a, b) => new Date(a) - new Date(b));
+                          
+                          if (sortedDays.length === 0) {
+                            return (
+                              <div className="text-center py-16">
+                                <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                                <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+                                <p className="text-gray-600">No pending tasks</p>
+                              </div>
+                            );
+                          }
+                          
+                          let taskCounter = 0;
+                          return sortedDays.map(dayKey => {
+                            const dayTasks = groupedTasks[dayKey];
+                            const date = new Date(dayKey);
+                            const dayName = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+                            
+                            return (
+                              <div key={dayKey} className="space-y-3">
+                                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg px-4 py-3 shadow-md sticky top-0 z-10">
+                                  <div className="flex items-center gap-2">
+                                    <Calendar className="w-5 h-5" />
+                                    <h3 className="font-bold">{dayName}</h3>
+                                    <span className="ml-auto text-sm bg-white/20 px-2 py-0.5 rounded">{dayTasks.length} tasks</span>
+                                  </div>
+                                </div>
+                                
+                                {dayTasks.map(task => {
+                                  taskCounter++;
+                                  const isHomeroom = task.title.toLowerCase().includes('homeroom');
+                                  const className = extractClassName(task.title);
+                                  const classColor = getClassColor(className);
+                                  
+                                  return (
+                                    <div 
+                                      key={task.id} 
+                                      className="border-2 rounded-lg p-4 hover:shadow-lg transition-all ml-4"
+                                      style={{ 
+                                        borderColor: classColor,
+                                        backgroundColor: `${classColor}08`
+                                      }}
+                                    >
+                                      <div className="flex items-start gap-3">
+                                        <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm shadow flex-shrink-0">
+                                          {taskCounter}
+                                        </div>
+                                        <input 
+                                          type="checkbox" 
+                                          checked={false} 
+                                          onChange={() => setShowCompleteConfirm(task.id)} 
+                                          className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer flex-shrink-0" 
+                                          style={{ accentColor: classColor }}
+                                        />
+                                        <div className="flex-1 min-w-0">
+                                          <div className="flex items-start justify-between gap-2 mb-2">
+                                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                                              <h3 className="font-semibold text-gray-900 truncate">{task.title}</h3>
+                                              <button
+                                                onClick={() => setShowTaskDescription(task)}
+                                                className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                                                title="View description"
+                                              >
+                                                <Info className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                            <div 
+                                              className="px-3 py-1 rounded-full text-xs font-bold text-white flex-shrink-0"
+                                              style={{ backgroundColor: classColor }}
+                                            >
+                                              {className}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-4 text-sm text-gray-600">
+                                            {task.estimatedTime > 0 && (
+                                              <span className="flex items-center gap-1">
+                                                <Brain className="w-3 h-3" />
+                                                {task.estimatedTime}m
+                                              </span>
+                                            )}
+                                            {isHomeroom && (
+                                              <span className="bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded text-xs font-medium">
+                                                Not Scheduled
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-shrink-0">
+                                          {!isHomeroom && (
+                                            <>
+                                              <input 
+                                                type="number" 
+                                                value={task.userEstimate || ''} 
+                                                onChange={(e) => {
+                                                  const val = e.target.value ? parseInt(e.target.value) : null;
+                                                  updateTaskEstimate(task.id, val);
+                                                }} 
+                                                placeholder={task.estimatedTime.toString()} 
+                                                className="w-16 px-2 py-1 border border-gray-300 rounded text-sm text-center" 
+                                              />
+                                              <span className="text-xs text-gray-500">min</span>
+                                              <button 
+                                                onClick={() => {
+                                                  setShowSplitTask(task.id);
+                                                  setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
+                                                }} 
+                                                className="text-purple-600 hover:text-purple-800 text-sm font-medium px-2 py-1 rounded hover:bg-purple-50" 
+                                                title="Split into segments"
+                                              >
+                                                Split
+                                              </button>
+                                            </>
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          });
+                        }
+                      })()}
+                    </div>
+                  </div>
                 </div>
               </div>
-              {accountSetup.canvasUrl && (
-                <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-                  <p className="text-blue-800">
-                    <strong>Tip:</strong> Sync from URL preserves completed tasks and split tasks. Only new tasks will be added.
-                  </p>
-                </div>
-              )}
-              {hasUnsavedChanges && (
-                <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
-                  <p className="text-orange-800 font-medium">
-                    WARNING: You have unsaved changes. Click Save and Adjust Plan to apply.
-                  </p>
-                  <button onClick={handleSaveAndAdjustPlan} className="bg-orange-600 text-white px-6 py-2 rounded-lg hover:bg-orange-700 font-semibold flex items-center gap-2 shadow-md">
-                    <Save className="w-5 h-5" />
-                    Save and Adjust Plan
-                  </button>
-                </div>
-              )}
-              {newTasks.length > 0 && priorityLocked && (
-                <div className="mb-6 bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-400 rounded-xl p-4">
-                  <div className="flex items-center justify-between mb-4">
+            </div>
+
+            {/* New Tasks Sidebar */}
+            {newTasksSidebarOpen && priorityLocked && (
+              <div className="fixed right-0 top-[80px] w-96 h-[calc(100vh-80px)] bg-gradient-to-br from-yellow-50 to-orange-50 border-l-4 border-yellow-400 shadow-2xl overflow-y-auto z-50">
+                <div className="p-6">
+                  {/* Sidebar Header */}
+                  <div className="flex items-center justify-between mb-4 sticky top-0 bg-gradient-to-br from-yellow-50 to-orange-50 pb-4 border-b-2 border-yellow-300">
                     <div className="flex items-center gap-2">
-                      <AlertCircle className="w-5 h-5 text-yellow-700" />
-                      <h3 className="text-lg font-bold text-yellow-900">📬 New Tasks ({newTasks.length})</h3>
+                      <AlertCircle className="w-6 h-6 text-yellow-700" />
+                      <h3 className="text-xl font-bold text-yellow-900">New Tasks</h3>
+                      <span className="bg-yellow-600 text-white px-2 py-1 rounded-full text-sm font-bold">{newTasks.length}</span>
                     </div>
                     <button 
-                      onClick={clearAllNewTasks}
-                      className="bg-yellow-600 text-white px-4 py-2 rounded-lg hover:bg-yellow-700 font-medium text-sm"
+                      onClick={closeSidebarWithoutSaving}
+                      className="text-gray-600 hover:text-gray-800"
+                      title="Close sidebar"
                     >
-                      Add All to List
+                      <X className="w-6 h-6" />
                     </button>
                   </div>
-                  <div className="space-y-2">
-                    {newTasks.map((task, index) => {
-                      const className = extractClassName(task.title);
-                      const classColor = getClassColor(className);
-                      const dueDate = new Date(task.dueDate);
-                      const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                      
-                      return (
-                        <div 
-                          key={task.id}
-                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 flex items-center justify-between hover:shadow-md transition-all"
-                        >
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-semibold text-gray-900">{task.title}</span>
-                              <span className="text-xs text-gray-500">Due: {dayName}</span>
-                            </div>
-                            <div className="flex items-center gap-2 text-sm text-gray-600">
-                              <span className="flex items-center gap-1">
-                                <Brain className="w-3 h-3" />
-                                {task.estimatedTime} min
-                              </span>
-                              <div 
-                                className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
-                                style={{ backgroundColor: classColor }}
-                              >
-                                {className}
-                              </div>
-                            </div>
-                          </div>
-                          <button 
-                            onClick={() => moveNewTaskToMain(task.id)}
-                            className="ml-4 bg-green-600 text-white px-3 py-1 rounded-lg hover:bg-green-700 text-sm font-medium"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      );
-                    })}
+
+                  {/* Instructions */}
+                  <div className="mb-4 p-3 bg-white border-2 border-yellow-300 rounded-lg">
+                    <p className="text-sm text-gray-700">
+                      <strong>💡 Drag tasks</strong> to your priority list to set their order, or click <strong>"Add All"</strong> to append them to the end.
+                    </p>
                   </div>
-                </div>
-              )}
-              <div className="space-y-6">
-                {(() => {
-                  // If priority locked, tasks are already ordered - don't group by day
-                  if (priorityLocked) {
-                    const incompleteTasks = tasks.filter(t => !t.completed);
-                    
-                    if (incompleteTasks.length === 0) {
-                      return (
-                        <div className="text-center py-12">
-                          <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                          <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                          <p className="text-gray-600">No pending tasks</p>
-                        </div>
-                      );
-                    }
-                    
-                    return incompleteTasks.map((task, index) => {
-                      const isHomeroom = task.title.toLowerCase().includes('homeroom');
-                      const taskTime = task.userEstimate || task.estimatedTime;
-                      const minHeight = Math.max(60, Math.min(150, taskTime * 2));
+
+                  {/* Add All Button */}
+                  <button 
+                    onClick={clearAllNewTasks}
+                    className="w-full mb-4 bg-yellow-600 text-white px-4 py-3 rounded-lg hover:bg-yellow-700 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+                  >
+                    <Check className="w-5 h-5" />
+                    Add All to End of List
+                  </button>
+
+                  {/* New Tasks List */}
+                  <div className="space-y-3">
+                    {newTasks.map((task) => {
                       const className = extractClassName(task.title);
                       const classColor = getClassColor(className);
                       const dueDate = new Date(task.dueDate);
@@ -1329,229 +1607,53 @@ const PlanAssist = () => {
                         <div 
                           key={task.id}
                           draggable={true}
-                          onDragStart={(e) => handleDragStart(e, task)}
-                          onDragOver={(e) => handleDragOver(e, task)}
+                          onDragStart={(e) => handleDragStart(e, task, true)}
                           onDragEnd={handleDragEnd}
-                          onDrop={(e) => handleDrop(e, task)}
-                          className={`border-2 rounded-lg p-4 transition-all cursor-move ${
-                            dragOverTask?.id === task.id ? 'opacity-50 scale-95' : 'hover:shadow-lg'
-                          }`}
-                          style={{ 
-                            minHeight: `${minHeight}px`,
-                            borderColor: classColor,
-                            backgroundColor: `${classColor}15`
-                          }}
+                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 hover:shadow-lg transition-all cursor-move hover:border-yellow-500"
                         >
-                          <div className="flex items-start gap-4 h-full">
-                            <div className="flex flex-col items-center gap-2">
-                              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
-                                {index + 1}
+                          <div className="flex items-start gap-2 mb-2">
+                            <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-1">
+                                <h4 className="font-semibold text-gray-900 text-sm truncate">{task.title}</h4>
+                                <button
+                                  onClick={() => setShowTaskDescription(task)}
+                                  className="text-blue-600 hover:text-blue-800 flex-shrink-0"
+                                  title="View description"
+                                >
+                                  <Info className="w-4 h-4" />
+                                </button>
                               </div>
-                              <GripVertical className="w-5 h-5 text-gray-400" />
-                            </div>
-                            <input 
-                              type="checkbox" 
-                              checked={false} 
-                              onChange={() => setShowCompleteConfirm(task.id)} 
-                              className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
-                              style={{ accentColor: classColor }}
-                            />
-                            <div className="flex-1">
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="flex-1 flex items-center gap-2">
-                                  <h3 className="font-semibold text-gray-900">{task.title}</h3>
-                                  <button
-                                    onClick={() => setShowTaskDescription(task)}
-                                    className="text-blue-600 hover:text-blue-800 flex-shrink-0"
-                                    title="View description"
-                                  >
-                                    <Info className="w-4 h-4" />
-                                  </button>
-                                </div>
+                              <div className="flex items-center gap-3 text-xs text-gray-600">
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="w-3 h-3" />
+                                  {dayName}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Brain className="w-3 h-3" />
+                                  {task.estimatedTime}m
+                                </span>
                                 <div 
-                                  className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2 flex-shrink-0"
+                                  className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
                                   style={{ backgroundColor: classColor }}
                                 >
                                   {className}
                                 </div>
                               </div>
-                              <span className="text-xs text-gray-500">Due: {dayName}</span>
-                              <div className="flex items-center gap-4 text-sm text-gray-600 mt-1">
-                                {task.estimatedTime > 0 && (
-                                  <span className="flex items-center gap-1">
-                                    <Brain className="w-4 h-4" />
-                                    AI: {task.estimatedTime} min
-                                  </span>
-                                )}
-                                {isHomeroom && (
-                                  <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
-                                    Not Scheduled
-                                  </span>
-                                )}
-                              </div>
                             </div>
-                            <div className="flex items-center gap-2">
-                              {!isHomeroom && (
-                                <>
-                                  <input 
-                                    type="number" 
-                                    value={task.userEstimate || ''} 
-                                    onChange={(e) => {
-                                      const val = e.target.value ? parseInt(e.target.value) : null;
-                                      updateTaskEstimate(task.id, val);
-                                    }} 
-                                    placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} 
-                                    className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" 
-                                  />
-                                  <span className="text-sm text-gray-500">min</span>
-                                  <button 
-                                    onClick={() => {
-                                      setShowSplitTask(task.id);
-                                      setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
-                                    }} 
-                                    className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" 
-                                    title="Split into segments"
-                                  >
-                                    Split
-                                  </button>
-                                </>
-                              )}
-                            </div>
+                          </div>
+                          <div className="text-xs text-gray-500 italic pl-7">
+                            Drag to priority list →
                           </div>
                         </div>
                       );
-                    });
-                  } else {
-                    // Unlocked - group by day
-                    const groupedTasks = groupTasksByDay(tasks);
-                    const sortedDays = Object.keys(groupedTasks).sort((a, b) => new Date(a) - new Date(b));
-                    
-                    if (sortedDays.length === 0) {
-                      return (
-                        <div className="text-center py-12">
-                          <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                          <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                          <p className="text-gray-600">No pending tasks</p>
-                        </div>
-                      );
-                    }
-                    
-                    let taskCounter = 0;
-                    return sortedDays.map(dayKey => {
-                      const dayTasks = groupedTasks[dayKey];
-                      const date = new Date(dayKey);
-                      const dayName = date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
-                      
-                      return (
-                        <div key={dayKey}>
-                          <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl p-4 mb-3 shadow-md">
-                            <div className="flex items-center gap-2">
-                              <Calendar className="w-5 h-5" />
-                              <h3 className="text-lg font-bold">{dayName}</h3>
-                            </div>
-                          </div>
-                          <div className="space-y-3 ml-4">
-                            {dayTasks.map(task => {
-                              taskCounter++;
-                              const isHomeroom = task.title.toLowerCase().includes('homeroom');
-                              const taskTime = task.userEstimate || task.estimatedTime;
-                              const minHeight = Math.max(60, Math.min(150, taskTime * 2));
-                              const className = extractClassName(task.title);
-                              const classColor = getClassColor(className);
-                              
-                              return (
-                                <div 
-                                  key={task.id} 
-                                  className="border-2 rounded-lg p-4 hover:shadow-lg transition-all"
-                                  style={{ 
-                                    minHeight: `${minHeight}px`,
-                                    borderColor: classColor,
-                                    backgroundColor: `${classColor}15`
-                                  }}
-                                >
-                                  <div className="flex items-start gap-4 h-full">
-                                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
-                                      {taskCounter}
-                                    </div>
-                                    <input 
-                                      type="checkbox" 
-                                      checked={false} 
-                                      onChange={() => setShowCompleteConfirm(task.id)} 
-                                      className="mt-1 w-5 h-5 rounded focus:ring-2 cursor-pointer" 
-                                      style={{ accentColor: classColor }}
-                                    />
-                                    <div className="flex-1">
-                                      <div className="flex items-start justify-between mb-2">
-                                        <div className="flex-1 flex items-center gap-2">
-                                          <h3 className="font-semibold text-gray-900">{task.title}</h3>
-                                          <button
-                                            onClick={() => setShowTaskDescription(task)}
-                                            className="text-blue-600 hover:text-blue-800 flex-shrink-0"
-                                            title="View description"
-                                          >
-                                            <Info className="w-4 h-4" />
-                                          </button>
-                                        </div>
-                                        <div 
-                                          className="px-3 py-1 rounded-full text-xs font-bold text-white ml-2 flex-shrink-0"
-                                          style={{ backgroundColor: classColor }}
-                                        >
-                                          {className}
-                                        </div>
-                                      </div>
-                                      <div className="flex items-center gap-4 text-sm text-gray-600">
-                                        {task.estimatedTime > 0 && (
-                                          <span className="flex items-center gap-1">
-                                            <Brain className="w-4 h-4" />
-                                            AI: {task.estimatedTime} min
-                                          </span>
-                                        )}
-                                        {isHomeroom && (
-                                          <span className="bg-yellow-100 text-yellow-800 px-2 py-1 rounded text-xs font-medium">
-                                            Not Scheduled
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                      {!isHomeroom && (
-                                        <>
-                                          <input 
-                                            type="number" 
-                                            value={task.userEstimate || ''} 
-                                            onChange={(e) => {
-                                              const val = e.target.value ? parseInt(e.target.value) : null;
-                                              updateTaskEstimate(task.id, val);
-                                            }} 
-                                            placeholder={task.estimatedTime > 0 ? task.estimatedTime.toString() : '0'} 
-                                            className="w-20 px-3 py-2 border border-gray-300 rounded-lg text-sm" 
-                                          />
-                                          <span className="text-sm text-gray-500">min</span>
-                                          <button 
-                                            onClick={() => {
-                                              setShowSplitTask(task.id);
-                                              setSplitSegments([{ name: 'Part 1' }, { name: 'Part 2' }]);
-                                            }} 
-                                            className="ml-2 text-purple-600 hover:text-purple-800 text-sm font-medium" 
-                                            title="Split into segments"
-                                          >
-                                            Split
-                                          </button>
-                                        </>
-                                      )}
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    });
-                  }
-                })()}
+                    })}
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
+          </div>
+        )}
             {showCompleteConfirm && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-xl p-6 max-w-md mx-4">
