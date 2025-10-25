@@ -54,6 +54,7 @@ const PlanAssist = () => {
   const [newTasks, setNewTasks] = useState([]);
   const [showTaskDescription, setShowTaskDescription] = useState(null);
   const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -69,6 +70,11 @@ const PlanAssist = () => {
   const extractClassName = (title) => {
     const match = title.match(/\[([^\]]+)\]/);
     return match ? match[1] : 'No Class';
+  };
+
+  // Remove bracketed class name from title for display
+  const cleanTaskTitle = (title) => {
+    return title.replace(/\s*\[([^\]]+)\]\s*/, '').trim();
   };
 
   // Get color for a class
@@ -297,6 +303,7 @@ const PlanAssist = () => {
   };
 
   const saveAccountSetup = async () => {
+    setSettingsSaving(true);
     try {
       await apiCall('/account/setup', 'POST', {
         grade: accountSetup.grade,
@@ -317,6 +324,8 @@ const PlanAssist = () => {
       setCurrentPage('hub');
     } catch (error) {
       alert('Failed to save settings: ' + error.message);
+    } finally {
+      setSettingsSaving(false);
     }
   };
 
@@ -777,6 +786,7 @@ const PlanAssist = () => {
         const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
         setTasks(updatedTasks);
       }
+      setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
       generateSessions(tasks, accountSetup.schedule);
     } catch (error) {
       console.error('Failed to toggle task completion:', error);
@@ -1392,7 +1402,7 @@ const PlanAssist = () => {
                                   
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                      <h3 className="font-semibold text-gray-900 text-lg">{task.title}</h3>
+                                      <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task.title)}</h3>
                                       <span 
                                         className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                         style={{ backgroundColor: classColor }}
@@ -1406,10 +1416,12 @@ const PlanAssist = () => {
                                         <Calendar className="w-4 h-4" />
                                         {dayName}
                                       </span>
-                                      <span className="flex items-center gap-1">
-                                        <Brain className="w-4 h-4" />
-                                        {taskTime} min
-                                      </span>
+                                      {taskTime > 0 && (
+                                        <span className="flex items-center gap-1">
+                                          <Brain className="w-4 h-4" />
+                                          {taskTime} min
+                                        </span>
+                                      )}
                                     </div>
                                   </div>
                                   
@@ -1480,7 +1492,7 @@ const PlanAssist = () => {
                                       
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                          <h3 className="font-semibold text-gray-900 text-lg">{task.title}</h3>
+                                          <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task.title)}</h3>
                                           <span 
                                             className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                             style={{ backgroundColor: classColor }}
@@ -1488,10 +1500,12 @@ const PlanAssist = () => {
                                             {className}
                                           </span>
                                         </div>
-                                        <div className="text-sm text-gray-600 flex items-center gap-1">
-                                          <Brain className="w-4 h-4" />
-                                          {taskTime} min
-                                        </div>
+                                        {taskTime > 0 && (
+                                          <div className="text-sm text-gray-600 flex items-center gap-1">
+                                            <Brain className="w-4 h-4" />
+                                            {taskTime} min
+                                          </div>
+                                        )}
                                       </div>
                                       
                                       <div className="flex gap-2 flex-shrink-0">
@@ -1575,7 +1589,7 @@ const PlanAssist = () => {
                           <div className="flex items-start gap-2 mb-2">
                             <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
                             <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{task.title}</h4>
+                              <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{cleanTaskTitle(task.title)}</h4>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span 
                                   className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
@@ -1623,6 +1637,52 @@ const PlanAssist = () => {
                       className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium"
                     >
                       Complete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showSplitTask && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
+                  <p className="text-gray-600 mb-4">
+                    Split this task into multiple parts. Time will be divided equally.
+                  </p>
+                  <div className="space-y-3 mb-4">
+                    {splitSegments.map((seg, idx) => (
+                      <div key={idx} className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={seg.name} 
+                          onChange={(e) => {
+                            const newSegs = [...splitSegments];
+                            newSegs[idx].name = e.target.value;
+                            setSplitSegments(newSegs);
+                          }} 
+                          placeholder={`Segment ${idx + 1} name`} 
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" 
+                        />
+                        {splitSegments.length > 1 && (
+                          <button onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))} className="text-red-600 hover:text-red-800">
+                            <X className="w-5 h-5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <button onClick={() => setSplitSegments([...splitSegments, { name: `Part ${splitSegments.length + 1}` }])} className="w-full mb-4 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-200 font-medium">
+                    + Add Segment
+                  </button>
+                  <div className="flex gap-3">
+                    <button onClick={() => {
+                      setShowSplitTask(null);
+                      setSplitSegments([{ name: 'Part 1' }]);
+                    }} className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium">
+                      Cancel
+                    </button>
+                    <button onClick={() => handleSplitTask(showSplitTask)} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium">
+                      Split Task
                     </button>
                   </div>
                 </div>
@@ -1723,7 +1783,7 @@ const PlanAssist = () => {
                             {idx + 1}
                           </span>
                           <div className="flex-1">
-                            <p className="font-medium text-gray-900">{task.title}</p>
+                            <p className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</p>
                             <p className="text-sm text-gray-600">
                               {task.userEstimate || task.estimatedTime} min
                             </p>
@@ -1782,7 +1842,7 @@ const PlanAssist = () => {
                     <h4 className="font-semibold text-gray-700">Incomplete Tasks (Rescheduled)</h4>
                     {sessionSummary.incompleteTasks.map((task, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{task.title}</span>
+                        <span className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</span>
                         <span className="text-sm text-orange-600">Moved to next session</span>
                       </div>
                     ))}
@@ -1867,7 +1927,7 @@ const PlanAssist = () => {
                       <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
                         {currentTaskIndex + idx + 2}
                       </span>
-                      <span className="text-gray-700">{task.title}</span>
+                      <span className="text-gray-700">{cleanTaskTitle(task.title)}</span>
                     </div>
                   ))}
                 </div>
@@ -1999,9 +2059,17 @@ const PlanAssist = () => {
                   </button>
                   <button
                     onClick={saveAccountSetup}
-                    className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700"
+                    disabled={settingsSaving}
+                    className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                   >
-                    Save Settings
+                    {settingsSaving ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Please Wait...
+                      </span>
+                    ) : (
+                      'Save Settings'
+                    )}
                   </button>
                 </div>
               </div>
