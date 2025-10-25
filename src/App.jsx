@@ -748,6 +748,42 @@ const PlanAssist = () => {
     }
   };
 
+  const handleCompleteTask = async (taskId) => {
+    try {
+      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
+      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
+      setTasks(updatedTasks);
+      setShowCompleteConfirm(null);
+      generateSessions(updatedTasks, accountSetup.schedule);
+    } catch (error) {
+      console.error('Failed to complete task:', error);
+      alert('Failed to complete task');
+    }
+  };
+
+  const toggleTaskCompletion = async (taskId) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    try {
+      if (task.completed) {
+        // Uncomplete the task
+        await apiCall(`/tasks/${taskId}/uncomplete`, 'PATCH');
+        const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: false } : t);
+        setTasks(updatedTasks);
+      } else {
+        // Complete the task
+        await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
+        const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
+        setTasks(updatedTasks);
+      }
+      generateSessions(tasks, accountSetup.schedule);
+    } catch (error) {
+      console.error('Failed to toggle task completion:', error);
+      alert('Failed to update task');
+    }
+  };
+
   const handleSplitTask = async (taskId) => {
     try {
       const task = tasks.find(t => t.id === taskId);
@@ -1339,16 +1375,24 @@ const PlanAssist = () => {
                                 }}
                               >
                                 <div className="flex items-center gap-4">
-                                  <div className="flex flex-col items-center gap-1">
+                                  <div className="flex flex-col items-center gap-1 flex-shrink-0">
                                     <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm shadow-md">
                                       {index + 1}
                                     </div>
                                     <GripVertical className="w-4 h-4 text-gray-400" />
                                   </div>
                                   
+                                  {/* Checkbox */}
+                                  <input
+                                    type="checkbox"
+                                    checked={task.completed || false}
+                                    onChange={() => toggleTaskCompletion(task.id)}
+                                    className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer flex-shrink-0"
+                                  />
+                                  
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1">
-                                      <h3 className="font-semibold text-gray-900 text-lg truncate">{task.title}</h3>
+                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                      <h3 className="font-semibold text-gray-900 text-lg">{task.title}</h3>
                                       <span 
                                         className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                         style={{ backgroundColor: classColor }}
@@ -1369,16 +1413,16 @@ const PlanAssist = () => {
                                     </div>
                                   </div>
                                   
-                                  <div className="flex flex-col gap-2">
+                                  <div className="flex gap-2 flex-shrink-0">
                                     <button 
                                       onClick={() => setShowTaskDescription(task)}
-                                      className="px-3 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
+                                      className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
                                     >
-                                      <Info className="w-4 h-4" />
+                                      Details
                                     </button>
                                     <button 
                                       onClick={() => setShowSplitTask(task.id)}
-                                      className="px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
+                                      className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
                                     >
                                       Split
                                     </button>
@@ -1426,11 +1470,19 @@ const PlanAssist = () => {
                                     }}
                                   >
                                     <div className="flex items-center gap-4">
-                                      <div className="flex-1">
-                                        <div className="flex items-center gap-2 mb-1">
+                                      {/* Checkbox */}
+                                      <input
+                                        type="checkbox"
+                                        checked={task.completed || false}
+                                        onChange={() => toggleTaskCompletion(task.id)}
+                                        className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                      />
+                                      
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
                                           <h3 className="font-semibold text-gray-900 text-lg">{task.title}</h3>
                                           <span 
-                                            className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
+                                            className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                             style={{ backgroundColor: classColor }}
                                           >
                                             {className}
@@ -1442,18 +1494,18 @@ const PlanAssist = () => {
                                         </div>
                                       </div>
                                       
-                                      <div className="flex gap-2">
+                                      <div className="flex gap-2 flex-shrink-0">
                                         <button 
                                           onClick={() => setShowTaskDescription(task)}
                                           className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium"
                                         >
-                                          View
+                                          Details
                                         </button>
                                         <button 
-                                          onClick={() => setShowCompleteConfirm(task)}
-                                          className="px-3 py-2 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 text-sm font-medium"
+                                          onClick={() => setShowSplitTask(task.id)}
+                                          className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
                                         >
-                                          Complete
+                                          Split
                                         </button>
                                       </div>
                                     </div>
