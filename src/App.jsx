@@ -918,15 +918,16 @@ const PlanAssist = () => {
         const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks });
         
         // Update tasks with the real database IDs from backend
-        const tasksWithRealIds = saveResult.tasks.filter(t => !t.is_new).map(t => ({
+        // Backend returns all tasks (no is_new flag in this endpoint)
+        const tasksWithRealIds = saveResult.tasks.map(t => ({
           id: t.id,
           title: t.title,
           description: t.description,
           dueDate: new Date(t.due_date),
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimate,
-          priorityOrder: t.priority_order,
-          completed: t.completed,
+          priorityOrder: t.priority_order || 0,
+          completed: t.completed || false,
           type: t.task_type
         }));
         
