@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2 } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -55,6 +55,8 @@ const PlanAssist = () => {
   const [showTaskDescription, setShowTaskDescription] = useState(null);
   const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
+  const [tempTimeValue, setTempTimeValue] = useState('');
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -771,6 +773,7 @@ const PlanAssist = () => {
   };
 
   const toggleTaskCompletion = async (taskId) => {
+    // Find task in the current tasks array by ID
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
 
@@ -780,18 +783,70 @@ const PlanAssist = () => {
         await apiCall(`/tasks/${taskId}/uncomplete`, 'PATCH');
         const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: false } : t);
         setTasks(updatedTasks);
+        generateSessions(updatedTasks, accountSetup.schedule);
       } else {
         // Complete the task
         await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
         const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
         setTasks(updatedTasks);
+        generateSessions(updatedTasks, accountSetup.schedule);
       }
       setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
-      generateSessions(tasks, accountSetup.schedule);
     } catch (error) {
       console.error('Failed to toggle task completion:', error);
       alert('Failed to update task');
     }
+  };
+
+  // Manual time editing handlers
+  const handleStartEditTime = (taskId, currentTime) => {
+    setEditingTimeTaskId(taskId);
+    setTempTimeValue(currentTime.toString());
+  };
+
+  const handleTimeInputChange = (e) => {
+    const value = e.target.value;
+    // Only allow numbers
+    if (/^\d*$/.test(value)) {
+      const numValue = parseInt(value) || 0;
+      // Limit to 60 minutes
+      if (numValue <= 60) {
+        setTempTimeValue(value);
+      }
+    }
+  };
+
+  const handleSaveTimeEstimate = async (taskId) => {
+    try {
+      const newTime = parseInt(tempTimeValue) || 0;
+      if (newTime < 1 || newTime > 60) {
+        alert('Please enter a time between 1 and 60 minutes');
+        return;
+      }
+
+      // Update local state
+      const updatedTasks = tasks.map(t =>
+        t.id === taskId ? { ...t, userEstimate: newTime } : t
+      );
+      setTasks(updatedTasks);
+
+      // Update backend
+      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', {
+        userEstimate: newTime
+      });
+
+      setEditingTimeTaskId(null);
+      setTempTimeValue('');
+      setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
+    } catch (error) {
+      console.error('Error updating time estimate:', error);
+      alert('Error updating time estimate: ' + error.message);
+    }
+  };
+
+  const handleCancelEditTime = () => {
+    setEditingTimeTaskId(null);
+    setTempTimeValue('');
   };
 
   const handleSplitTask = async (taskId) => {
@@ -1417,9 +1472,50 @@ const PlanAssist = () => {
                                         {dayName}
                                       </span>
                                       {taskTime > 0 && (
-                                        <span className="flex items-center gap-1">
+                                        <span className="flex items-center gap-2">
                                           <Brain className="w-4 h-4" />
-                                          {taskTime} min
+                                          {editingTimeTaskId === task.id ? (
+                                            <div className="flex items-center gap-2">
+                                              <input
+                                                type="text"
+                                                value={tempTimeValue}
+                                                onChange={handleTimeInputChange}
+                                                className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                                                autoFocus
+                                                onKeyDown={(e) => {
+                                                  if (e.key === 'Enter') {
+                                                    handleSaveTimeEstimate(task.id);
+                                                  } else if (e.key === 'Escape') {
+                                                    handleCancelEditTime();
+                                                  }
+                                                }}
+                                              />
+                                              <span>min</span>
+                                              <button
+                                                onClick={() => handleSaveTimeEstimate(task.id)}
+                                                className="text-green-600 hover:text-green-700"
+                                              >
+                                                <Check className="w-4 h-4" />
+                                              </button>
+                                              <button
+                                                onClick={handleCancelEditTime}
+                                                className="text-red-600 hover:text-red-700"
+                                              >
+                                                <X className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div className="flex items-center gap-2">
+                                              <span>{taskTime} min</span>
+                                              <button
+                                                onClick={() => handleStartEditTime(task.id, taskTime)}
+                                                className="text-purple-600 hover:text-purple-700"
+                                                title="Edit time estimate"
+                                              >
+                                                <Edit2 className="w-4 h-4" />
+                                              </button>
+                                            </div>
+                                          )}
                                         </span>
                                       )}
                                     </div>
@@ -1501,9 +1597,50 @@ const PlanAssist = () => {
                                           </span>
                                         </div>
                                         {taskTime > 0 && (
-                                          <div className="text-sm text-gray-600 flex items-center gap-1">
+                                          <div className="text-sm text-gray-600 flex items-center gap-2">
                                             <Brain className="w-4 h-4" />
-                                            {taskTime} min
+                                            {editingTimeTaskId === task.id ? (
+                                              <div className="flex items-center gap-2">
+                                                <input
+                                                  type="text"
+                                                  value={tempTimeValue}
+                                                  onChange={handleTimeInputChange}
+                                                  className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                                                  autoFocus
+                                                  onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                      handleSaveTimeEstimate(task.id);
+                                                    } else if (e.key === 'Escape') {
+                                                      handleCancelEditTime();
+                                                    }
+                                                  }}
+                                                />
+                                                <span>min</span>
+                                                <button
+                                                  onClick={() => handleSaveTimeEstimate(task.id)}
+                                                  className="text-green-600 hover:text-green-700"
+                                                >
+                                                  <Check className="w-4 h-4" />
+                                                </button>
+                                                <button
+                                                  onClick={handleCancelEditTime}
+                                                  className="text-red-600 hover:text-red-700"
+                                                >
+                                                  <X className="w-4 h-4" />
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <div className="flex items-center gap-2">
+                                                <span>{taskTime} min</span>
+                                                <button
+                                                  onClick={() => handleStartEditTime(task.id, taskTime)}
+                                                  className="text-purple-600 hover:text-purple-700"
+                                                  title="Edit time estimate"
+                                                >
+                                                  <Edit2 className="w-4 h-4" />
+                                                </button>
+                                              </div>
+                                            )}
                                           </div>
                                         )}
                                       </div>
