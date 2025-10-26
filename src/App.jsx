@@ -796,6 +796,7 @@ const PlanAssist = () => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) {
       console.error('Task not found:', taskId);
+      alert('Task not found. Please try refreshing the page.');
       return;
     }
 
@@ -803,7 +804,6 @@ const PlanAssist = () => {
     const newCompletedStatus = !task.completed;
     const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: newCompletedStatus } : t);
     setTasks(updatedTasks);
-    setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
     generateSessions(updatedTasks, accountSetup.schedule);
 
     try {
@@ -814,12 +814,25 @@ const PlanAssist = () => {
         // Uncomplete the task
         await apiCall(`/tasks/${taskId}/uncomplete`, 'PATCH');
       }
+      // Successfully saved to backend
+      console.log('Task completion toggled successfully');
     } catch (error) {
       console.error('Failed to toggle task completion:', error);
-      // Revert on error
-      setTasks(tasks);
-      generateSessions(tasks, accountSetup.schedule);
-      alert('Failed to update task: ' + error.message);
+      console.error('Task ID:', taskId);
+      console.error('Task details:', task);
+      
+      // Check if this is a newly split task that hasn't been saved yet
+      if (error.message.includes('Failed to complete task') || error.message.includes('500')) {
+        alert('This task needs to be saved first. Click "Save and Adjust Plan" to save your changes, then you can mark it complete.');
+        // Revert the change
+        setTasks(tasks);
+        generateSessions(tasks, accountSetup.schedule);
+      } else {
+        alert('Failed to update task: ' + error.message);
+        // Revert on error
+        setTasks(tasks);
+        generateSessions(tasks, accountSetup.schedule);
+      }
     }
   };
 
@@ -884,7 +897,7 @@ const PlanAssist = () => {
       const timePerSegment = Math.round(totalTime / splitSegments.length);
       
       const newTasks = splitSegments.map((seg, idx) => ({
-        id: Date.now() + idx,
+        id: Date.now() + idx, // Temporary ID, will be replaced with database ID
         title: `${task.title} - ${seg.name}`,
         description: task.description,
         dueDate: task.dueDate,
@@ -896,15 +909,38 @@ const PlanAssist = () => {
         segment_name: seg.name
       }));
       
+      // Remove the original task and add segments
       const updatedTasks = [...tasks];
       updatedTasks.splice(taskIndex, 1, ...newTasks);
       
-      // DON'T save immediately - just update local state
-      setTasks(updatedTasks);
-      setShowSplitTask(null);
-      setSplitSegments([{ name: 'Part 1' }]);
-      setHasUnsavedChanges(true);
-      alert(`Split "${task.title}" into ${splitSegments.length} segments. Click "Save and Adjust Plan" to apply changes.`);
+      // Immediately save to backend to get real database IDs
+      try {
+        const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks });
+        
+        // Update tasks with the real database IDs from backend
+        const tasksWithRealIds = saveResult.tasks.filter(t => !t.is_new).map(t => ({
+          id: t.id,
+          title: t.title,
+          description: t.description,
+          dueDate: new Date(t.due_date),
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimate,
+          priorityOrder: t.priority_order,
+          completed: t.completed,
+          type: t.task_type
+        }));
+        
+        setTasks(tasksWithRealIds);
+        setShowSplitTask(null);
+        setSplitSegments([{ name: 'Part 1' }]);
+        generateSessions(tasksWithRealIds, accountSetup.schedule);
+        alert(`Split "${task.title}" into ${splitSegments.length} segments successfully!`);
+      } catch (saveError) {
+        console.error('Failed to save split tasks:', saveError);
+        alert('Failed to save split tasks: ' + saveError.message);
+        // Revert on error
+        return;
+      }
     } catch (error) {
       console.error('Failed to split task:', error);
       alert('Failed to split task');
