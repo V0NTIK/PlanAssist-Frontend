@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2 } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, Trash2 } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -402,7 +402,12 @@ const PlanAssist = () => {
       const parsedTasks = parseICSFile(text);
       
       const existingCompletedTasks = tasks.filter(t => t.completed);
-      const existingSplitTasks = tasks.filter(t => t.title.includes(' - Part ') || t.title.includes(' - Segment '));
+      const existingSplitTasks = tasks.filter(t => 
+        t.title.includes('  - Part ') || 
+        t.title.includes('  - Segment ') ||
+        t.title.includes(' - Part ') || 
+        t.title.includes(' - Segment ')
+      );
       
       const newTasks = parsedTasks.map((t, idx) => ({
         id: Date.now() + idx,
@@ -417,7 +422,11 @@ const PlanAssist = () => {
       
       const filteredNewTasks = newTasks.filter(newTask => {
         return !existingSplitTasks.some(splitTask => {
-          const baseTitle = splitTask.title.split(' - Part ')[0].split(' - Segment ')[0];
+          const baseTitle = splitTask.title
+            .split('  - Part ')[0]
+            .split('  - Segment ')[0]
+            .split(' - Part ')[0]
+            .split(' - Segment ')[0];
           return newTask.title === baseTitle;
         });
       });
@@ -491,7 +500,12 @@ const PlanAssist = () => {
       });
 
       const existingCompletedTasks = tasks.filter(t => t.completed);
-      const existingSplitTasks = tasks.filter(t => t.title.includes(' - Part ') || t.title.includes(' - Segment '));
+      const existingSplitTasks = tasks.filter(t => 
+        t.title.includes('  - Part ') || 
+        t.title.includes('  - Segment ') ||
+        t.title.includes(' - Part ') || 
+        t.title.includes(' - Segment ')
+      );
 
       const newTasks = filteredTasks.map((t, idx) => ({
         id: Date.now() + idx,
@@ -506,7 +520,11 @@ const PlanAssist = () => {
       
       const filteredNewTasks = newTasks.filter(newTask => {
         return !existingSplitTasks.some(splitTask => {
-          const baseTitle = splitTask.title.split(' - Part ')[0].split(' - Segment ')[0];
+          const baseTitle = splitTask.title
+            .split('  - Part ')[0]
+            .split('  - Segment ')[0]
+            .split(' - Part ')[0]
+            .split(' - Segment ')[0];
           return newTask.title === baseTitle;
         });
       });
@@ -515,6 +533,7 @@ const PlanAssist = () => {
         filteredNewTasks[i].estimatedTime = await estimateTaskTime(filteredNewTasks[i].title);
       }
       
+      // Preserve split tasks in their current position and add new tasks
       const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
       const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
       
@@ -849,6 +868,24 @@ const PlanAssist = () => {
     setTempTimeValue('');
   };
 
+  const handleDeleteTask = async (taskId) => {
+    if (!window.confirm('Are you sure you want to delete this task?')) {
+      return;
+    }
+    
+    try {
+      // Remove from local state
+      const updatedTasks = tasks.filter(t => t.id !== taskId);
+      setTasks(updatedTasks);
+      setHasUnsavedChanges(true);
+      
+      // Note: Task will be removed from backend when user clicks "Save and Adjust Plan"
+    } catch (error) {
+      console.error('Failed to delete task:', error);
+      alert('Failed to delete task');
+    }
+  };
+
   const handleSplitTask = async (taskId) => {
     try {
       const task = tasks.find(t => t.id === taskId);
@@ -860,13 +897,15 @@ const PlanAssist = () => {
       
       const newTasks = splitSegments.map((seg, idx) => ({
         id: Date.now() + idx,
-        title: `${task.title} - ${seg.name}`,
+        title: `${task.title}  - ${seg.name}`,
         description: task.description,
         dueDate: task.dueDate,
         estimatedTime: timePerSegment,
         userEstimate: timePerSegment,
         completed: false,
-        type: task.type
+        type: task.type,
+        parent_task_id: task.id,
+        segment_name: seg.name
       }));
       
       const updatedTasks = [...tasks];
@@ -1016,11 +1055,18 @@ const PlanAssist = () => {
     setHasUnsavedChanges(false);
   };
 
-  const handleSaveAndAdjustPlan = () => {
-    generateSessions(tasks, accountSetup.schedule);
-    setHasUnsavedChanges(false);
-    setNewTasksSidebarOpen(false);
-    setCurrentPage('hub');
+  const handleSaveAndAdjustPlan = async () => {
+    try {
+      // Save all tasks with their current priority order to backend
+      await apiCall('/tasks', 'POST', { tasks });
+      generateSessions(tasks, accountSetup.schedule);
+      setHasUnsavedChanges(false);
+      setNewTasksSidebarOpen(false);
+      setCurrentPage('hub');
+    } catch (error) {
+      console.error('Failed to save tasks:', error);
+      alert('Failed to save changes: ' + error.message);
+    }
   };
 
   const startSession = (session) => {
@@ -1528,12 +1574,22 @@ const PlanAssist = () => {
                                     >
                                       Details
                                     </button>
-                                    <button 
-                                      onClick={() => setShowSplitTask(task.id)}
-                                      className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
-                                    >
-                                      Split
-                                    </button>
+                                    {(task.title.includes('  - Part ') || task.title.includes('  - Segment ') || task.title.includes(' - Part ') || task.title.includes(' - Segment ')) ? (
+                                      <button 
+                                        onClick={() => handleDeleteTask(task.id)}
+                                        className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-medium transition-all flex items-center gap-1"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                        Delete
+                                      </button>
+                                    ) : (
+                                      <button 
+                                        onClick={() => setShowSplitTask(task.id)}
+                                        className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
+                                      >
+                                        Split
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1652,12 +1708,22 @@ const PlanAssist = () => {
                                         >
                                           Details
                                         </button>
-                                        <button 
-                                          onClick={() => setShowSplitTask(task.id)}
-                                          className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
-                                        >
-                                          Split
-                                        </button>
+                                        {(task.title.includes('  - Part ') || task.title.includes('  - Segment ') || task.title.includes(' - Part ') || task.title.includes(' - Segment ')) ? (
+                                          <button 
+                                            onClick={() => handleDeleteTask(task.id)}
+                                            className="px-3 py-2 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 text-sm font-medium flex items-center gap-1"
+                                          >
+                                            <Trash2 className="w-4 h-4" />
+                                            Delete
+                                          </button>
+                                        ) : (
+                                          <button 
+                                            onClick={() => setShowSplitTask(task.id)}
+                                            className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
+                                          >
+                                            Split
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
