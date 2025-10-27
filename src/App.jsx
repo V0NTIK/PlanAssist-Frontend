@@ -57,6 +57,10 @@ const PlanAssist = () => {
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
   const [tempTimeValue, setTempTimeValue] = useState('');
+  const [markingComplete, setMarkingComplete] = useState(false);
+  const [savingSession, setSavingSession] = useState(false);
+  const [endingSession, setEndingSession] = useState(false);
+  const [partialTaskTimes, setPartialTaskTimes] = useState({}); // Track accumulated time for partially completed tasks
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -1101,6 +1105,7 @@ const PlanAssist = () => {
     setTaskStartTime(3600);
     setIsTimerRunning(true);
     setSessionCompletions([]);
+    setPartialTaskTimes({}); // Clear partial times for new session
     setCurrentPage('session-active');
   };
 
@@ -1122,6 +1127,10 @@ const PlanAssist = () => {
       setCurrentTaskIndex(savedSessionState.currentTaskIndex);
       setTaskStartTime(savedSessionState.taskStartTime);
       setSessionCompletions(savedSessionState.completions);
+      // Restore partial task times if they exist
+      if (savedSessionState.partialTaskTimes) {
+        setPartialTaskTimes(savedSessionState.partialTaskTimes);
+      }
       setIsTimerRunning(true);
       setCurrentPage('session-active');
     } catch (error) {
@@ -1132,7 +1141,20 @@ const PlanAssist = () => {
 
   const pauseSession = async () => {
     try {
+      setSavingSession(true);
       setIsTimerRunning(false);
+      
+      // Calculate partial time spent on current task
+      const currentTask = currentSession.tasks[currentTaskIndex];
+      const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
+      
+      // Update partial task times
+      const updatedPartialTimes = { ...partialTaskTimes };
+      if (currentTaskTimeSpent > 0) {
+        updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
+      }
+      
+      // Save session state with partial times
       await apiCall('/sessions/save-state', 'POST', {
         sessionId: currentSession.id,
         day: currentSession.day,
@@ -1140,12 +1162,29 @@ const PlanAssist = () => {
         remainingTime: sessionTime,
         currentTaskIndex: currentTaskIndex,
         taskStartTime: taskStartTime,
-        completions: sessionCompletions
+        completions: sessionCompletions,
+        partialTaskTimes: updatedPartialTimes
       });
-      setCurrentPage('sessions');
+      
+      setPartialTaskTimes(updatedPartialTimes);
+      
+      // Show summary
+      setSessionSummary({
+        day: currentSession.day,
+        period: currentSession.period,
+        completions: sessionCompletions,
+        incompleteTasks: currentSession.tasks.slice(currentTaskIndex),
+        timeExpired: false,
+        totalTime: Math.round((3600 - sessionTime) / 60),
+        isSaveAndExit: true
+      });
+      
+      setShowSessionSummary(true);
+      setSavingSession(false);
     } catch (error) {
       console.error('Failed to save session state:', error);
-      alert('Failed to pause session');
+      alert('Failed to save and exit session');
+      setSavingSession(false);
     }
   };
 
@@ -1159,46 +1198,98 @@ const PlanAssist = () => {
     return () => clearInterval(interval);
   }, [isTimerRunning, sessionTime]);
 
-  const completeTask = () => {
+  const completeTask = async () => {
     if (!currentSession) return;
-    const task = currentSession.tasks[currentTaskIndex];
-    const timeSpent = Math.round((taskStartTime - sessionTime) / 60);
-    const completion = { task, timeSpent, timestamp: new Date() };
-    setSessionCompletions(prev => [...prev, completion]);
-    setCompletionHistory(prev => [...prev, {
-      taskTitle: task.title,
-      type: task.type,
-      estimatedTime: task.userEstimate || task.estimatedTime,
-      actualTime: timeSpent,
-      date: new Date()
-    }]);
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true } : t));
-    if (currentTaskIndex < currentSession.tasks.length - 1) {
-      setCurrentTaskIndex(prev => prev + 1);
-      setTaskStartTime(sessionTime);
-    } else {
-      endSession(false);
+    
+    try {
+      setMarkingComplete(true);
+      
+      const task = currentSession.tasks[currentTaskIndex];
+      const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
+      
+      // Add any previously accumulated partial time
+      const previousPartialTime = partialTaskTimes[task.id] || 0;
+      const totalTimeSpent = currentSessionTime + previousPartialTime;
+      
+      const completion = { 
+        task, 
+        timeSpent: totalTimeSpent, 
+        timestamp: new Date() 
+      };
+      
+      setSessionCompletions(prev => [...prev, completion]);
+      setCompletionHistory(prev => [...prev, {
+        taskTitle: task.title,
+        type: task.type,
+        estimatedTime: task.userEstimate || task.estimatedTime,
+        actualTime: totalTimeSpent,
+        date: new Date()
+      }]);
+      
+      // Mark task as complete in local state
+      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true } : t));
+      
+      // Clear partial time for this task since it's now complete
+      const updatedPartialTimes = { ...partialTaskTimes };
+      delete updatedPartialTimes[task.id];
+      setPartialTaskTimes(updatedPartialTimes);
+      
+      setMarkingComplete(false);
+      
+      // Move to next task or end session
+      if (currentTaskIndex < currentSession.tasks.length - 1) {
+        setCurrentTaskIndex(prev => prev + 1);
+        setTaskStartTime(sessionTime);
+      } else {
+        endSession(false);
+      }
+    } catch (error) {
+      console.error('Failed to mark task complete:', error);
+      alert('Failed to mark task complete');
+      setMarkingComplete(false);
     }
   };
 
   const endSession = async (timeExpired) => {
-    setIsTimerRunning(false);
-    const incompleteTasks = currentSession.tasks.slice(currentTaskIndex + (timeExpired ? 0 : 1));
-    setSessionSummary({
-      day: currentSession.day,
-      period: currentSession.period,
-      completions: sessionCompletions,
-      incompleteTasks,
-      timeExpired,
-      totalTime: Math.round((3600 - sessionTime) / 60)
-    });
     try {
+      setEndingSession(true);
+      setIsTimerRunning(false);
+      
+      // Calculate partial time for current task if not completed
+      const currentTask = currentSession.tasks[currentTaskIndex];
+      const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
+      
+      // Update partial task times for the current incomplete task
+      const updatedPartialTimes = { ...partialTaskTimes };
+      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+        updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
+      }
+      
+      setPartialTaskTimes(updatedPartialTimes);
+      
+      const incompleteTasks = currentSession.tasks.slice(currentTaskIndex + (timeExpired ? 0 : 1));
+      
+      setSessionSummary({
+        day: currentSession.day,
+        period: currentSession.period,
+        completions: sessionCompletions,
+        incompleteTasks,
+        timeExpired,
+        totalTime: Math.round((3600 - sessionTime) / 60),
+        isSaveAndExit: false
+      });
+      
+      // Save completions to backend
       await apiCall('/sessions/complete', 'POST', {
         completions: sessionCompletions,
         day: currentSession.day,
         period: currentSession.period
       });
+      
+      // Clear saved session state since we're ending
       await apiCall('/sessions/saved-state', 'DELETE');
+      
+      // Reload tasks to get updated completion status
       const tasksData = await apiCall('/tasks', 'GET');
       const loadedTasks = tasksData.map(t => ({
         id: t.id,
@@ -1210,20 +1301,27 @@ const PlanAssist = () => {
         completed: t.completed,
         type: t.task_type
       }));
+      
       const reestimatedTasks = [...loadedTasks];
       for (let i = 0; i < reestimatedTasks.length; i++) {
         if (!reestimatedTasks[i].completed) {
           reestimatedTasks[i].estimatedTime = await estimateTaskTime(reestimatedTasks[i].title);
         }
       }
+      
       setTasks(reestimatedTasks);
       generateSessions(reestimatedTasks, accountSetup.schedule);
+      
+      setSessions(prev => prev.filter(s => s.id !== currentSession.id));
+      setCompletedSessionIds(prev => [...prev, currentSession.id]);
+      setShowSessionSummary(true);
+      setEndingSession(false);
     } catch (error) {
       console.error('Failed to save session:', error);
+      alert('Failed to end session properly, but your progress has been saved locally');
+      setShowSessionSummary(true);
+      setEndingSession(false);
     }
-    setSessions(prev => prev.filter(s => s.id !== currentSession.id));
-    setCompletedSessionIds(prev => [...prev, currentSession.id]);
-    setShowSessionSummary(true);
   };
 
   const formatTime = (seconds) => {
@@ -2090,12 +2188,28 @@ const PlanAssist = () => {
                       </>
                     )}
                   </button>
-                  <button onClick={pauseSession} className="bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-800 flex items-center gap-2">
-                    <X className="w-5 h-5" />
-                    Save & Exit
+                  <button onClick={pauseSession} disabled={savingSession} className="bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-800 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                    {savingSession ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Please Wait...
+                      </>
+                    ) : (
+                      <>
+                        <X className="w-5 h-5" />
+                        Save & Exit
+                      </>
+                    )}
                   </button>
-                  <button onClick={() => endSession(false)} className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700">
-                    End Session
+                  <button onClick={() => endSession(false)} disabled={endingSession} className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
+                    {endingSession ? (
+                      <>
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        Please Wait...
+                      </>
+                    ) : (
+                      'End Session'
+                    )}
                   </button>
                 </div>
               </div>
@@ -2122,9 +2236,18 @@ const PlanAssist = () => {
                     <div className="mb-4 text-sm text-gray-600">
                       Time on this task: {Math.round((taskStartTime - sessionTime) / 60)} min
                     </div>
-                    <button onClick={completeTask} className="w-full bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2">
-                      <Check className="w-5 h-5" />
-                      Mark Complete
+                    <button onClick={completeTask} disabled={markingComplete} className="w-full bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                      {markingComplete ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Please Wait...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-5 h-5" />
+                          Mark Complete
+                        </>
+                      )}
                     </button>
                   </div>
                 )}
