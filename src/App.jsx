@@ -1123,9 +1123,22 @@ const PlanAssist = () => {
         return;
       }
       
+      console.log('Resuming session:', session.id);
+      console.log('Saved state completed IDs:', savedSessionState.completedTaskIds);
+      console.log('Original session tasks:', session.tasks.map(t => ({id: t.id, title: t.title})));
+      
       // Filter out tasks that were already completed in the saved session
       const completedIds = savedSessionState.completedTaskIds || [];
       const remainingTasks = session.tasks.filter(t => !completedIds.includes(t.id));
+      
+      console.log('Remaining tasks after filter:', remainingTasks.map(t => ({id: t.id, title: t.title})));
+      
+      if (remainingTasks.length === 0) {
+        alert('All tasks in this session have been completed!');
+        await apiCall('/sessions/saved-state', 'DELETE');
+        setSavedSessionState(null);
+        return;
+      }
       
       // Reconstruct session with only remaining tasks
       const resumedSession = {
@@ -1136,16 +1149,17 @@ const PlanAssist = () => {
       setCurrentSession(resumedSession);
       setSessionTime(savedSessionState.remainingTime);
       
-      // Find the current task in the remaining tasks
-      // It should be the first task since we filtered completed ones
+      // Always start at index 0 since we've filtered the tasks
       setCurrentTaskIndex(0);
+      // Set task start time to current remaining time
       setTaskStartTime(savedSessionState.remainingTime);
       
-      // Load completions that were made before saving (these are already in DB)
+      // Clear completions since they're already saved
       setSessionCompletions([]);
       
       // Restore partial task times from backend
       if (savedSessionState.partialTaskTimes) {
+        console.log('Restoring partial times:', savedSessionState.partialTaskTimes);
         setPartialTaskTimes(savedSessionState.partialTaskTimes);
       } else {
         setPartialTaskTimes({});
@@ -1153,6 +1167,8 @@ const PlanAssist = () => {
       
       setIsTimerRunning(true);
       setCurrentPage('session-active');
+      
+      console.log('Session resumed successfully');
     } catch (error) {
       console.error('Failed to resume session:', error);
       alert('Failed to resume session: ' + error.message);
@@ -1171,46 +1187,73 @@ const PlanAssist = () => {
       // Get IDs of all completed tasks in this session
       const completedTaskIds = sessionCompletions.map(c => c.task.id);
       
-      // Save session state with partial time for current task
-      await apiCall('/sessions/save-state', 'POST', {
-        sessionId: currentSession.id,
-        day: currentSession.day,
-        period: currentSession.period,
-        remainingTime: sessionTime,
-        currentTaskIndex: currentTaskIndex,
-        taskStartTime: taskStartTime,
-        completedTaskIds: completedTaskIds,
-        partialTaskId: currentTask.id,
-        partialTaskTime: currentTaskTimeSpent
-      });
-      
-      // Update local partial times for display
-      const updatedPartialTimes = { ...partialTaskTimes };
+      // Only save if there's actually time spent on current task
       if (currentTaskTimeSpent > 0) {
+        // Save session state with partial time for current task
+        await apiCall('/sessions/save-state', 'POST', {
+          sessionId: currentSession.id,
+          day: currentSession.day,
+          period: currentSession.period,
+          remainingTime: sessionTime,
+          currentTaskIndex: currentTaskIndex,
+          taskStartTime: taskStartTime,
+          completedTaskIds: completedTaskIds,
+          partialTaskId: currentTask.id,
+          partialTaskTime: currentTaskTimeSpent
+        });
+        
+        // Update local partial times for display
+        const updatedPartialTimes = { ...partialTaskTimes };
         updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
+        setPartialTaskTimes(updatedPartialTimes);
+        
+        // Show partial task in summary
+        const partiallyCompletedTask = {
+          ...currentTask,
+          partialTime: updatedPartialTimes[currentTask.id]
+        };
+        
+        const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
+        
+        setSessionSummary({
+          day: currentSession.day,
+          period: currentSession.period,
+          completions: sessionCompletions,
+          partialTask: partiallyCompletedTask,
+          missedTasks: missedTasks,
+          timeExpired: false,
+          totalTime: Math.round((3600 - sessionTime) / 60),
+          remainingTime: Math.round(sessionTime / 60),
+          isSaveAndExit: true
+        });
+      } else {
+        // No time spent on current task, just save session without partial
+        await apiCall('/sessions/save-state', 'POST', {
+          sessionId: currentSession.id,
+          day: currentSession.day,
+          period: currentSession.period,
+          remainingTime: sessionTime,
+          currentTaskIndex: currentTaskIndex,
+          taskStartTime: taskStartTime,
+          completedTaskIds: completedTaskIds,
+          partialTaskId: null,
+          partialTaskTime: 0
+        });
+        
+        const missedTasks = currentSession.tasks.slice(currentTaskIndex);
+        
+        setSessionSummary({
+          day: currentSession.day,
+          period: currentSession.period,
+          completions: sessionCompletions,
+          partialTask: null,
+          missedTasks: missedTasks,
+          timeExpired: false,
+          totalTime: Math.round((3600 - sessionTime) / 60),
+          remainingTime: Math.round(sessionTime / 60),
+          isSaveAndExit: true
+        });
       }
-      setPartialTaskTimes(updatedPartialTimes);
-      
-      // Prepare summary showing completed, partially completed, and missed tasks
-      const partiallyCompletedTask = {
-        ...currentTask,
-        partialTime: updatedPartialTimes[currentTask.id] || currentTaskTimeSpent
-      };
-      
-      const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
-      
-      // Show summary
-      setSessionSummary({
-        day: currentSession.day,
-        period: currentSession.period,
-        completions: sessionCompletions,
-        partialTask: partiallyCompletedTask,
-        missedTasks: missedTasks,
-        timeExpired: false,
-        totalTime: Math.round((3600 - sessionTime) / 60),
-        remainingTime: Math.round(sessionTime / 60),
-        isSaveAndExit: true
-      });
       
       setShowSessionSummary(true);
       setSavingSession(false);
@@ -1240,9 +1283,16 @@ const PlanAssist = () => {
       const task = currentSession.tasks[currentTaskIndex];
       const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
       
+      console.log('=== COMPLETING TASK ===');
+      console.log('Task:', task.title, 'ID:', task.id);
+      console.log('Current session time:', currentSessionTime, 'min');
+      console.log('Previous partial time:', partialTaskTimes[task.id] || 0, 'min');
+      
       // Add any previously accumulated partial time
       const previousPartialTime = partialTaskTimes[task.id] || 0;
       const totalTimeSpent = currentSessionTime + previousPartialTime;
+      
+      console.log('Total time for completion:', totalTimeSpent, 'min');
       
       // Immediately save completion to backend
       await apiCall('/sessions/complete-task', 'POST', {
@@ -1252,6 +1302,8 @@ const PlanAssist = () => {
         estimatedTime: task.userEstimate || task.estimatedTime,
         actualTime: totalTimeSpent
       });
+      
+      console.log('✓ Task completion saved to backend');
       
       const completion = { 
         task, 
@@ -1278,13 +1330,19 @@ const PlanAssist = () => {
       
       setMarkingComplete(false);
       
+      console.log('Task index:', currentTaskIndex, '/', currentSession.tasks.length - 1);
+      
       // Move to next task or end session
       if (currentTaskIndex < currentSession.tasks.length - 1) {
+        console.log('Moving to next task');
         setCurrentTaskIndex(prev => prev + 1);
         setTaskStartTime(sessionTime);
       } else {
+        console.log('Last task completed, ending session');
         endSession(false);
       }
+      
+      console.log('=======================\n');
     } catch (error) {
       console.error('Failed to mark task complete:', error);
       alert('Failed to mark task complete: ' + error.message);
