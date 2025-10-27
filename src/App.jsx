@@ -1122,20 +1122,40 @@ const PlanAssist = () => {
         setSavedSessionState(null);
         return;
       }
-      setCurrentSession(session);
+      
+      // Filter out tasks that were already completed in the saved session
+      const completedIds = savedSessionState.completedTaskIds || [];
+      const remainingTasks = session.tasks.filter(t => !completedIds.includes(t.id));
+      
+      // Reconstruct session with only remaining tasks
+      const resumedSession = {
+        ...session,
+        tasks: remainingTasks
+      };
+      
+      setCurrentSession(resumedSession);
       setSessionTime(savedSessionState.remainingTime);
-      setCurrentTaskIndex(savedSessionState.currentTaskIndex);
-      setTaskStartTime(savedSessionState.taskStartTime);
-      setSessionCompletions(savedSessionState.completions);
-      // Restore partial task times if they exist
+      
+      // Find the current task in the remaining tasks
+      // It should be the first task since we filtered completed ones
+      setCurrentTaskIndex(0);
+      setTaskStartTime(savedSessionState.remainingTime);
+      
+      // Load completions that were made before saving (these are already in DB)
+      setSessionCompletions([]);
+      
+      // Restore partial task times from backend
       if (savedSessionState.partialTaskTimes) {
         setPartialTaskTimes(savedSessionState.partialTaskTimes);
+      } else {
+        setPartialTaskTimes({});
       }
+      
       setIsTimerRunning(true);
       setCurrentPage('session-active');
     } catch (error) {
       console.error('Failed to resume session:', error);
-      alert('Failed to resume session');
+      alert('Failed to resume session: ' + error.message);
     }
   };
 
@@ -1148,13 +1168,10 @@ const PlanAssist = () => {
       const currentTask = currentSession.tasks[currentTaskIndex];
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
       
-      // Update partial task times
-      const updatedPartialTimes = { ...partialTaskTimes };
-      if (currentTaskTimeSpent > 0) {
-        updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
-      }
+      // Get IDs of all completed tasks in this session
+      const completedTaskIds = sessionCompletions.map(c => c.task.id);
       
-      // Save session state with partial times
+      // Save session state with partial time for current task
       await apiCall('/sessions/save-state', 'POST', {
         sessionId: currentSession.id,
         day: currentSession.day,
@@ -1162,20 +1179,36 @@ const PlanAssist = () => {
         remainingTime: sessionTime,
         currentTaskIndex: currentTaskIndex,
         taskStartTime: taskStartTime,
-        completions: sessionCompletions,
-        partialTaskTimes: updatedPartialTimes
+        completedTaskIds: completedTaskIds,
+        partialTaskId: currentTask.id,
+        partialTaskTime: currentTaskTimeSpent
       });
       
+      // Update local partial times for display
+      const updatedPartialTimes = { ...partialTaskTimes };
+      if (currentTaskTimeSpent > 0) {
+        updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
+      }
       setPartialTaskTimes(updatedPartialTimes);
+      
+      // Prepare summary showing completed, partially completed, and missed tasks
+      const partiallyCompletedTask = {
+        ...currentTask,
+        partialTime: updatedPartialTimes[currentTask.id] || currentTaskTimeSpent
+      };
+      
+      const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
       
       // Show summary
       setSessionSummary({
         day: currentSession.day,
         period: currentSession.period,
         completions: sessionCompletions,
-        incompleteTasks: currentSession.tasks.slice(currentTaskIndex),
+        partialTask: partiallyCompletedTask,
+        missedTasks: missedTasks,
         timeExpired: false,
         totalTime: Math.round((3600 - sessionTime) / 60),
+        remainingTime: Math.round(sessionTime / 60),
         isSaveAndExit: true
       });
       
@@ -1183,7 +1216,7 @@ const PlanAssist = () => {
       setSavingSession(false);
     } catch (error) {
       console.error('Failed to save session state:', error);
-      alert('Failed to save and exit session');
+      alert('Failed to save and exit session: ' + error.message);
       setSavingSession(false);
     }
   };
@@ -1211,6 +1244,15 @@ const PlanAssist = () => {
       const previousPartialTime = partialTaskTimes[task.id] || 0;
       const totalTimeSpent = currentSessionTime + previousPartialTime;
       
+      // Immediately save completion to backend
+      await apiCall('/sessions/complete-task', 'POST', {
+        taskId: task.id,
+        taskTitle: task.title,
+        taskType: task.type,
+        estimatedTime: task.userEstimate || task.estimatedTime,
+        actualTime: totalTimeSpent
+      });
+      
       const completion = { 
         task, 
         timeSpent: totalTimeSpent, 
@@ -1226,7 +1268,7 @@ const PlanAssist = () => {
         date: new Date()
       }]);
       
-      // Mark task as complete in local state
+      // Mark task as complete in local state (already done by backend)
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true } : t));
       
       // Clear partial time for this task since it's now complete
@@ -1245,7 +1287,7 @@ const PlanAssist = () => {
       }
     } catch (error) {
       console.error('Failed to mark task complete:', error);
-      alert('Failed to mark task complete');
+      alert('Failed to mark task complete: ' + error.message);
       setMarkingComplete(false);
     }
   };
@@ -1259,49 +1301,73 @@ const PlanAssist = () => {
       const currentTask = currentSession.tasks[currentTaskIndex];
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
       
-      // Update partial task times for the current incomplete task
+      // Save partial time for current incomplete task to backend
+      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+        try {
+          await apiCall('/sessions/save-state', 'POST', {
+            sessionId: currentSession.id,
+            day: currentSession.day,
+            period: currentSession.period,
+            remainingTime: 0,
+            currentTaskIndex: currentTaskIndex,
+            taskStartTime: 0,
+            completedTaskIds: sessionCompletions.map(c => c.task.id),
+            partialTaskId: currentTask.id,
+            partialTaskTime: currentTaskTimeSpent
+          });
+        } catch (error) {
+          console.error('Failed to save partial completion:', error);
+        }
+      }
+      
+      // Update local partial times for display
       const updatedPartialTimes = { ...partialTaskTimes };
       if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
         updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
       }
-      
       setPartialTaskTimes(updatedPartialTimes);
       
-      const incompleteTasks = currentSession.tasks.slice(currentTaskIndex + (timeExpired ? 0 : 1));
+      // Prepare summary data
+      const partiallyCompletedTask = currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)
+        ? { ...currentTask, partialTime: updatedPartialTimes[currentTask.id] || currentTaskTimeSpent }
+        : null;
+      
+      const missedTaskStartIndex = partiallyCompletedTask ? currentTaskIndex + 1 : currentTaskIndex;
+      const missedTasks = currentSession.tasks.slice(missedTaskStartIndex);
       
       setSessionSummary({
         day: currentSession.day,
         period: currentSession.period,
         completions: sessionCompletions,
-        incompleteTasks,
+        partialTask: partiallyCompletedTask,
+        missedTasks: missedTasks,
         timeExpired,
         totalTime: Math.round((3600 - sessionTime) / 60),
+        remainingTime: 0,
         isSaveAndExit: false
       });
       
-      // Save completions to backend
-      await apiCall('/sessions/complete', 'POST', {
-        completions: sessionCompletions,
-        day: currentSession.day,
-        period: currentSession.period
-      });
+      // Completions were already saved individually when marked complete
+      // No need to save again here
       
       // Clear saved session state since we're ending
       await apiCall('/sessions/saved-state', 'DELETE');
       
       // Reload tasks to get updated completion status
       const tasksData = await apiCall('/tasks', 'GET');
-      const loadedTasks = tasksData.map(t => ({
+      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
         dueDate: new Date(t.due_date),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimate,
+        priorityOrder: t.priority_order,
         completed: t.completed,
         type: t.task_type
       }));
       
+      // Re-estimate incomplete tasks
       const reestimatedTasks = [...loadedTasks];
       for (let i = 0; i < reestimatedTasks.length; i++) {
         if (!reestimatedTasks[i].completed) {
@@ -1318,7 +1384,7 @@ const PlanAssist = () => {
       setEndingSession(false);
     } catch (error) {
       console.error('Failed to save session:', error);
-      alert('Failed to end session properly, but your progress has been saved locally');
+      alert('Failed to end session properly: ' + error.message);
       setShowSessionSummary(true);
       setEndingSession(false);
     }
@@ -2115,7 +2181,9 @@ const PlanAssist = () => {
             <div className="max-w-4xl mx-auto p-6">
               <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
                 <Check className="w-16 h-16 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">Session Complete!</h2>
+                <h2 className="text-3xl font-bold mb-2">
+                  {sessionSummary.isSaveAndExit ? 'Session Saved!' : 'Session Complete!'}
+                </h2>
                 <p className="text-lg">
                   {sessionSummary.day} - Period {sessionSummary.period}
                 </p>
@@ -2129,29 +2197,57 @@ const PlanAssist = () => {
                   </div>
                   <div className="bg-purple-50 p-4 rounded-lg text-center">
                     <div className="text-3xl font-bold text-purple-600">{sessionSummary.totalTime} min</div>
-                    <div className="text-sm text-gray-600">Total Time</div>
+                    <div className="text-sm text-gray-600">Time Used</div>
                   </div>
                 </div>
+                
+                {/* Completed Tasks */}
                 {sessionSummary.completions.length > 0 && (
                   <div className="space-y-2 mb-4">
                     <h4 className="font-semibold text-gray-700">Completed Tasks</h4>
                     {sessionSummary.completions.map((comp, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{comp.task.title}</span>
+                        <span className="font-medium text-gray-900">{cleanTaskTitle(comp.task.title)}</span>
                         <span className="text-sm text-gray-600">{comp.timeSpent} min</span>
                       </div>
                     ))}
                   </div>
                 )}
-                {sessionSummary.incompleteTasks.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-semibold text-gray-700">Incomplete Tasks (Rescheduled)</h4>
-                    {sessionSummary.incompleteTasks.map((task, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-orange-50 rounded-lg">
+                
+                {/* Partially Completed Task */}
+                {sessionSummary.partialTask && (
+                  <div className="space-y-2 mb-4">
+                    <h4 className="font-semibold text-gray-700">Partially Completed</h4>
+                    <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+                      <span className="font-medium text-gray-900">{cleanTaskTitle(sessionSummary.partialTask.title)}</span>
+                      <span className="text-sm text-orange-600">{sessionSummary.partialTask.partialTime} min progress</span>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Missed Tasks */}
+                {sessionSummary.missedTasks && sessionSummary.missedTasks.length > 0 && (
+                  <div className="space-y-2 mb-4">
+                    <h4 className="font-semibold text-gray-700">
+                      {sessionSummary.isSaveAndExit ? 'Remaining Tasks' : 'Missed Tasks (Rescheduled)'}
+                    </h4>
+                    {sessionSummary.missedTasks.map((task, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <span className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</span>
-                        <span className="text-sm text-orange-600">Moved to next session</span>
+                        <span className="text-sm text-gray-600">
+                          {sessionSummary.isSaveAndExit ? 'Saved for later' : 'Rescheduled'}
+                        </span>
                       </div>
                     ))}
+                  </div>
+                )}
+                
+                {/* Save and Exit info */}
+                {sessionSummary.isSaveAndExit && sessionSummary.remainingTime > 0 && (
+                  <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+                    <p className="text-sm text-blue-800">
+                      <strong>{sessionSummary.remainingTime} minutes</strong> saved for when you resume this session.
+                    </p>
                   </div>
                 )}
               </div>
