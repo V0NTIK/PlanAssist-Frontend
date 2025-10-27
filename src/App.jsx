@@ -1297,12 +1297,13 @@ const PlanAssist = () => {
       setEndingSession(true);
       setIsTimerRunning(false);
       
-      // Calculate partial time for current task if not completed
+      // Check if current task is actually incomplete
       const currentTask = currentSession.tasks[currentTaskIndex];
+      const isCurrentTaskCompleted = sessionCompletions.find(c => c.task.id === currentTask.id);
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
       
-      // Save partial time for current incomplete task to backend
-      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+      // Save partial time ONLY if current task is incomplete and has time spent
+      if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
         try {
           await apiCall('/sessions/save-state', 'POST', {
             sessionId: currentSession.id,
@@ -1322,16 +1323,17 @@ const PlanAssist = () => {
       
       // Update local partial times for display
       const updatedPartialTimes = { ...partialTaskTimes };
-      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+      if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
         updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
       }
       setPartialTaskTimes(updatedPartialTimes);
       
-      // Prepare summary data
-      const partiallyCompletedTask = currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)
+      // Prepare summary data - only show partial if task is actually incomplete
+      const partiallyCompletedTask = (!isCurrentTaskCompleted && currentTaskTimeSpent > 0)
         ? { ...currentTask, partialTime: updatedPartialTimes[currentTask.id] || currentTaskTimeSpent }
         : null;
       
+      // Calculate missed tasks - start from next task if current is partial, otherwise from current
       const missedTaskStartIndex = partiallyCompletedTask ? currentTaskIndex + 1 : currentTaskIndex;
       const missedTasks = currentSession.tasks.slice(missedTaskStartIndex);
       
@@ -2115,56 +2117,52 @@ const PlanAssist = () => {
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">Study Sessions</h2>
                 <p className="text-gray-600">Your scheduled study periods</p>
               </div>
-              {savedSessionState && (
-                <div className="mb-6 p-4 bg-blue-50 border-2 border-blue-300 rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-bold text-blue-900 mb-1">Resume Session</h3>
-                      <p className="text-sm text-blue-700">
-                        {savedSessionState.day} - Period {savedSessionState.period} ({Math.floor(savedSessionState.remainingTime / 60)} min remaining)
-                      </p>
-                    </div>
-                    <button onClick={resumeSession} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2">
-                      <Play className="w-5 h-5" />
-                      Resume
-                    </button>
-                  </div>
-                </div>
-              )}
               <div className="space-y-4">
-                {sessions.map(session => (
-                  <div key={session.id} className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition-colors">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-lg font-bold text-gray-900">
-                          {session.day} - Period {session.period}
-                        </h3>
-                        <p className="text-sm text-gray-600">
-                          {session.tasks.length} tasks - {session.totalTime} minutes
-                        </p>
-                      </div>
-                      <button onClick={() => startSession(session)} className="bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2">
-                        <Play className="w-5 h-5" />
-                        Start Session
-                      </button>
-                    </div>
-                    <div className="space-y-2">
-                      {session.tasks.map((task, idx) => (
-                        <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                          <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                            {idx + 1}
-                          </span>
-                          <div className="flex-1">
-                            <p className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</p>
-                            <p className="text-sm text-gray-600">
-                              {task.userEstimate || task.estimatedTime} min
-                            </p>
-                          </div>
+                {sessions.map(session => {
+                  // Check if this session has a saved state
+                  const hasSavedState = savedSessionState && savedSessionState.sessionId === session.id;
+                  
+                  return (
+                    <div key={session.id} className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition-colors">
+                      <div className="flex items-center justify-between mb-4">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">
+                            {session.day} - Period {session.period}
+                          </h3>
+                          <p className="text-sm text-gray-600">
+                            {session.tasks.length} tasks - {session.totalTime} minutes
+                          </p>
                         </div>
-                      ))}
+                        {hasSavedState ? (
+                          <button onClick={resumeSession} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2">
+                            <Play className="w-5 h-5" />
+                            Resume
+                          </button>
+                        ) : (
+                          <button onClick={() => startSession(session)} className="bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2">
+                            <Play className="w-5 h-5" />
+                            Start Session
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-2">
+                        {session.tasks.map((task, idx) => (
+                          <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                            <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                              {idx + 1}
+                            </span>
+                            <div className="flex-1">
+                              <p className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</p>
+                              <p className="text-sm text-gray-600">
+                                {task.userEstimate || task.estimatedTime} min
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               {sessions.length === 0 && (
                 <div className="text-center py-12">
