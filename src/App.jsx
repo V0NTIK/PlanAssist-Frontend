@@ -1129,7 +1129,23 @@ const PlanAssist = () => {
       
       // Filter out tasks that were already completed in the saved session
       const completedIds = savedSessionState.completedTaskIds || [];
-      const remainingTasks = session.tasks.filter(t => !completedIds.includes(t.id));
+      let remainingTasks = session.tasks.filter(t => !completedIds.includes(t.id));
+      
+      // IMPORTANT: Also filter out tasks that no longer exist in the current tasks list
+      // This prevents working on deleted/completed tasks from old sessions
+      const validTaskIds = new Set(tasks.map(t => t.id));
+      const beforeValidation = remainingTasks.length;
+      remainingTasks = remainingTasks.filter(t => {
+        const exists = validTaskIds.has(t.id);
+        if (!exists) {
+          console.warn(`⚠ Task ${t.id} ("${t.title}") no longer exists in database, removing from session`);
+        }
+        return exists;
+      });
+      
+      if (remainingTasks.length < beforeValidation) {
+        console.log(`ℹ Filtered out ${beforeValidation - remainingTasks.length} non-existent tasks`);
+      }
       
       console.log('Remaining tasks after filter:', remainingTasks.map(t => ({id: t.id, title: t.title})));
       
@@ -1159,9 +1175,15 @@ const PlanAssist = () => {
       
       // Restore partial task times from backend
       if (savedSessionState.partialTaskTimes) {
-        console.log('Restoring partial times:', savedSessionState.partialTaskTimes);
+        console.log('✓ Restoring partial times from backend:', savedSessionState.partialTaskTimes);
+        console.log('  Tasks with partial time:');
+        Object.entries(savedSessionState.partialTaskTimes).forEach(([taskId, time]) => {
+          const task = remainingTasks.find(t => t.id === parseInt(taskId));
+          console.log(`  - Task ${taskId}: ${time} min${task ? ` (${task.title})` : ' (not in session)'}`);
+        });
         setPartialTaskTimes(savedSessionState.partialTaskTimes);
       } else {
+        console.log('ℹ No partial times to restore');
         setPartialTaskTimes({});
       }
       
@@ -1187,8 +1209,17 @@ const PlanAssist = () => {
       // Get IDs of all completed tasks in this session
       const completedTaskIds = sessionCompletions.map(c => c.task.id);
       
-      // Only save if there's actually time spent on current task
-      if (currentTaskTimeSpent > 0) {
+      // Validate that the current task still exists in the tasks list
+      const taskStillExists = tasks.find(t => t.id === currentTask.id && !t.completed);
+      if (!taskStillExists) {
+        console.warn('⚠ Current task (ID:', currentTask.id, ') no longer exists or is completed');
+        console.warn('  This task may have been deleted or marked complete in another session');
+      }
+      
+      // Only save if there's actually time spent on current task AND task still exists
+      if (currentTaskTimeSpent > 0 && taskStillExists) {
+        console.log('✓ Task validated, saving partial completion for:', currentTask.title);
+        
         // Save session state with partial time for current task
         await apiCall('/sessions/save-state', 'POST', {
           sessionId: currentSession.id,
@@ -1227,7 +1258,10 @@ const PlanAssist = () => {
           isSaveAndExit: true
         });
       } else {
-        // No time spent on current task, just save session without partial
+        // Either no time spent OR task no longer exists - save session without partial
+        const reason = !taskStillExists ? 'task no longer exists' : 'no time spent';
+        console.log(`ℹ Saving session without partial completion (${reason})`);
+        
         await apiCall('/sessions/save-state', 'POST', {
           sessionId: currentSession.id,
           day: currentSession.day,
@@ -2386,7 +2420,21 @@ const PlanAssist = () => {
                       </span>
                     </div>
                     <div className="mb-4 text-sm text-gray-600">
-                      Time on this task: {Math.round((taskStartTime - sessionTime) / 60)} min
+                      {(() => {
+                        const currentTask = currentSession.tasks[currentTaskIndex];
+                        const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
+                        const previousTime = partialTaskTimes[currentTask.id] || 0;
+                        const totalTime = currentSessionTime + previousTime;
+                        
+                        if (previousTime > 0) {
+                          return (
+                            <>
+                              Time on this task: {currentSessionTime} min <span className="text-blue-600">(+{previousTime} min from previous session = {totalTime} min total)</span>
+                            </>
+                          );
+                        }
+                        return `Time on this task: ${currentSessionTime} min`;
+                      })()}
                     </div>
                     <button onClick={completeTask} disabled={markingComplete} className="w-full bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
                       {markingComplete ? (
@@ -2405,14 +2453,24 @@ const PlanAssist = () => {
                 )}
                 <div className="space-y-2">
                   <h4 className="font-semibold text-gray-700 text-sm mb-3">Upcoming in This Session</h4>
-                  {currentSession.tasks.slice(currentTaskIndex + 1).map((task, idx) => (
-                    <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-60">
-                      <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
-                        {currentTaskIndex + idx + 2}
-                      </span>
-                      <span className="text-gray-700">{cleanTaskTitle(task.title)}</span>
-                    </div>
-                  ))}
+                  {currentSession.tasks.slice(currentTaskIndex + 1).map((task, idx) => {
+                    const hasPartialTime = partialTaskTimes[task.id] > 0;
+                    return (
+                      <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-60">
+                        <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
+                          {currentTaskIndex + idx + 2}
+                        </span>
+                        <div className="flex-1">
+                          <span className="text-gray-700">{cleanTaskTitle(task.title)}</span>
+                          {hasPartialTime && (
+                            <span className="ml-2 text-xs text-blue-600">
+                              ({partialTaskTimes[task.id]} min in progress)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
