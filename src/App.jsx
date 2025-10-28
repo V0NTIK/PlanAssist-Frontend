@@ -1230,7 +1230,8 @@ const PlanAssist = () => {
           taskStartTime: taskStartTime,
           completedTaskIds: completedTaskIds,
           partialTaskId: currentTask.id,
-          partialTaskTime: currentTaskTimeSpent
+          partialTaskTime: currentTaskTimeSpent,
+          partialTaskTitle: currentTask.title  // Send task title to backend
         });
         
         // Update local partial times for display
