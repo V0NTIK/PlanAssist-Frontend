@@ -181,7 +181,9 @@ const PlanAssist = () => {
           userEstimate: t.user_estimate,
           priorityOrder: t.priority_order,
           completed: t.completed,
-          type: t.task_type
+          type: t.task_type,
+          parent_task_id: t.parent_task_id,  // NEW
+          split_task_id: t.split_task_id     // NEW
         }));
         
         const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
@@ -193,7 +195,9 @@ const PlanAssist = () => {
           userEstimate: t.user_estimate,
           priorityOrder: t.priority_order,
           completed: t.completed,
-          type: t.task_type
+          type: t.task_type,
+          parent_task_id: t.parent_task_id,  // NEW
+          split_task_id: t.split_task_id     // NEW
         }));
         
         setTasks(loadedTasks);
@@ -218,6 +222,36 @@ const PlanAssist = () => {
         actualTime: h.actual_time,
         date: new Date(h.completed_at)
       })));
+
+      // NEW: Load partial completions grouped by parent_task_id
+      const loadPartialCompletions = async () => {
+        try {
+          const response = await fetch(`${API_URL}/tasks/partial-completions`, {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+          }).then(r => r.json());
+          
+          // Group partial completions by parent_task_id
+          const partialTimes = {};
+          
+          response.partialCompletions.forEach(pc => {
+            const parentId = pc.parent_task_id;
+            
+            // If this parent already has time accumulated, add to it
+            if (partialTimes[parentId]) {
+              partialTimes[parentId] += pc.accumulated_time;
+            } else {
+              partialTimes[parentId] = pc.accumulated_time;
+            }
+          });
+          
+          console.log('Loaded partial completions grouped by parent:', partialTimes);
+          setPartialTaskTimes(partialTimes);
+        } catch (error) {
+          console.error('Failed to load partial completions:', error);
+        }
+      };
+      
+      await loadPartialCompletions();
 
       const sessionStateData = await fetch(`${API_URL}/sessions/saved-state`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -421,7 +455,9 @@ const PlanAssist = () => {
         estimatedTime: 20,
         userEstimate: null,
         completed: false,
-        type: detectTaskType(t.title)
+        type: detectTaskType(t.title),
+        parent_task_id: null,  // NEW: Base tasks have no parent
+        split_task_id: null    // NEW: Base tasks have no split ID
       }));
       
       const filteredNewTasks = newTasks.filter(newTask => {
@@ -452,7 +488,9 @@ const PlanAssist = () => {
         userEstimate: t.user_estimate,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type
+        type: t.task_type,
+        parent_task_id: t.parent_task_id,  // NEW
+        split_task_id: t.split_task_id     // NEW
       }));
       
       const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
@@ -464,7 +502,9 @@ const PlanAssist = () => {
         userEstimate: t.user_estimate,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type
+        type: t.task_type,
+        parent_task_id: t.parent_task_id,  // NEW
+        split_task_id: t.split_task_id     // NEW
       }));
       
       setTasks(updatedTasks);
@@ -519,7 +559,9 @@ const PlanAssist = () => {
         estimatedTime: 20,
         userEstimate: null,
         completed: false,
-        type: detectTaskType(t.title)
+        type: detectTaskType(t.title),
+        parent_task_id: null,  // NEW: Base tasks have no parent
+        split_task_id: null    // NEW: Base tasks have no split ID
       }));
       
       const filteredNewTasks = newTasks.filter(newTask => {
@@ -551,7 +593,9 @@ const PlanAssist = () => {
         userEstimate: t.user_estimate,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type
+        type: t.task_type,
+        parent_task_id: t.parent_task_id,  // NEW
+        split_task_id: t.split_task_id     // NEW
       }));
       
       const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
@@ -563,7 +607,9 @@ const PlanAssist = () => {
         userEstimate: t.user_estimate,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type
+        type: t.task_type,
+        parent_task_id: t.parent_task_id,  // NEW
+        split_task_id: t.split_task_id     // NEW
       }));
       
       setTasks(updatedTasks);
@@ -900,8 +946,11 @@ const PlanAssist = () => {
       const totalTime = task.userEstimate || task.estimatedTime;
       const timePerSegment = Math.round(totalTime / splitSegments.length);
       
+      // Generate unique split_task_ids for each segment
+      const baseId = Date.now();
+      
       const newTasks = splitSegments.map((seg, idx) => ({
-        id: Date.now() + idx, // Temporary ID, will be replaced with database ID
+        id: baseId + idx, // Temporary ID, will be replaced by backend
         title: `${task.title} - ${seg.name}`,
         description: task.description,
         dueDate: task.dueDate,
@@ -909,20 +958,20 @@ const PlanAssist = () => {
         userEstimate: timePerSegment,
         completed: false,
         type: task.type,
-        parent_task_id: task.id,
+        parent_task_id: task.id,  // NEW: Link to original task
+        split_task_id: null,      // NEW: Will be set by backend
         segment_name: seg.name
       }));
       
-      // Remove the original task and add segments
+      // Remove the original task and add segments in its place
       const updatedTasks = [...tasks];
       updatedTasks.splice(taskIndex, 1, ...newTasks);
       
-      // Immediately save to backend to get real database IDs
+      // Save to backend to get real database IDs with parent_task_id and split_task_id
       try {
         const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks });
         
-        // Update tasks with the real database IDs from backend
-        // Backend returns all tasks (no is_new flag in this endpoint)
+        // Update tasks with the real database IDs
         const tasksWithRealIds = saveResult.tasks.map(t => ({
           id: t.id,
           title: t.title,
@@ -932,7 +981,9 @@ const PlanAssist = () => {
           userEstimate: t.user_estimate,
           priorityOrder: t.priority_order || 0,
           completed: t.completed || false,
-          type: t.task_type
+          type: t.task_type,
+          parent_task_id: t.parent_task_id,  // NEW: Preserve parent ID
+          split_task_id: t.split_task_id     // NEW: Preserve split ID
         }));
         
         setTasks(tasksWithRealIds);
@@ -943,12 +994,11 @@ const PlanAssist = () => {
       } catch (saveError) {
         console.error('Failed to save split tasks:', saveError);
         alert('Failed to save split tasks: ' + saveError.message);
-        // Revert on error
         return;
       }
     } catch (error) {
       console.error('Failed to split task:', error);
-      alert('Failed to split task');
+      alert('Failed to split task: ' + error.message);
     }
   };
 
@@ -1220,6 +1270,8 @@ const PlanAssist = () => {
       if (currentTaskTimeSpent > 0 && taskStillExists) {
         console.log('✓ Task validated, saving partial completion for:', currentTask.title);
         
+        const parentId = currentTask.parent_task_id || currentTask.id; // Get parent ID
+        
         // Save session state with partial time for current task
         await apiCall('/sessions/save-state', 'POST', {
           sessionId: currentSession.id,
@@ -1234,15 +1286,15 @@ const PlanAssist = () => {
           partialTaskTitle: currentTask.title  // Send task title to backend
         });
         
-        // Update local partial times for display
+        // Update local partial times for display using parent ID
         const updatedPartialTimes = { ...partialTaskTimes };
-        updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
+        updatedPartialTimes[parentId] = (updatedPartialTimes[parentId] || 0) + currentTaskTimeSpent;
         setPartialTaskTimes(updatedPartialTimes);
         
         // Show partial task in summary
         const partiallyCompletedTask = {
           ...currentTask,
-          partialTime: updatedPartialTimes[currentTask.id]
+          partialTime: updatedPartialTimes[parentId]
         };
         
         const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
@@ -1318,13 +1370,17 @@ const PlanAssist = () => {
       const task = currentSession.tasks[currentTaskIndex];
       const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
       
+      // Get parent ID for grouping
+      const parentId = task.parent_task_id || task.id;
+      
       console.log('=== COMPLETING TASK ===');
       console.log('Task:', task.title, 'ID:', task.id);
+      console.log('Parent ID:', parentId);
       console.log('Current session time:', currentSessionTime, 'min');
-      console.log('Previous partial time:', partialTaskTimes[task.id] || 0, 'min');
+      console.log('Previous partial time:', partialTaskTimes[parentId] || 0, 'min');
       
       // Add any previously accumulated partial time
-      const previousPartialTime = partialTaskTimes[task.id] || 0;
+      const previousPartialTime = partialTaskTimes[parentId] || 0;
       const totalTimeSpent = currentSessionTime + previousPartialTime;
       
       console.log('Total time for completion:', totalTimeSpent, 'min');
@@ -1358,9 +1414,9 @@ const PlanAssist = () => {
       // Mark task as complete in local state (already done by backend)
       setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true } : t));
       
-      // Clear partial time for this task since it's now complete
+      // Clear partial time for this PARENT task (all segments share same parent time)
       const updatedPartialTimes = { ...partialTaskTimes };
-      delete updatedPartialTimes[task.id];
+      delete updatedPartialTimes[parentId];
       setPartialTaskTimes(updatedPartialTimes);
       
       setMarkingComplete(false);
@@ -1394,6 +1450,7 @@ const PlanAssist = () => {
       const currentTask = currentSession.tasks[currentTaskIndex];
       const isCurrentTaskCompleted = sessionCompletions.find(c => c.task.id === currentTask.id);
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
+      const parentId = currentTask.parent_task_id || currentTask.id; // Get parent ID
       
       // Save partial time ONLY if current task is incomplete and has time spent
       if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
@@ -1414,16 +1471,16 @@ const PlanAssist = () => {
         }
       }
       
-      // Update local partial times for display
+      // Update local partial times for display using parent ID
       const updatedPartialTimes = { ...partialTaskTimes };
       if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
-        updatedPartialTimes[currentTask.id] = (updatedPartialTimes[currentTask.id] || 0) + currentTaskTimeSpent;
+        updatedPartialTimes[parentId] = (updatedPartialTimes[parentId] || 0) + currentTaskTimeSpent;
       }
       setPartialTaskTimes(updatedPartialTimes);
       
       // Prepare summary data - only show partial if task is actually incomplete
       const partiallyCompletedTask = (!isCurrentTaskCompleted && currentTaskTimeSpent > 0)
-        ? { ...currentTask, partialTime: updatedPartialTimes[currentTask.id] || currentTaskTimeSpent }
+        ? { ...currentTask, partialTime: updatedPartialTimes[parentId] || currentTaskTimeSpent }
         : null;
       
       // Calculate missed tasks - start from next task if current is partial, otherwise from current
@@ -1459,7 +1516,9 @@ const PlanAssist = () => {
         userEstimate: t.user_estimate,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type
+        type: t.task_type,
+        parent_task_id: t.parent_task_id,  // NEW
+        split_task_id: t.split_task_id     // NEW
       }));
       
       // Re-estimate incomplete tasks
@@ -2424,13 +2483,19 @@ const PlanAssist = () => {
                       {(() => {
                         const currentTask = currentSession.tasks[currentTaskIndex];
                         const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-                        const previousTime = partialTaskTimes[currentTask.id] || 0;
+                        const parentId = currentTask.parent_task_id || currentTask.id; // Use parent if exists
+                        const previousTime = partialTaskTimes[parentId] || 0;
                         const totalTime = currentSessionTime + previousTime;
                         
                         if (previousTime > 0) {
                           return (
                             <>
                               Time on this task: {currentSessionTime} min <span className="text-blue-600">(+{previousTime} min from previous session = {totalTime} min total)</span>
+                              {currentTask.parent_task_id && (
+                                <span className="text-xs text-gray-500 ml-2">
+                                  (combined from all segments)
+                                </span>
+                              )}
                             </>
                           );
                         }
@@ -2455,7 +2520,8 @@ const PlanAssist = () => {
                 <div className="space-y-2">
                   <h4 className="font-semibold text-gray-700 text-sm mb-3">Upcoming in This Session</h4>
                   {currentSession.tasks.slice(currentTaskIndex + 1).map((task, idx) => {
-                    const hasPartialTime = partialTaskTimes[task.id] > 0;
+                    const parentId = task.parent_task_id || task.id;
+                    const hasPartialTime = partialTaskTimes[parentId] > 0;
                     return (
                       <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-60">
                         <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
@@ -2465,7 +2531,7 @@ const PlanAssist = () => {
                           <span className="text-gray-700">{cleanTaskTitle(task.title)}</span>
                           {hasPartialTime && (
                             <span className="ml-2 text-xs text-blue-600">
-                              ({partialTaskTimes[task.id]} min in progress)
+                              ({partialTaskTimes[parentId]} min in progress)
                             </span>
                           )}
                         </div>
