@@ -628,7 +628,24 @@ const PlanAssist = () => {
         alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
       }
     } catch (error) {
-      alert('Failed to fetch Canvas calendar: ' + error.message);
+      console.error('Failed to fetch Canvas calendar:', error);
+      
+      // Provide more specific error messages based on the error
+      let errorMessage = 'Failed to fetch Canvas calendar.';
+      
+      if (error.message.includes('Invalid Canvas URL')) {
+        errorMessage = 'Invalid Canvas URL. Please use the format: https://canvas.oneschoolglobal.com/feeds/calendars/user_...';
+      } else if (error.message.includes('400')) {
+        errorMessage = 'Invalid request. Please check your Canvas URL format and try again.';
+      } else if (error.message.includes('404')) {
+        errorMessage = 'Canvas calendar not found. Please verify your URL is correct.';
+      } else if (error.message.includes('timeout') || error.message.includes('408')) {
+        errorMessage = 'Request timeout. Please check your Canvas URL and try again.';
+      } else if (error.message) {
+        errorMessage = 'Failed to fetch Canvas calendar: ' + error.message;
+      }
+      
+      alert(errorMessage);
     } finally {
       setIsLoadingTasks(false);
     }
@@ -2559,8 +2576,9 @@ const PlanAssist = () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Canvas Calendar ICS URL</label>
-                  <input type="url" value={accountSetup.canvasUrl} onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasUrl: e.target.value }))} placeholder="https://canvas.oneschoolglobal.com/feeds/calendars/..." className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-                  <p className="text-xs text-gray-500 mt-1">Find this in Canvas: Calendar - Calendar Feed</p>
+                  <input type="url" value={accountSetup.canvasUrl} onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasUrl: e.target.value }))} placeholder="https://canvas.oneschoolglobal.com/feeds/calendars/user_..." className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                  <p className="text-xs text-gray-500 mt-1">Find this in Canvas: Calendar → Calendar Feed → Copy the URL</p>
+                  <p className="text-xs text-blue-600 mt-1">💡 The URL should contain "/feeds/calendars/"</p>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Present Periods (Time Zone)</label>
