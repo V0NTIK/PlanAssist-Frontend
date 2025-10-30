@@ -1285,6 +1285,36 @@ const fetchCanvasTasks = async () => {
     setSavingSession(true);
     try {
       const currentTask = currentSession.tasks[currentTaskIndex];
+      
+      // Check if currentTask exists before proceeding
+      if (!currentTask) {
+        // If no current task, just save the session state without partial time
+        await apiCall('/sessions/saved-state', 'POST', {
+          sessionId: currentSession.id,
+          day: currentSession.day,
+          period: currentSession.period,
+          remainingTime: sessionTime,
+          currentTaskIndex: currentTaskIndex,
+          taskStartTime: taskStartTime,
+          completedTaskIds: sessionCompletions.map(c => c.task.id)
+        });
+        
+        setSessionSummary({
+          isSaveAndExit: true,
+          day: currentSession.day,
+          period: currentSession.period,
+          completions: sessionCompletions,
+          partialTask: null,
+          missedTasks: [],
+          totalTime: Math.round((3600 - sessionTime) / 60),
+          remainingTime: Math.round(sessionTime / 60)
+        });
+        
+        setShowSessionSummary(true);
+        setIsTimerRunning(false);
+        return;
+      }
+      
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
     
       // ✅ Calculate and save partial time
@@ -1411,10 +1441,10 @@ const fetchCanvasTasks = async () => {
   
     try {
       const currentTask = currentSession.tasks[currentTaskIndex];
-      const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
+      const currentTaskTimeSpent = currentTask ? Math.round((taskStartTime - sessionTime) / 60) : 0;
     
       // ✅ Save partial time if any time spent on current task
-      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+      if (currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
         const previousAccumulatedTime = currentTask.accumulatedTime || 0;
         const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
       
@@ -1435,7 +1465,7 @@ const fetchCanvasTasks = async () => {
     
       // Determine missed tasks
       let missedTaskStartIndex = currentTaskIndex;
-      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+      if (currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
         missedTaskStartIndex = currentTaskIndex + 1;
       }
     
@@ -1446,7 +1476,7 @@ const fetchCanvasTasks = async () => {
         day: currentSession.day,
         period: currentSession.period,
         completions: sessionCompletions,
-        partialTask: currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id) ? {
+        partialTask: currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id) ? {
           ...currentTask,
           partialTime: currentTaskTimeSpent
         } : null,
