@@ -1342,7 +1342,7 @@ const fetchCanvasTasks = async () => {
     return () => clearInterval(interval);
   }, [isTimerRunning, sessionTime]);
 
-  const completeCurrentTask = async () => {
+  const completeTask = async () => {
     if (!currentSession) return;
   
     setMarkingComplete(true);
