@@ -72,19 +72,26 @@ const PlanAssist = () => {
     return periods;
   }, [accountSetup.presentPeriods]);
 
-  // Extract class name from task title
-  const extractClassName = (title) => {
-    const match = title.match(/\[([^\]]+)\]/);
+  // Extract class name from task class field or title
+  const extractClassName = (task) => {
+    // If task has a class field, use it directly
+    if (task.class) {
+      return task.class.replace(/[\[\]]/g, ''); // Remove brackets if present
+    }
+    // Fallback to title parsing (for legacy or imported tasks)
+    const match = task.title.match(/\[([^\]]+)\]/);
     return match ? match[1] : 'No Class';
   };
 
-  // Remove bracketed class name from title for display
-  const cleanTaskTitle = (title) => {
-    return title.replace(/\s*\[([^\]]+)\]\s*/, '').trim();
+  // Display task title with segment if present
+  const cleanTaskTitle = (task) => {
+    const baseTitle = task.title.replace(/\s*\[([^\]]+)\]\s*/, '').trim();
+    return task.segment ? `${baseTitle} - ${task.segment}` : baseTitle;
   };
 
   // Get color for a class
-  const getClassColor = (className) => {
+  const getClassColor = (task) => {
+    const className = extractClassName(task);
     if (accountSetup.classColors[className]) {
       return accountSetup.classColors[className];
     }
@@ -175,29 +182,31 @@ const PlanAssist = () => {
         const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
           id: t.id,
           title: t.title,
+          segment: t.segment,
+          class: t.class,
           description: t.description,
-          dueDate: new Date(t.due_date),
+          url: t.url,
+          dueDate: new Date(t.deadline),
           estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimate,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
           priorityOrder: t.priority_order,
-          completed: t.completed,
-          type: t.task_type,
-          parent_task_id: t.parent_task_id,  // NEW
-          split_task_id: t.split_task_id     // NEW
+          completed: t.completed
         }));
         
         const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
           id: t.id,
           title: t.title,
+          segment: t.segment,
+          class: t.class,
           description: t.description,
-          dueDate: new Date(t.due_date),
+          url: t.url,
+          dueDate: new Date(t.deadline),
           estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimate,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
           priorityOrder: t.priority_order,
-          completed: t.completed,
-          type: t.task_type,
-          parent_task_id: t.parent_task_id,  // NEW
-          split_task_id: t.split_task_id     // NEW
+          completed: t.completed
         }));
         
         setTasks(loadedTasks);
@@ -223,35 +232,14 @@ const PlanAssist = () => {
         date: new Date(h.completed_at)
       })));
 
-      // NEW: Load partial completions grouped by parent_task_id
-      const loadPartialCompletions = async () => {
-        try {
-          const response = await fetch(`${API_URL}/tasks/partial-completions`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-          }).then(r => r.json());
-          
-          // Group partial completions by parent_task_id
-          const partialTimes = {};
-          
-          response.partialCompletions.forEach(pc => {
-            const parentId = pc.parent_task_id;
-            
-            // If this parent already has time accumulated, add to it
-            if (partialTimes[parentId]) {
-              partialTimes[parentId] += pc.accumulated_time;
-            } else {
-              partialTimes[parentId] = pc.accumulated_time;
-            }
-          });
-          
-          console.log('Loaded partial completions grouped by parent:', partialTimes);
-          setPartialTaskTimes(partialTimes);
-        } catch (error) {
-          console.error('Failed to load partial completions:', error);
+      // Load accumulated times from tasks (stored in tasks.accumulated_time)
+      const partialTimes = {};
+      tasksData.forEach(t => {
+        if (t.accumulated_time > 0) {
+          partialTimes[t.id] = t.accumulated_time;
         }
-      };
-      
-      await loadPartialCompletions();
+      });
+      setPartialTaskTimes(partialTimes);
 
       const sessionStateData = await fetch(`${API_URL}/sessions/saved-state`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -272,6 +260,48 @@ const PlanAssist = () => {
       }
     } catch (error) {
       console.error('Error loading user data:', error);
+    }
+  };
+
+  // Load tasks from API
+  const loadTasks = async () => {
+    try {
+      const tasksData = await apiCall('/tasks', 'GET');
+      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
+        id: t.id,
+        title: t.title,
+        segment: t.segment,
+        class: t.class,
+        description: t.description,
+        url: t.url,
+        dueDate: new Date(t.deadline),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
+        priorityOrder: t.priority_order,
+        completed: t.completed
+      }));
+      
+      const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
+        id: t.id,
+        title: t.title,
+        segment: t.segment,
+        class: t.class,
+        description: t.description,
+        url: t.url,
+        dueDate: new Date(t.deadline),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
+        priorityOrder: t.priority_order,
+        completed: t.completed
+      }));
+      
+      setTasks(loadedTasks);
+      setNewTasks(loadedNewTasks);
+      generateSessions(loadedTasks, accountSetup.schedule);
+    } catch (error) {
+      console.error('Failed to load tasks:', error);
     }
   };
 
@@ -456,8 +486,6 @@ const PlanAssist = () => {
         userEstimate: null,
         completed: false,
         type: detectTaskType(t.title),
-        parent_task_id: null,  // NEW: Base tasks have no parent
-        split_task_id: null    // NEW: Base tasks have no split ID
       }));
       
       const filteredNewTasks = newTasks.filter(newTask => {
@@ -482,29 +510,31 @@ const PlanAssist = () => {
       const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
+        segment: t.segment,
+        class: t.class,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        url: t.url,
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
         priorityOrder: t.priority_order,
-        completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        completed: t.completed
       }));
       
       const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
         id: t.id,
         title: t.title,
+        segment: t.segment,
+        class: t.class,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        url: t.url,
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
         priorityOrder: t.priority_order,
-        completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        completed: t.completed
       }));
       
       setTasks(updatedTasks);
@@ -560,8 +590,6 @@ const PlanAssist = () => {
         userEstimate: null,
         completed: false,
         type: detectTaskType(t.title),
-        parent_task_id: null,  // NEW: Base tasks have no parent
-        split_task_id: null    // NEW: Base tasks have no split ID
       }));
       
       const filteredNewTasks = newTasks.filter(newTask => {
@@ -587,29 +615,31 @@ const PlanAssist = () => {
       const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
+        segment: t.segment,
+        class: t.class,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        url: t.url,
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
         priorityOrder: t.priority_order,
-        completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        completed: t.completed
       }));
       
       const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
         id: t.id,
         title: t.title,
+        segment: t.segment,
+        class: t.class,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        url: t.url,
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
         priorityOrder: t.priority_order,
-        completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        completed: t.completed
       }));
       
       setTasks(updatedTasks);
@@ -959,63 +989,20 @@ const PlanAssist = () => {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
       
-      const taskIndex = tasks.findIndex(t => t.id === taskId);
-      const totalTime = task.userEstimate || task.estimatedTime;
-      const timePerSegment = Math.round(totalTime / splitSegments.length);
+      // Call the backend split endpoint
+      const segmentNames = splitSegments.map(seg => seg.name);
+      const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segmentNames });
       
-      // Generate unique split_task_ids for each segment
-      const baseId = Date.now();
-      
-      const newTasks = splitSegments.map((seg, idx) => ({
-        id: baseId + idx, // Temporary ID, will be replaced by backend
-        title: `${task.title} - ${seg.name}`,
-        description: task.description,
-        dueDate: task.dueDate,
-        estimatedTime: timePerSegment,
-        userEstimate: timePerSegment,
-        completed: false,
-        type: task.type,
-        parent_task_id: task.id,  // NEW: Link to original task
-        split_task_id: null,      // NEW: Will be set by backend
-        segment_name: seg.name
-      }));
-      
-      // Remove the original task and add segments in its place
-      const updatedTasks = [...tasks];
-      updatedTasks.splice(taskIndex, 1, ...newTasks);
-      
-      // Save to backend to get real database IDs with parent_task_id and split_task_id
-      try {
-        const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks });
+      if (result.success) {
+        // Reload tasks from server to get the new segments
+        await loadTasks();
         
-        // Update tasks with the real database IDs
-        const tasksWithRealIds = saveResult.tasks.map(t => ({
-          id: t.id,
-          title: t.title,
-          description: t.description,
-          dueDate: new Date(t.due_date),
-          estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimate,
-          priorityOrder: t.priority_order || 0,
-          completed: t.completed || false,
-          type: t.task_type,
-          parent_task_id: t.parent_task_id,  // NEW: Preserve parent ID
-          split_task_id: t.split_task_id     // NEW: Preserve split ID
-        }));
-        
-        setTasks(tasksWithRealIds);
         setShowSplitTask(null);
         setSplitSegments([{ name: 'Part 1' }]);
-        generateSessions(tasksWithRealIds, accountSetup.schedule);
-        alert(`Split "${task.title}" into ${splitSegments.length} segments successfully!`);
-      } catch (saveError) {
-        console.error('Failed to save split tasks:', saveError);
-        alert('Failed to save split tasks: ' + saveError.message);
-        return;
       }
     } catch (error) {
-      console.error('Failed to split task:', error);
-      alert('Failed to split task: ' + error.message);
+      console.error('Error splitting task:', error);
+      alert('Error splitting task: ' + error.message);
     }
   };
 
@@ -1287,7 +1274,8 @@ const PlanAssist = () => {
       if (currentTaskTimeSpent > 0 && taskStillExists) {
         console.log('✓ Task validated, saving partial completion for:', currentTask.title);
         
-        const parentId = currentTask.parent_task_id || currentTask.id; // Get parent ID
+        // Use the task's own ID for accumulated time tracking
+        const taskId = currentTask.id;
         
         // Save session state with partial time for current task
         await apiCall('/sessions/save-state', 'POST', {
@@ -1303,15 +1291,15 @@ const PlanAssist = () => {
           partialTaskTitle: currentTask.title  // Send task title to backend
         });
         
-        // Update local partial times for display using parent ID
+        // Update local partial times for display
         const updatedPartialTimes = { ...partialTaskTimes };
-        updatedPartialTimes[parentId] = (updatedPartialTimes[parentId] || 0) + currentTaskTimeSpent;
+        updatedPartialTimes[taskId] = (updatedPartialTimes[taskId] || 0) + currentTaskTimeSpent;
         setPartialTaskTimes(updatedPartialTimes);
         
         // Show partial task in summary
         const partiallyCompletedTask = {
           ...currentTask,
-          partialTime: updatedPartialTimes[parentId]
+          partialTime: updatedPartialTimes[taskId]
         };
         
         const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
@@ -1388,16 +1376,16 @@ const PlanAssist = () => {
       const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
       
       // Get parent ID for grouping
-      const parentId = task.parent_task_id || task.id;
+      const taskId = task.id;
       
       console.log('=== COMPLETING TASK ===');
       console.log('Task:', task.title, 'ID:', task.id);
-      console.log('Parent ID:', parentId);
+      console.log('Parent ID:', taskId);
       console.log('Current session time:', currentSessionTime, 'min');
-      console.log('Previous partial time:', partialTaskTimes[parentId] || 0, 'min');
+      console.log('Previous partial time:', partialTaskTimes[taskId] || 0, 'min');
       
       // Add any previously accumulated partial time
-      const previousPartialTime = partialTaskTimes[parentId] || 0;
+      const previousPartialTime = partialTaskTimes[taskId] || 0;
       const totalTimeSpent = currentSessionTime + previousPartialTime;
       
       console.log('Total time for completion:', totalTimeSpent, 'min');
@@ -1433,7 +1421,7 @@ const PlanAssist = () => {
       
       // Clear partial time for this PARENT task (all segments share same parent time)
       const updatedPartialTimes = { ...partialTaskTimes };
-      delete updatedPartialTimes[parentId];
+      delete updatedPartialTimes[taskId];
       setPartialTaskTimes(updatedPartialTimes);
       
       setMarkingComplete(false);
@@ -1467,7 +1455,7 @@ const PlanAssist = () => {
       const currentTask = currentSession.tasks[currentTaskIndex];
       const isCurrentTaskCompleted = sessionCompletions.find(c => c.task.id === currentTask.id);
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
-      const parentId = currentTask.parent_task_id || currentTask.id; // Get parent ID
+      const taskId = currentTask.id; // Get parent ID
       
       // Save partial time ONLY if current task is incomplete and has time spent
       if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
@@ -1491,13 +1479,13 @@ const PlanAssist = () => {
       // Update local partial times for display using parent ID
       const updatedPartialTimes = { ...partialTaskTimes };
       if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
-        updatedPartialTimes[parentId] = (updatedPartialTimes[parentId] || 0) + currentTaskTimeSpent;
+        updatedPartialTimes[taskId] = (updatedPartialTimes[taskId] || 0) + currentTaskTimeSpent;
       }
       setPartialTaskTimes(updatedPartialTimes);
       
       // Prepare summary data - only show partial if task is actually incomplete
       const partiallyCompletedTask = (!isCurrentTaskCompleted && currentTaskTimeSpent > 0)
-        ? { ...currentTask, partialTime: updatedPartialTimes[parentId] || currentTaskTimeSpent }
+        ? { ...currentTask, partialTime: updatedPartialTimes[taskId] || currentTaskTimeSpent }
         : null;
       
       // Calculate missed tasks - start from next task if current is partial, otherwise from current
@@ -1527,15 +1515,16 @@ const PlanAssist = () => {
       const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
+        segment: t.segment,
+        class: t.class,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        url: t.url,
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
+        accumulatedTime: t.accumulated_time || 0,
         priorityOrder: t.priority_order,
-        completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        completed: t.completed
       }));
       
       // Re-estimate incomplete tasks
@@ -1824,8 +1813,8 @@ const PlanAssist = () => {
                           
                           return incompleteTasks.map((task, index) => {
                             const taskTime = task.userEstimate || task.estimatedTime;
-                            const className = extractClassName(task.title);
-                            const classColor = getClassColor(className);
+                            const className = extractClassName(task);
+                            const classColor = getClassColor(task);
                             const dueDate = new Date(task.dueDate);
                             const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                             
@@ -1863,7 +1852,7 @@ const PlanAssist = () => {
                                   
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                      <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task.title)}</h3>
+                                      <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task)}</h3>
                                       <span 
                                         className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                         style={{ backgroundColor: classColor }}
@@ -1971,8 +1960,8 @@ const PlanAssist = () => {
                               </h3>
                               {groupedTasks[day].map((task) => {
                                 const taskTime = task.userEstimate || task.estimatedTime;
-                                const className = extractClassName(task.title);
-                                const classColor = getClassColor(className);
+                                const className = extractClassName(task);
+                                const classColor = getClassColor(task);
                                 
                                 return (
                                   <div 
@@ -1994,7 +1983,7 @@ const PlanAssist = () => {
                                       
                                       <div className="flex-1 min-w-0">
                                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                          <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task.title)}</h3>
+                                          <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task)}</h3>
                                           <span 
                                             className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                             style={{ backgroundColor: classColor }}
@@ -2116,8 +2105,8 @@ const PlanAssist = () => {
                   {/* New Tasks */}
                   <div className="space-y-3">
                     {newTasks.map((task) => {
-                      const className = extractClassName(task.title);
-                      const classColor = getClassColor(className);
+                      const className = extractClassName(task);
+                      const classColor = getClassColor(task);
                       const dueDate = new Date(task.dueDate);
                       const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                       
@@ -2132,7 +2121,7 @@ const PlanAssist = () => {
                           <div className="flex items-start gap-2 mb-2">
                             <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
                             <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{cleanTaskTitle(task.title)}</h4>
+                              <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{cleanTaskTitle(task)}</h4>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span 
                                   className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
@@ -2321,7 +2310,7 @@ const PlanAssist = () => {
                               {idx + 1}
                             </span>
                             <div className="flex-1">
-                              <p className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</p>
+                              <p className="font-medium text-gray-900">{cleanTaskTitle(task)}</p>
                               <p className="text-sm text-gray-600">
                                 {task.userEstimate || task.estimatedTime} min
                               </p>
@@ -2400,7 +2389,7 @@ const PlanAssist = () => {
                     </h4>
                     {sessionSummary.missedTasks.map((task, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</span>
+                        <span className="font-medium text-gray-900">{cleanTaskTitle(task)}</span>
                         <span className="text-sm text-gray-600">
                           {sessionSummary.isSaveAndExit ? 'Saved for later' : 'Rescheduled'}
                         </span>
@@ -2500,17 +2489,17 @@ const PlanAssist = () => {
                       {(() => {
                         const currentTask = currentSession.tasks[currentTaskIndex];
                         const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-                        const parentId = currentTask.parent_task_id || currentTask.id; // Use parent if exists
-                        const previousTime = partialTaskTimes[parentId] || 0;
+                        const taskId = currentTask.id; // Use parent if exists
+                        const previousTime = partialTaskTimes[taskId] || 0;
                         const totalTime = currentSessionTime + previousTime;
                         
                         if (previousTime > 0) {
                           return (
                             <>
                               Time on this task: {currentSessionTime} min <span className="text-blue-600">(+{previousTime} min from previous session = {totalTime} min total)</span>
-                              {currentTask.parent_task_id && (
+                              {currentTask.segment && (
                                 <span className="text-xs text-gray-500 ml-2">
-                                  (combined from all segments)
+                                  (this is a task segment)
                                 </span>
                               )}
                             </>
@@ -2537,18 +2526,18 @@ const PlanAssist = () => {
                 <div className="space-y-2">
                   <h4 className="font-semibold text-gray-700 text-sm mb-3">Upcoming in This Session</h4>
                   {currentSession.tasks.slice(currentTaskIndex + 1).map((task, idx) => {
-                    const parentId = task.parent_task_id || task.id;
-                    const hasPartialTime = partialTaskTimes[parentId] > 0;
+                    const taskId = task.id;
+                    const hasPartialTime = partialTaskTimes[taskId] > 0;
                     return (
                       <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-60">
                         <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
                           {currentTaskIndex + idx + 2}
                         </span>
                         <div className="flex-1">
-                          <span className="text-gray-700">{cleanTaskTitle(task.title)}</span>
+                          <span className="text-gray-700">{cleanTaskTitle(task)}</span>
                           {hasPartialTime && (
                             <span className="ml-2 text-xs text-blue-600">
-                              ({partialTaskTimes[parentId]} min in progress)
+                              ({partialTaskTimes[taskId]} min in progress)
                             </span>
                           )}
                         </div>
@@ -2645,7 +2634,7 @@ const PlanAssist = () => {
                     </label>
                     <p className="text-xs text-gray-500 mb-3">Customize colors for your classes. Changes save automatically.</p>
                     <div className="space-y-2">
-                      {Array.from(new Set(tasks.map(t => extractClassName(t.title)))).map(className => (
+                      {Array.from(new Set(tasks.map(t => extractClassName(t)))).map(className => (
                         <div key={className} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg">
                           <input 
                             type="color" 
