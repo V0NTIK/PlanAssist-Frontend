@@ -1115,8 +1115,14 @@ const fetchCanvasTasks = async () => {
 
   const handleSaveAndAdjustPlan = async () => {
     try {
+      // Convert tasks from frontend format (dueDate) to backend format (deadline)
+      const tasksForBackend = tasks.map(task => ({
+        ...task,
+        deadline: task.dueDate // Backend expects 'deadline', frontend uses 'dueDate'
+      }));
+      
       // Save all tasks with their current priority order to backend
-      await apiCall('/tasks', 'POST', { tasks });
+      await apiCall('/tasks', 'POST', { tasks: tasksForBackend });
       generateSessions(tasks, accountSetup.schedule);
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
