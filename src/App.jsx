@@ -341,8 +341,16 @@ const PlanAssist = () => {
   const loadTasksFromCanvas = async () => {
     setIsLoadingTasks(true);
     try {
-      const data = await apiCall('/canvas/import', 'POST', { calendarUrl: accountSetup.canvasUrl });
-      const importedTasks = data.tasks.map(t => ({
+      // Step 1: Fetch raw task data from Canvas
+      const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
+      
+      // Step 2: Save tasks to database (which will mark them as is_new = true)
+      await apiCall('/tasks', 'POST', { tasks: data.tasks });
+      
+      // Step 3: Reload all tasks from database to get complete task objects with IDs
+      const tasksData = await apiCall('/tasks');
+      
+      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         segment: t.segment,
@@ -350,16 +358,33 @@ const PlanAssist = () => {
         description: t.description,
         url: t.url,
         dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time, // FIXED: Use estimated_time
-        userEstimate: t.user_estimated_time, // FIXED: Use user_estimated_time
-        completed: t.completed,
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimated_time,
         priorityOrder: t.priority_order,
+        completed: t.completed,
         accumulatedTime: t.accumulated_time || 0
       }));
-      setNewTasks(importedTasks.filter(t => t.is_new));
-      setTasks(prev => [...prev, ...importedTasks.filter(t => !t.is_new)]);
-      generateSessions([...tasks, ...importedTasks.filter(t => !t.is_new)], accountSetup.schedule);
-      if (importedTasks.length > 0) {
+      
+      const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
+        id: t.id,
+        title: t.title,
+        segment: t.segment,
+        className: t.class,
+        description: t.description,
+        url: t.url,
+        dueDate: new Date(t.deadline),
+        estimatedTime: t.estimated_time,
+        userEstimate: t.user_estimated_time,
+        priorityOrder: t.priority_order,
+        completed: t.completed,
+        accumulatedTime: t.accumulated_time || 0
+      }));
+      
+      setTasks(loadedTasks);
+      setNewTasks(loadedNewTasks);
+      generateSessions(loadedTasks, accountSetup.schedule);
+      
+      if (loadedNewTasks.length > 0) {
         setNewTasksSidebarOpen(true);
       }
     } catch (error) {
