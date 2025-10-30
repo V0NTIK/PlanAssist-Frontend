@@ -72,6 +72,17 @@ const PlanAssist = () => {
     return periods;
   }, [accountSetup.presentPeriods]);
 
+  // Transform task from frontend format to backend format
+  const taskToBackendFormat = (task) => ({
+    title: task.title,
+    segment: task.segment || null,
+    class: task.className || extractClassName(task.title),
+    description: task.description || '',
+    url: task.url || '',
+    deadline: task.dueDate,
+    estimatedTime: task.estimatedTime
+  });
+
   // Extract class name from task title
   const extractClassName = (title) => {
     const match = title.match(/\[([^\]]+)\]/);
@@ -175,29 +186,31 @@ const PlanAssist = () => {
         const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
           id: t.id,
           title: t.title,
+          segment: t.segment,
+          className: t.class,
           description: t.description,
-          dueDate: new Date(t.due_date),
+          url: t.url,
+          dueDate: new Date(t.deadline),
           estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimate,
+          userEstimate: t.user_estimated_timed_time,
           priorityOrder: t.priority_order,
           completed: t.completed,
-          type: t.task_type,
-          parent_task_id: t.parent_task_id,  // NEW
-          split_task_id: t.split_task_id     // NEW
+          accumulatedTime: t.accumulated_time || 0
         }));
         
         const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
           id: t.id,
           title: t.title,
+          segment: t.segment,
+          className: t.class,
           description: t.description,
-          dueDate: new Date(t.due_date),
+          url: t.url,
+          dueDate: new Date(t.deadline),
           estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimate,
+          userEstimate: t.user_estimated_timed_time,
           priorityOrder: t.priority_order,
           completed: t.completed,
-          type: t.task_type,
-          parent_task_id: t.parent_task_id,  // NEW
-          split_task_id: t.split_task_id     // NEW
+          accumulatedTime: t.accumulated_time || 0
         }));
         
         setTasks(loadedTasks);
@@ -216,42 +229,14 @@ const PlanAssist = () => {
       }).then(r => r.json());
 
       setCompletionHistory(historyData.map(h => ({
-        taskTitle: h.task_title,
-        type: h.task_type,
+        taskTitle: h.task_title || h.title,
+        type: h.class,
         estimatedTime: h.estimated_time,
         actualTime: h.actual_time,
         date: new Date(h.completed_at)
       })));
 
-      // NEW: Load partial completions grouped by parent_task_id
-      const loadPartialCompletions = async () => {
-        try {
-          const response = await fetch(`${API_URL}/tasks/partial-completions`, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-          }).then(r => r.json());
-          
-          // Group partial completions by parent_task_id
-          const partialTimes = {};
-          
-          response.partialCompletions.forEach(pc => {
-            const parentId = pc.parent_task_id;
-            
-            // If this parent already has time accumulated, add to it
-            if (partialTimes[parentId]) {
-              partialTimes[parentId] += pc.accumulated_time;
-            } else {
-              partialTimes[parentId] = pc.accumulated_time;
-            }
-          });
-          
-          console.log('Loaded partial completions grouped by parent:', partialTimes);
-          setPartialTaskTimes(partialTimes);
-        } catch (error) {
-          console.error('Failed to load partial completions:', error);
-        }
-      };
-      
-      await loadPartialCompletions();
+      // Note: accumulated_time is now directly in tasks table, loaded above
 
       const sessionStateData = await fetch(`${API_URL}/sessions/saved-state`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -455,9 +440,12 @@ const PlanAssist = () => {
         estimatedTime: 20,
         userEstimate: null,
         completed: false,
-        type: detectTaskType(t.title),
-        parent_task_id: null,  // NEW: Base tasks have no parent
-        split_task_id: null    // NEW: Base tasks have no split ID
+        
+        segment: null,
+        className: extractClassName(t.title),
+        url: t.url || "",
+        accumulatedTime: 0
+        
       }));
       
       const filteredNewTasks = newTasks.filter(newTask => {
@@ -476,35 +464,37 @@ const PlanAssist = () => {
       }
       
       const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks.map(taskToBackendFormat) });
       
       // Separate new and existing tasks based on is_new flag
       const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        segment: t.segment,
+        className: t.class,
+        url: t.url,
+        accumulatedTime: t.accumulated_time || 0
       }));
       
       const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        segment: t.segment,
+        className: t.class,
+        url: t.url,
+        accumulatedTime: t.accumulated_time || 0
       }));
       
       setTasks(updatedTasks);
@@ -559,9 +549,12 @@ const PlanAssist = () => {
         estimatedTime: 20,
         userEstimate: null,
         completed: false,
-        type: detectTaskType(t.title),
-        parent_task_id: null,  // NEW: Base tasks have no parent
-        split_task_id: null    // NEW: Base tasks have no split ID
+        
+        segment: null,
+        className: extractClassName(t.title),
+        url: t.url || "",
+        accumulatedTime: 0
+        
       }));
       
       const filteredNewTasks = newTasks.filter(newTask => {
@@ -581,35 +574,37 @@ const PlanAssist = () => {
       
       // Preserve split tasks in their current position and add new tasks
       const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks.map(taskToBackendFormat) });
       
       // Separate new and existing tasks based on is_new flag
       const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        segment: t.segment,
+        className: t.class,
+        url: t.url,
+        accumulatedTime: t.accumulated_time || 0
       }));
       
       const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
         id: t.id,
         title: t.title,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        segment: t.segment,
+        className: t.class,
+        url: t.url,
+        accumulatedTime: t.accumulated_time || 0
       }));
       
       setTasks(updatedTasks);
@@ -974,10 +969,11 @@ const PlanAssist = () => {
         estimatedTime: timePerSegment,
         userEstimate: timePerSegment,
         completed: false,
-        type: task.type,
-        parent_task_id: task.id,  // NEW: Link to original task
-        split_task_id: null,      // NEW: Will be set by backend
-        segment_name: seg.name
+        segment: seg.name
+        
+        className: task.className,
+        url: task.url,
+        accumulatedTime: 0
       }));
       
       // Remove the original task and add segments in its place
@@ -986,21 +982,22 @@ const PlanAssist = () => {
       
       // Save to backend to get real database IDs with parent_task_id and split_task_id
       try {
-        const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks });
+        const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks.map(taskToBackendFormat) });
         
         // Update tasks with the real database IDs
         const tasksWithRealIds = saveResult.tasks.map(t => ({
           id: t.id,
           title: t.title,
+          segment: t.segment,
+          className: t.class,
           description: t.description,
-          dueDate: new Date(t.due_date),
+          url: t.url,
+          dueDate: new Date(t.deadline),
           estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimate,
+          userEstimate: t.user_estimated_time,
           priorityOrder: t.priority_order || 0,
           completed: t.completed || false,
-          type: t.task_type,
-          parent_task_id: t.parent_task_id,  // NEW: Preserve parent ID
-          split_task_id: t.split_task_id     // NEW: Preserve split ID
+          accumulatedTime: t.accumulated_time || 0
         }));
         
         setTasks(tasksWithRealIds);
@@ -1154,7 +1151,7 @@ const PlanAssist = () => {
   const handleSaveAndAdjustPlan = async () => {
     try {
       // Save all tasks with their current priority order to backend
-      await apiCall('/tasks', 'POST', { tasks });
+      await apiCall('/tasks', 'POST', { tasks: tasks.map(taskToBackendFormat) });
       generateSessions(tasks, accountSetup.schedule);
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
@@ -1422,7 +1419,6 @@ const PlanAssist = () => {
       setSessionCompletions(prev => [...prev, completion]);
       setCompletionHistory(prev => [...prev, {
         taskTitle: task.title,
-        type: task.type,
         estimatedTime: task.userEstimate || task.estimatedTime,
         actualTime: totalTimeSpent,
         date: new Date()
@@ -1528,14 +1524,15 @@ const PlanAssist = () => {
         id: t.id,
         title: t.title,
         description: t.description,
-        dueDate: new Date(t.due_date),
+        dueDate: new Date(t.deadline),
         estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimate,
+        userEstimate: t.user_estimated_time,
         priorityOrder: t.priority_order,
         completed: t.completed,
-        type: t.task_type,
-        parent_task_id: t.parent_task_id,  // NEW
-        split_task_id: t.split_task_id     // NEW
+        segment: t.segment,
+        className: t.class,
+        url: t.url,
+        accumulatedTime: t.accumulated_time || 0
       }));
       
       // Re-estimate incomplete tasks
