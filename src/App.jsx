@@ -736,7 +736,8 @@ const fetchCanvasTasks = async () => {
   console.log('Valid tasks (not past due):', validTasks.length);
 
   const incompleteTasks = validTasks.filter(t => {
-    return !t.completed && !t.title.toLowerCase().includes('homeroom');
+    const taskClass = extractClassName(t);
+    return !t.completed && !taskClass.toLowerCase().includes('homeroom');
   }).sort((a, b) => a.dueDate - b.dueDate);
   
   console.log('Incomplete tasks:', incompleteTasks.length);
@@ -1780,7 +1781,7 @@ const fetchCanvasTasks = async () => {
                                         <Calendar className="w-4 h-4" />
                                         {dayName}
                                       </span>
-                                      {taskTime > 0 && (
+                                      {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
                                         <span className="flex items-center gap-2">
                                           <Brain className="w-4 h-4" />
                                           {editingTimeTaskId === task.id ? (
@@ -1837,12 +1838,14 @@ const fetchCanvasTasks = async () => {
                                     >
                                       Details
                                     </button>
-                                    <button 
-                                      onClick={() => setShowSplitTask(task.id)}
-                                      className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
-                                    >
-                                      Split
-                                    </button>
+                                    {!className.toLowerCase().includes('homeroom') && (
+                                      <button 
+                                        onClick={() => setShowSplitTask(task.id)}
+                                        className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
+                                      >
+                                        Split
+                                      </button>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -1905,7 +1908,7 @@ const fetchCanvasTasks = async () => {
                                             {className}
                                           </span>
                                         </div>
-                                        {taskTime > 0 && (
+                                        {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
                                           <div className="text-sm text-gray-600 flex items-center gap-2">
                                             <Brain className="w-4 h-4" />
                                             {editingTimeTaskId === task.id ? (
@@ -1961,12 +1964,14 @@ const fetchCanvasTasks = async () => {
                                         >
                                           Details
                                         </button>
-                                        <button 
-                                          onClick={() => setShowSplitTask(task.id)}
-                                          className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
-                                        >
-                                          Split
-                                        </button>
+                                        {!className.toLowerCase().includes('homeroom') && (
+                                          <button 
+                                            onClick={() => setShowSplitTask(task.id)}
+                                            className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
+                                          >
+                                            Split
+                                          </button>
+                                        )}
                                       </div>
                                     </div>
                                   </div>
