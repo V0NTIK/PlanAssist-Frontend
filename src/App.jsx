@@ -61,6 +61,12 @@ const PlanAssist = () => {
   const [savingSession, setSavingSession] = useState(false);
   const [endingSession, setEndingSession] = useState(false);
   const [partialTaskTimes, setPartialTaskTimes] = useState({}); // Track accumulated time for partially completed tasks
+  // Workspace state
+  const [showWorkspace, setShowWorkspace] = useState(false);
+  const [workspaceTask, setWorkspaceTask] = useState(null);
+  const [workspaceNotes, setWorkspaceNotes] = useState('');
+  const [workspaceTab, setWorkspaceTab] = useState('notes');
+  const [savingNotes, setSavingNotes] = useState(false);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -556,130 +562,98 @@ const PlanAssist = () => {
     }
   };
 
-  const fetchCanvasTasks = async () => {
-    if (!accountSetup.canvasUrl) {
-      alert('Please enter your Canvas Calendar URL first');
-      return;
+const fetchCanvasTasks = async () => {
+  if (!accountSetup.canvasUrl) {
+    alert('Please enter your Canvas Calendar URL first');
+    return;
+  }
+  setIsLoadingTasks(true);
+  try {
+    // Fetch from Canvas
+    const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
+    
+    // ✅ FIX: Backend returns 'deadline' not 'dueDate'
+    // Format tasks properly for saving to database
+    const formattedTasks = data.tasks.map(t => ({
+      title: t.title,
+      segment: t.segment,
+      class: t.class,
+      description: t.description,
+      url: t.url,
+      deadline: t.deadline,           // Keep as deadline for backend
+      estimatedTime: t.estimatedTime
+    }));
+    
+    // Save to database
+    const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
+    
+    // ✅ FIX: Map backend response correctly
+    const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
+      id: t.id,
+      title: t.title,
+      segment: t.segment,
+      class: t.class,
+      description: t.description,
+      url: t.url,
+      dueDate: new Date(t.deadline),        // Convert deadline to dueDate for frontend
+      estimatedTime: t.estimated_time,
+      userEstimate: t.user_estimated_time,
+      accumulatedTime: t.accumulated_time || 0,
+      priorityOrder: t.priority_order,
+      completed: t.completed
+    }));
+    
+    const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
+      id: t.id,
+      title: t.title,
+      segment: t.segment,
+      class: t.class,
+      description: t.description,
+      url: t.url,
+      dueDate: new Date(t.deadline),        // Convert deadline to dueDate for frontend
+      estimatedTime: t.estimated_time,
+      userEstimate: t.user_estimated_time,
+      accumulatedTime: t.accumulated_time || 0,
+      priorityOrder: t.priority_order,
+      completed: t.completed
+    }));
+    
+    setTasks(updatedTasks);
+    setNewTasks(updatedNewTasks);
+    setHasUnsavedChanges(false);
+    
+    // Generate sessions
+    generateSessions(updatedTasks, accountSetup.schedule);
+    
+    if (updatedNewTasks.length > 0 && priorityLocked) {
+      setNewTasksSidebarOpen(true);
+      setHasUnsavedChanges(true);
+      alert(`Loaded ${formattedTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar. Drag them to your list or click "Add All".`);
+    } else {
+      alert(`Loaded ${formattedTasks.length} new tasks from Canvas!`);
     }
-    setIsLoadingTasks(true);
-    try {
-      const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
-      
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const filteredTasks = data.tasks.filter(t => {
-        const dueDate = new Date(t.dueDate);
-        dueDate.setHours(0, 0, 0, 0);
-        return dueDate >= today;
-      });
-
-      const existingCompletedTasks = tasks.filter(t => t.completed);
-      const existingSplitTasks = tasks.filter(t => 
-        t.title.includes('  - Part ') || 
-        t.title.includes('  - Segment ') ||
-        t.title.includes(' - Part ') || 
-        t.title.includes(' - Segment ')
-      );
-
-      const newTasks = filteredTasks.map((t, idx) => ({
-        id: Date.now() + idx,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.dueDate),
-        estimatedTime: 20,
-        userEstimate: null,
-        completed: false,
-        type: detectTaskType(t.title),
-      }));
-      
-      const filteredNewTasks = newTasks.filter(newTask => {
-        return !existingSplitTasks.some(splitTask => {
-          const baseTitle = splitTask.title
-            .split('  - Part ')[0]
-            .split('  - Segment ')[0]
-            .split(' - Part ')[0]
-            .split(' - Segment ')[0];
-          return newTask.title === baseTitle;
-        });
-      });
-      
-      for (let i = 0; i < filteredNewTasks.length; i++) {
-        filteredNewTasks[i].estimatedTime = await estimateTaskTime(filteredNewTasks[i].title);
-      }
-      
-      // Preserve split tasks in their current position and add new tasks
-      const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
-      
-      // Separate new and existing tasks based on is_new flag
-      const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
-      
-      const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
-      
-      setTasks(updatedTasks);
-      setNewTasks(updatedNewTasks);
-      setHasUnsavedChanges(false);
-      
-      // Generate sessions with the newly loaded tasks
-      generateSessions(updatedTasks, accountSetup.schedule);
-      
-      if (updatedNewTasks.length > 0 && priorityLocked) {
-        // Open sidebar when new tasks are detected with priority lock on
-        setNewTasksSidebarOpen(true);
-        setHasUnsavedChanges(true); // Mark as unsaved so user must save before changes apply
-        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar. Drag them to your list or click "Add All".`);
-      } else {
-        alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
-      }
-    } catch (error) {
-      console.error('Failed to fetch Canvas calendar:', error);
-      
-      // Provide more specific error messages based on the error
-      let errorMessage = 'Failed to fetch Canvas calendar.';
-      
-      if (error.message.includes('Invalid Canvas URL')) {
-        errorMessage = 'Invalid Canvas URL. Please use the format: https://canvas.oneschoolglobal.com/feeds/calendars/user_...';
-      } else if (error.message.includes('400')) {
-        errorMessage = 'Invalid request. Please check your Canvas URL format and try again.';
-      } else if (error.message.includes('404')) {
-        errorMessage = 'Canvas calendar not found. Please verify your URL is correct.';
-      } else if (error.message.includes('timeout') || error.message.includes('408')) {
-        errorMessage = 'Request timeout. Please check your Canvas URL and try again.';
-      } else if (error.message) {
-        errorMessage = 'Failed to fetch Canvas calendar: ' + error.message;
-      }
-      
-      alert(errorMessage);
-    } finally {
-      setIsLoadingTasks(false);
+  } catch (error) {
+    console.error('Failed to fetch Canvas calendar:', error);
+    
+    let errorMessage = 'Failed to fetch Canvas calendar.';
+    
+    if (error.message.includes('Invalid Canvas URL')) {
+      errorMessage = 'Invalid Canvas URL. Please use the format: https://canvas.oneschoolglobal.com/feeds/calendars/user_...';
+    } else if (error.message.includes('400')) {
+      errorMessage = 'Invalid request. Please check your Canvas URL format and try again.';
+    } else if (error.message.includes('404')) {
+      errorMessage = 'Canvas calendar not found. Please verify your URL is correct.';
+    } else if (error.message.includes('timeout') || error.message.includes('408')) {
+      errorMessage = 'Request timeout. Please check your Canvas URL and try again.';
+    } else if (error.message) {
+      errorMessage = 'Failed to fetch Canvas calendar: ' + error.message;
     }
-  };
+    
+    alert(errorMessage);
+  } finally {
+    setIsLoadingTasks(false);
+  }
+};
 
   const detectTaskType = (title) => {
     const lower = title.toLowerCase();
@@ -1152,6 +1126,55 @@ const PlanAssist = () => {
     }
   };
 
+  // Workspace functions
+  const loadTaskNotes = async (taskId) => {
+    try {
+      const data = await apiCall(`/tasks/${taskId}/notes`, 'GET');
+      setWorkspaceNotes(data.notes || '');
+    } catch (error) {
+      console.error('Failed to load notes:', error);
+      setWorkspaceNotes('');
+    }
+  };
+
+  const saveTaskNotes = async () => {
+    if (!workspaceTask) return;
+  
+    setSavingNotes(true);
+    try {
+      await apiCall(`/tasks/${workspaceTask.id}/notes`, 'POST', { notes: workspaceNotes });
+      console.log('Notes saved successfully');
+    } catch (error) {
+      console.error('Failed to save notes:', error);
+      alert('Failed to save notes');
+    } finally {
+      setSavingNotes(false);
+    }
+  };
+
+  const openWorkspace = async (task) => {
+    setWorkspaceTask(task);
+    setWorkspaceTab('notes');
+    await loadTaskNotes(task.id);
+    setShowWorkspace(true);
+  };
+
+  const closeWorkspace = async () => {
+    if (workspaceNotes) {
+      await saveTaskNotes();
+    }
+    setShowWorkspace(false);
+    setWorkspaceTask(null);
+    setWorkspaceNotes('');
+  };
+
+  const switchWorkspaceTab = async (tab) => {
+    if (workspaceTab === 'notes' && tab !== 'notes') {
+      await saveTaskNotes();
+    }
+    setWorkspaceTab(tab);
+  };
+  
   const startSession = (session) => {
     setCurrentSession(session);
     setCurrentTaskIndex(0);
@@ -1252,106 +1275,59 @@ const PlanAssist = () => {
   };
 
   const pauseSession = async () => {
+    setSavingSession(true);
     try {
-      setSavingSession(true);
-      setIsTimerRunning(false);
-      
-      // Calculate partial time spent on current task
       const currentTask = currentSession.tasks[currentTaskIndex];
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
-      
-      // Get IDs of all completed tasks in this session
-      const completedTaskIds = sessionCompletions.map(c => c.task.id);
-      
-      // Validate that the current task still exists in the tasks list
-      const taskStillExists = tasks.find(t => t.id === currentTask.id && !t.completed);
-      if (!taskStillExists) {
-        console.warn('⚠ Current task (ID:', currentTask.id, ') no longer exists or is completed');
-        console.warn('  This task may have been deleted or marked complete in another session');
-      }
-      
-      // Only save if there's actually time spent on current task AND task still exists
-      if (currentTaskTimeSpent > 0 && taskStillExists) {
-        console.log('✓ Task validated, saving partial completion for:', currentTask.title);
-        
-        // Use the task's own ID for accumulated time tracking
-        const taskId = currentTask.id;
-        
-        // Save session state with partial time for current task
-        await apiCall('/sessions/save-state', 'POST', {
-          sessionId: currentSession.id,
-          day: currentSession.day,
-          period: currentSession.period,
-          remainingTime: sessionTime,
-          currentTaskIndex: currentTaskIndex,
-          taskStartTime: taskStartTime,
-          completedTaskIds: completedTaskIds,
-          partialTaskId: currentTask.id,
-          partialTaskTime: currentTaskTimeSpent,
-          partialTaskTitle: currentTask.title  // Send task title to backend
-        });
-        
-        // Update local partial times for display
-        const updatedPartialTimes = { ...partialTaskTimes };
-        updatedPartialTimes[taskId] = (updatedPartialTimes[taskId] || 0) + currentTaskTimeSpent;
-        setPartialTaskTimes(updatedPartialTimes);
-        
-        // Show partial task in summary
-        const partiallyCompletedTask = {
+    
+      // ✅ Calculate and save partial time
+      const previousAccumulatedTime = currentTask.accumulatedTime || 0;
+      const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
+    
+      console.log('=== Saving Partial Time ===');
+      console.log('Task ID:', currentTask.id);
+      console.log('Time spent this session:', currentTaskTimeSpent, 'min');
+      console.log('Previous accumulated:', previousAccumulatedTime, 'min');
+      console.log('New total accumulated:', newAccumulatedTime, 'min');
+    
+      // Save accumulated time to database
+      await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
+        accumulatedTime: newAccumulatedTime
+      });
+    
+      // Save session state
+      await apiCall('/sessions/saved-state', 'POST', {
+        sessionId: currentSession.id,
+        day: currentSession.day,
+        period: currentSession.period,
+        remainingTime: sessionTime,
+        currentTaskIndex: currentTaskIndex,
+        taskStartTime: taskStartTime,
+        completedTaskIds: sessionCompletions.map(c => c.task.id)
+      });
+    
+      // Show summary
+      const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
+      setSessionSummary({
+        isSaveAndExit: true,
+        day: currentSession.day,
+        period: currentSession.period,
+        completions: sessionCompletions,
+        partialTask: {
           ...currentTask,
-          partialTime: updatedPartialTimes[taskId]
-        };
-        
-        const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
-        
-        setSessionSummary({
-          day: currentSession.day,
-          period: currentSession.period,
-          completions: sessionCompletions,
-          partialTask: partiallyCompletedTask,
-          missedTasks: missedTasks,
-          timeExpired: false,
-          totalTime: Math.round((3600 - sessionTime) / 60),
-          remainingTime: Math.round(sessionTime / 60),
-          isSaveAndExit: true
-        });
-      } else {
-        // Either no time spent OR task no longer exists - save session without partial
-        const reason = !taskStillExists ? 'task no longer exists' : 'no time spent';
-        console.log(`ℹ Saving session without partial completion (${reason})`);
-        
-        await apiCall('/sessions/save-state', 'POST', {
-          sessionId: currentSession.id,
-          day: currentSession.day,
-          period: currentSession.period,
-          remainingTime: sessionTime,
-          currentTaskIndex: currentTaskIndex,
-          taskStartTime: taskStartTime,
-          completedTaskIds: completedTaskIds,
-          partialTaskId: null,
-          partialTaskTime: 0
-        });
-        
-        const missedTasks = currentSession.tasks.slice(currentTaskIndex);
-        
-        setSessionSummary({
-          day: currentSession.day,
-          period: currentSession.period,
-          completions: sessionCompletions,
-          partialTask: null,
-          missedTasks: missedTasks,
-          timeExpired: false,
-          totalTime: Math.round((3600 - sessionTime) / 60),
-          remainingTime: Math.round(sessionTime / 60),
-          isSaveAndExit: true
-        });
-      }
-      
+          partialTime: currentTaskTimeSpent
+        },
+        missedTasks: missedTasks,
+        totalTime: Math.round((3600 - sessionTime) / 60),
+        remainingTime: Math.round(sessionTime / 60)
+      });
+    
       setShowSessionSummary(true);
-      setSavingSession(false);
+      setIsTimerRunning(false);
     } catch (error) {
-      console.error('Failed to save session state:', error);
-      alert('Failed to save and exit session: ' + error.message);
+      console.error('Failed to save session:', error);
+      alert('Failed to save session: ' + error.message);
+    } finally {
       setSavingSession(false);
     }
   };
@@ -1366,187 +1342,125 @@ const PlanAssist = () => {
     return () => clearInterval(interval);
   }, [isTimerRunning, sessionTime]);
 
-  const completeTask = async () => {
+  const completeCurrentTask = async () => {
     if (!currentSession) return;
-    
+  
+    setMarkingComplete(true);
+  
     try {
-      setMarkingComplete(true);
-      
       const task = currentSession.tasks[currentTaskIndex];
       const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-      
-      // Get parent ID for grouping
-      const taskId = task.id;
-      
-      console.log('=== COMPLETING TASK ===');
-      console.log('Task:', task.title, 'ID:', task.id);
-      console.log('Parent ID:', taskId);
+    
+      // ✅ Get accumulated time from task (from database)
+      const previousPartialTime = task.accumulatedTime || 0;
+    
+      console.log('=== Completing Task ===');
+      console.log('Task ID:', task.id);
       console.log('Current session time:', currentSessionTime, 'min');
-      console.log('Previous partial time:', partialTaskTimes[taskId] || 0, 'min');
-      
-      // Add any previously accumulated partial time
-      const previousPartialTime = partialTaskTimes[taskId] || 0;
+      console.log('Previous accumulated time:', previousPartialTime, 'min');
+    
+      // Calculate total time
       const totalTimeSpent = currentSessionTime + previousPartialTime;
+      console.log('Total time spent:', totalTimeSpent, 'min');
       
-      console.log('Total time for completion:', totalTimeSpent, 'min');
-      
-      // Immediately save completion to backend
-      await apiCall('/sessions/complete-task', 'POST', {
-        taskId: task.id,
-        taskTitle: task.title,
-        taskType: task.type,
-        estimatedTime: task.userEstimate || task.estimatedTime,
-        actualTime: totalTimeSpent
+      // Complete the task with total time
+      await apiCall(`/tasks/${task.id}/complete`, 'POST', {
+        timeSpent: totalTimeSpent
       });
       
-      console.log('✓ Task completion saved to backend');
-      
-      const completion = { 
+      // Add to completions
+      setSessionCompletions(prev => [...prev, { 
         task, 
-        timeSpent: totalTimeSpent, 
-        timestamp: new Date() 
-      };
-      
-      setSessionCompletions(prev => [...prev, completion]);
-      setCompletionHistory(prev => [...prev, {
-        taskTitle: task.title,
-        type: task.type,
-        estimatedTime: task.userEstimate || task.estimatedTime,
-        actualTime: totalTimeSpent,
-        date: new Date()
+        timeSpent: totalTimeSpent 
       }]);
       
-      // Mark task as complete in local state (already done by backend)
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true } : t));
+      // Update local state
+      const updatedTasks = tasks.map(t => 
+        t.id === task.id ? { ...t, completed: true } : t
+      );
+      setTasks(updatedTasks);
       
-      // Clear partial time for this PARENT task (all segments share same parent time)
-      const updatedPartialTimes = { ...partialTaskTimes };
-      delete updatedPartialTimes[taskId];
-      setPartialTaskTimes(updatedPartialTimes);
-      
-      setMarkingComplete(false);
-      
-      console.log('Task index:', currentTaskIndex, '/', currentSession.tasks.length - 1);
+      console.log('Task completed successfully');
       
       // Move to next task or end session
       if (currentTaskIndex < currentSession.tasks.length - 1) {
-        console.log('Moving to next task');
         setCurrentTaskIndex(prev => prev + 1);
         setTaskStartTime(sessionTime);
       } else {
-        console.log('Last task completed, ending session');
-        endSession(false);
+        await endSession(true);
       }
-      
-      console.log('=======================\n');
     } catch (error) {
-      console.error('Failed to mark task complete:', error);
-      alert('Failed to mark task complete: ' + error.message);
+      console.error('Failed to complete task:', error);
+      alert('Failed to complete task: ' + error.message);
+    } finally {
       setMarkingComplete(false);
     }
   };
 
-  const endSession = async (timeExpired) => {
-    try {
+  const endSession = async (natural = false) => {
+    if (!natural) {
       setEndingSession(true);
-      setIsTimerRunning(false);
-      
-      // Check if current task is actually incomplete
+    }
+  
+    try {
       const currentTask = currentSession.tasks[currentTaskIndex];
-      const isCurrentTaskCompleted = sessionCompletions.find(c => c.task.id === currentTask.id);
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
-      const taskId = currentTask.id; // Get parent ID
+    
+      // ✅ Save partial time if any time spent on current task
+      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+        const previousAccumulatedTime = currentTask.accumulatedTime || 0;
+        const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
       
-      // Save partial time ONLY if current task is incomplete and has time spent
-      if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
-        try {
-          await apiCall('/sessions/save-state', 'POST', {
-            sessionId: currentSession.id,
-            day: currentSession.day,
-            period: currentSession.period,
-            remainingTime: 0,
-            currentTaskIndex: currentTaskIndex,
-            taskStartTime: 0,
-            completedTaskIds: sessionCompletions.map(c => c.task.id),
-            partialTaskId: currentTask.id,
-            partialTaskTime: currentTaskTimeSpent
-          });
-        } catch (error) {
-          console.error('Failed to save partial completion:', error);
-        }
+        console.log('=== Saving Partial Time on End Session ===');
+        console.log('Task ID:', currentTask.id);
+        console.log('Time spent this session:', currentTaskTimeSpent, 'min');
+        console.log('Previous accumulated:', previousAccumulatedTime, 'min');
+        console.log('New total accumulated:', newAccumulatedTime, 'min');
+      
+        await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
+          accumulatedTime: newAccumulatedTime
+        });
       }
-      
-      // Update local partial times for display using parent ID
-      const updatedPartialTimes = { ...partialTaskTimes };
-      if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
-        updatedPartialTimes[taskId] = (updatedPartialTimes[taskId] || 0) + currentTaskTimeSpent;
+    
+      // Delete saved session
+      await apiCall('/sessions/saved-state', 'DELETE');
+      setSavedSessionState(null);
+    
+      // Determine missed tasks
+      let missedTaskStartIndex = currentTaskIndex;
+      if (currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+        missedTaskStartIndex = currentTaskIndex + 1;
       }
-      setPartialTaskTimes(updatedPartialTimes);
-      
-      // Prepare summary data - only show partial if task is actually incomplete
-      const partiallyCompletedTask = (!isCurrentTaskCompleted && currentTaskTimeSpent > 0)
-        ? { ...currentTask, partialTime: updatedPartialTimes[taskId] || currentTaskTimeSpent }
-        : null;
-      
-      // Calculate missed tasks - start from next task if current is partial, otherwise from current
-      const missedTaskStartIndex = partiallyCompletedTask ? currentTaskIndex + 1 : currentTaskIndex;
+    
       const missedTasks = currentSession.tasks.slice(missedTaskStartIndex);
-      
+    
       setSessionSummary({
+        isSaveAndExit: false,
         day: currentSession.day,
         period: currentSession.period,
         completions: sessionCompletions,
-        partialTask: partiallyCompletedTask,
+        partialTask: currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id) ? {
+          ...currentTask,
+          partialTime: currentTaskTimeSpent
+        } : null,
         missedTasks: missedTasks,
-        timeExpired,
         totalTime: Math.round((3600 - sessionTime) / 60),
-        remainingTime: 0,
-        isSaveAndExit: false
+        remainingTime: Math.round(sessionTime / 60)
       });
-      
-      // Completions were already saved individually when marked complete
-      // No need to save again here
-      
-      // Clear saved session state since we're ending
-      await apiCall('/sessions/saved-state', 'DELETE');
-      
-      // Reload tasks to get updated completion status
-      const tasksData = await apiCall('/tasks', 'GET');
-      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
-      
-      // Re-estimate incomplete tasks
-      const reestimatedTasks = [...loadedTasks];
-      for (let i = 0; i < reestimatedTasks.length; i++) {
-        if (!reestimatedTasks[i].completed) {
-          reestimatedTasks[i].estimatedTime = await estimateTaskTime(reestimatedTasks[i].title);
-        }
-      }
-      
-      setTasks(reestimatedTasks);
-      generateSessions(reestimatedTasks, accountSetup.schedule);
-      
+    
+      setShowSessionSummary(true);
+      setIsTimerRunning(false);
+    
+      // Mark session complete
       setSessions(prev => prev.filter(s => s.id !== currentSession.id));
       setCompletedSessionIds(prev => [...prev, currentSession.id]);
-      setShowSessionSummary(true);
-      setEndingSession(false);
     } catch (error) {
-      console.error('Failed to save session:', error);
-      alert('Failed to end session properly: ' + error.message);
-      setShowSessionSummary(true);
-      setEndingSession(false);
+      console.error('Failed to end session:', error);
+      alert('Failed to end session: ' + error.message);
+    } finally {
+      if (!natural) {
+        setEndingSession(false);
+      }
     }
   };
 
@@ -2737,6 +2651,142 @@ const PlanAssist = () => {
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// Task Workspace Component
+const TaskWorkspace = () => {
+  if (!showWorkspace || !workspaceTask) return null;
+    
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl w-full h-full max-w-[95vw] max-h-[95vh] flex flex-col">
+        {/* Header */}
+        <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 rounded-t-xl flex items-center justify-between">
+          <div className="flex-1">
+            <h2 className="text-xl font-bold">{cleanTaskTitle(workspaceTask)}</h2>
+            <p className="text-sm text-purple-100">
+              <span className="mr-3">{extractClassName(workspaceTask)}</span>
+              <span>Due: {workspaceTask.dueDate.toLocaleDateString()}</span>
+            </p>
+          </div>
+          <button
+            onClick={closeWorkspace}
+            className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2"
+          >
+            <X className="w-5 h-5" />
+            Close Workspace
+          </button>
+        </div>
+          
+        {/* Content */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Side: Notes/Calculator (35%) */}
+          <div className="w-[35%] border-r border-gray-200 flex flex-col">
+            {/* Tab selector */}
+            <div className="flex border-b border-gray-200">
+              <button
+                onClick={() => switchWorkspaceTab('notes')}
+                className={`flex-1 py-3 px-4 font-semibold ${
+                  workspaceTab === 'notes'
+                    ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Notes
+              </button>
+              <button
+                onClick={() => switchWorkspaceTab('calculator')}
+                className={`flex-1 py-3 px-4 font-semibold ${
+                  workspaceTab === 'calculator'
+                    ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                Calculator
+              </button>
+            </div>
+              
+            {/* Tab content */}
+            <div className="flex-1 overflow-hidden">
+              {workspaceTab === 'notes' ? (
+                <div className="h-full flex flex-col p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-gray-700">Your Notes</h3>
+                    <button
+                      onClick={saveTaskNotes}
+                      disabled={savingNotes}
+                      className="bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1"
+                    >
+                      {savingNotes ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4" />
+                          Save
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <textarea
+                    value={workspaceNotes}
+                    onChange={(e) => setWorkspaceNotes(e.target.value)}
+                    placeholder="Type your notes here... bullet points, reminders, key concepts, etc."
+                    className="flex-1 w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  />
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center p-4">
+                  <iframe
+                    src="https://graphingcalculator.pro/graphing-calculator"
+                    height="100%"
+                    width="100%"
+                    frameBorder="0"
+                    allow="fullscreen"
+                    className="rounded-lg"
+                    title="Graphing Calculator"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+            
+          {/* Right Side: Canvas Task (65%) */}
+          <div className="w-[65%] flex flex-col">
+            <div className="bg-gray-50 p-3 border-b border-gray-200">
+              <h3 className="font-semibold text-gray-700 mb-1">Canvas Assignment</h3>
+              <a
+                href={workspaceTask.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 hover:text-blue-700 break-all"
+              >
+                {workspaceTask.url}
+              </a>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {workspaceTask.url ? (
+                <iframe
+                  src={workspaceTask.url}
+                  className="w-full h-full border-0"
+                  title="Canvas Assignment"
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-gray-500">
+                  <div className="text-center">
+                    <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                    <p>No URL available for this task</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
