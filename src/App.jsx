@@ -80,7 +80,8 @@ const PlanAssist = () => {
     description: task.description || '',
     url: task.url || '',
     deadline: task.dueDate,
-    estimatedTime: task.estimatedTime
+    estimated_time: task.estimatedTime, // FIXED: Use estimated_time (database column name)
+    user_estimated_time: task.userEstimate || null // FIXED: Use user_estimated_time (database column name)
   });
 
   // Extract class name from task title
@@ -183,6 +184,7 @@ const PlanAssist = () => {
       }).then(r => r.json());
 
       if (tasksData.length > 0) {
+        // FIXED: Corrected field mapping from backend to frontend
         const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
           id: t.id,
           title: t.title,
@@ -191,8 +193,8 @@ const PlanAssist = () => {
           description: t.description,
           url: t.url,
           dueDate: new Date(t.deadline),
-          estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimated_timed_time,
+          estimatedTime: t.estimated_time, // FIXED: was estimatedTime
+          userEstimate: t.user_estimated_time, // FIXED: was user_estimated_timed_time (typo)
           priorityOrder: t.priority_order,
           completed: t.completed,
           accumulatedTime: t.accumulated_time || 0
@@ -206,8 +208,8 @@ const PlanAssist = () => {
           description: t.description,
           url: t.url,
           dueDate: new Date(t.deadline),
-          estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimated_timed_time,
+          estimatedTime: t.estimated_time, // FIXED: was estimatedTime
+          userEstimate: t.user_estimated_time, // FIXED: was user_estimated_timed_time (typo)
           priorityOrder: t.priority_order,
           completed: t.completed,
           accumulatedTime: t.accumulated_time || 0
@@ -278,12 +280,7 @@ const PlanAssist = () => {
       setUser(data.user);
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
-      if (data.user.isNewUser) {
-        setCurrentPage('settings');
-      } else {
-        await loadUserData(data.token);
-        setCurrentPage('hub');
-      }
+      loadUserData(data.token);
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -300,6 +297,11 @@ const PlanAssist = () => {
       setAuthLoading(false);
       return;
     }
+    if (password.length < 6) {
+      setAuthError('Password must be at least 6 characters');
+      setAuthLoading(false);
+      return;
+    }
     try {
       const data = await apiCall('/auth/register', 'POST', { email, password });
       localStorage.setItem('token', data.token);
@@ -308,7 +310,7 @@ const PlanAssist = () => {
       setUser(data.user);
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
-      setCurrentPage('settings');
+      setCurrentPage('setup');
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -322,11 +324,79 @@ const PlanAssist = () => {
     setToken(null);
     setUser(null);
     setIsAuthenticated(false);
-    setCurrentPage('hub');
+    setAccountSetup({
+      name: '',
+      grade: '',
+      canvasUrl: '',
+      presentPeriods: '2-6',
+      schedule: {},
+      classColors: {}
+    });
     setTasks([]);
     setSessions([]);
+    setCurrentPage('hub');
   };
 
+  // Load tasks from Canvas
+  const loadTasksFromCanvas = async () => {
+    setIsLoadingTasks(true);
+    try {
+      const data = await apiCall('/canvas/import', 'POST', { calendarUrl: accountSetup.canvasUrl });
+      const importedTasks = data.tasks.map(t => ({
+        id: t.id,
+        title: t.title,
+        segment: t.segment,
+        className: t.class,
+        description: t.description,
+        url: t.url,
+        dueDate: new Date(t.deadline),
+        estimatedTime: t.estimated_time, // FIXED: Use estimated_time
+        userEstimate: t.user_estimated_time, // FIXED: Use user_estimated_time
+        completed: t.completed,
+        priorityOrder: t.priority_order,
+        accumulatedTime: t.accumulated_time || 0
+      }));
+      setNewTasks(importedTasks.filter(t => t.is_new));
+      setTasks(prev => [...prev, ...importedTasks.filter(t => !t.is_new)]);
+      generateSessions([...tasks, ...importedTasks.filter(t => !t.is_new)], accountSetup.schedule);
+      if (importedTasks.length > 0) {
+        setNewTasksSidebarOpen(true);
+      }
+    } catch (error) {
+      alert('Failed to load tasks from Canvas. Please check your calendar URL and try again.');
+      console.error('Canvas import error:', error);
+    } finally {
+      setIsLoadingTasks(false);
+    }
+  };
+
+  // Accept new tasks
+  const acceptNewTasks = async () => {
+    try {
+      await apiCall('/tasks/accept-new', 'POST');
+      setTasks(prev => [...prev, ...newTasks]);
+      setNewTasks([]);
+      setNewTasksSidebarOpen(false);
+      generateSessions([...tasks, ...newTasks], accountSetup.schedule);
+    } catch (error) {
+      alert('Failed to accept new tasks');
+      console.error('Accept new tasks error:', error);
+    }
+  };
+
+  // Dismiss new tasks
+  const dismissNewTasks = async () => {
+    try {
+      await apiCall('/tasks/dismiss-new', 'DELETE');
+      setNewTasks([]);
+      setNewTasksSidebarOpen(false);
+    } catch (error) {
+      alert('Failed to dismiss new tasks');
+      console.error('Dismiss new tasks error:', error);
+    }
+  };
+
+  // Save account setup
   const saveAccountSetup = async () => {
     setSettingsSaving(true);
     try {
@@ -336,627 +406,279 @@ const PlanAssist = () => {
         presentPeriods: accountSetup.presentPeriods,
         schedule: accountSetup.schedule
       });
+      // Save class colors to localStorage
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
-      
-      // Fetch tasks and generate sessions if Canvas URL is provided
-      if (accountSetup.canvasUrl) {
-        await fetchCanvasTasks();
-        // Generate sessions after tasks are loaded
-        // Note: fetchCanvasTasks updates the tasks state, but we need to use the result
-        // Sessions will be generated in fetchCanvasTasks
-      }
-      
+      generateSessions(tasks, accountSetup.schedule);
       setCurrentPage('hub');
     } catch (error) {
-      alert('Failed to save settings: ' + error.message);
+      alert('Failed to save settings');
+      console.error('Save setup error:', error);
     } finally {
       setSettingsSaving(false);
     }
   };
 
-  const handleSendFeedback = async () => {
-    if (!feedbackText.trim()) {
-      alert('Please enter your feedback');
-      return;
-    }
+  // Generate sessions
+  const generateSessions = (taskList, schedule) => {
+    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+    const newSessions = [];
     
-    setFeedbackSending(true);
-    try {
-      await apiCall('/feedback', 'POST', {
-        feedback: feedbackText,
-        userEmail: user.email,
-        userName: accountSetup.name
-      });
-      alert('Thank you! Your feedback has been sent.');
-      setFeedbackText('');
-      setShowFeedbackForm(false);
-    } catch (error) {
-      alert('Failed to send feedback. Please try again or email directly.');
-    } finally {
-      setFeedbackSending(false);
-    }
-  };
-
-  const parseICSFile = (icsText) => {
-    const tasks = [];
-    const lines = icsText.split('\n');
-    let currentEvent = {};
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line === 'BEGIN:VEVENT') {
-        currentEvent = {};
-      } else if (line.startsWith('SUMMARY:')) {
-        currentEvent.title = line.substring(8);
-      } else if (line.startsWith('DTSTART')) {
-        const dateStr = line.split(':')[1] || line.split('=')[line.split('=').length - 1].split(':')[1];
-        if (dateStr) {
-          currentEvent.dueDate = new Date(
-            dateStr.substring(0, 4),
-            parseInt(dateStr.substring(4, 6)) - 1,
-            dateStr.substring(6, 8)
-          );
-        }
-      } else if (line.startsWith('DESCRIPTION:')) {
-        currentEvent.description = line.substring(12);
-      } else if (line === 'END:VEVENT' && currentEvent.title) {
-        const dueDate = new Date(currentEvent.dueDate || new Date());
-        dueDate.setHours(0, 0, 0, 0);
-        if (dueDate >= today) {
-          tasks.push({
-            title: currentEvent.title,
-            description: currentEvent.description || '',
-            dueDate: currentEvent.dueDate || new Date(),
+    days.forEach((day) => {
+      selectedPeriods.forEach((period) => {
+        if (schedule[day]?.[period] === 'Study') {
+          newSessions.push({
+            day,
+            period,
+            duration: 3600,
+            tasks: []
           });
         }
-      }
-    }
-    return tasks;
-  };
-
-  const handleICSUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setIsLoadingTasks(true);
-    try {
-      const text = await file.text();
-      const parsedTasks = parseICSFile(text);
-      
-      const existingCompletedTasks = tasks.filter(t => t.completed);
-      const existingSplitTasks = tasks.filter(t => 
-        t.title.includes('  - Part ') || 
-        t.title.includes('  - Segment ') ||
-        t.title.includes(' - Part ') || 
-        t.title.includes(' - Segment ')
-      );
-      
-      const newTasks = parsedTasks.map((t, idx) => ({
-        id: Date.now() + idx,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.dueDate),
-        estimatedTime: 20,
-        userEstimate: null,
-        completed: false,
-        
-        segment: null,
-        className: extractClassName(t.title),
-        url: t.url || "",
-        accumulatedTime: 0
-        
-      }));
-      
-      const filteredNewTasks = newTasks.filter(newTask => {
-        return !existingSplitTasks.some(splitTask => {
-          const baseTitle = splitTask.title
-            .split('  - Part ')[0]
-            .split('  - Segment ')[0]
-            .split(' - Part ')[0]
-            .split(' - Segment ')[0];
-          return newTask.title === baseTitle;
-        });
       });
-      
-      for (let i = 0; i < filteredNewTasks.length; i++) {
-        filteredNewTasks[i].estimatedTime = await estimateTaskTime(filteredNewTasks[i].title);
-      }
-      
-      const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks.map(taskToBackendFormat) });
-      
-      // Separate new and existing tasks based on is_new flag
-      const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        priorityOrder: t.priority_order,
-        completed: t.completed,
-        segment: t.segment,
-        className: t.class,
-        url: t.url,
-        accumulatedTime: t.accumulated_time || 0
-      }));
-      
-      const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        priorityOrder: t.priority_order,
-        completed: t.completed,
-        segment: t.segment,
-        className: t.class,
-        url: t.url,
-        accumulatedTime: t.accumulated_time || 0
-      }));
-      
-      setTasks(updatedTasks);
-      setNewTasks(updatedNewTasks);
-      setHasUnsavedChanges(false);
-      
-      // Generate sessions with the newly loaded tasks
-      generateSessions(updatedTasks, accountSetup.schedule);
-      
-      if (updatedNewTasks.length > 0 && priorityLocked) {
-        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
-      } else {
-        alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
-      }
-    } catch (error) {
-      alert('Failed to parse calendar file: ' + error.message);
-    } finally {
-      setIsLoadingTasks(false);
-    }
+    });
+
+    setSessions(newSessions);
   };
 
-  const fetchCanvasTasks = async () => {
-    if (!accountSetup.canvasUrl) {
-      alert('Please enter your Canvas Calendar URL first');
-      return;
-    }
-    setIsLoadingTasks(true);
-    try {
-      const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
-      
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const filteredTasks = data.tasks.filter(t => {
-        const dueDate = new Date(t.dueDate);
-        dueDate.setHours(0, 0, 0, 0);
-        return dueDate >= today;
-      });
-
-      const existingCompletedTasks = tasks.filter(t => t.completed);
-      const existingSplitTasks = tasks.filter(t => 
-        t.title.includes('  - Part ') || 
-        t.title.includes('  - Segment ') ||
-        t.title.includes(' - Part ') || 
-        t.title.includes(' - Segment ')
-      );
-
-      const newTasks = filteredTasks.map((t, idx) => ({
-        id: Date.now() + idx,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.dueDate),
-        estimatedTime: 20,
-        userEstimate: null,
-        completed: false,
-        
-        segment: null,
-        className: extractClassName(t.title),
-        url: t.url || "",
-        accumulatedTime: 0
-        
-      }));
-      
-      const filteredNewTasks = newTasks.filter(newTask => {
-        return !existingSplitTasks.some(splitTask => {
-          const baseTitle = splitTask.title
-            .split('  - Part ')[0]
-            .split('  - Segment ')[0]
-            .split(' - Part ')[0]
-            .split(' - Segment ')[0];
-          return newTask.title === baseTitle;
-        });
-      });
-      
-      for (let i = 0; i < filteredNewTasks.length; i++) {
-        filteredNewTasks[i].estimatedTime = await estimateTaskTime(filteredNewTasks[i].title);
-      }
-      
-      // Preserve split tasks in their current position and add new tasks
-      const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks.map(taskToBackendFormat) });
-      
-      // Separate new and existing tasks based on is_new flag
-      const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        priorityOrder: t.priority_order,
-        completed: t.completed,
-        segment: t.segment,
-        className: t.class,
-        url: t.url,
-        accumulatedTime: t.accumulated_time || 0
-      }));
-      
-      const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        priorityOrder: t.priority_order,
-        completed: t.completed,
-        segment: t.segment,
-        className: t.class,
-        url: t.url,
-        accumulatedTime: t.accumulated_time || 0
-      }));
-      
-      setTasks(updatedTasks);
-      setNewTasks(updatedNewTasks);
-      setHasUnsavedChanges(false);
-      
-      // Generate sessions with the newly loaded tasks
-      generateSessions(updatedTasks, accountSetup.schedule);
-      
-      if (updatedNewTasks.length > 0 && priorityLocked) {
-        // Open sidebar when new tasks are detected with priority lock on
-        setNewTasksSidebarOpen(true);
-        setHasUnsavedChanges(true); // Mark as unsaved so user must save before changes apply
-        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar. Drag them to your list or click "Add All".`);
-      } else {
-        alert(`Loaded ${filteredNewTasks.length} new tasks from Canvas!`);
-      }
-    } catch (error) {
-      console.error('Failed to fetch Canvas calendar:', error);
-      
-      // Provide more specific error messages based on the error
-      let errorMessage = 'Failed to fetch Canvas calendar.';
-      
-      if (error.message.includes('Invalid Canvas URL')) {
-        errorMessage = 'Invalid Canvas URL. Please use the format: https://canvas.oneschoolglobal.com/feeds/calendars/user_...';
-      } else if (error.message.includes('400')) {
-        errorMessage = 'Invalid request. Please check your Canvas URL format and try again.';
-      } else if (error.message.includes('404')) {
-        errorMessage = 'Canvas calendar not found. Please verify your URL is correct.';
-      } else if (error.message.includes('timeout') || error.message.includes('408')) {
-        errorMessage = 'Request timeout. Please check your Canvas URL and try again.';
-      } else if (error.message) {
-        errorMessage = 'Failed to fetch Canvas calendar: ' + error.message;
-      }
-      
-      alert(errorMessage);
-    } finally {
-      setIsLoadingTasks(false);
-    }
+  // Start session
+  const startSession = (sessionIndex) => {
+    const session = sessions[sessionIndex];
+    setCurrentSession(session);
+    setSessionTime(session.duration);
+    setTaskStartTime(session.duration);
+    setCurrentTaskIndex(0);
+    setSessionCompletions([]);
+    setIsTimerRunning(true);
+    setCurrentPage('session');
   };
 
-  const detectTaskType = (title) => {
-    const lower = title.toLowerCase();
-    if (lower.includes('homework') || lower.includes('hw')) return 'homework';
-    if (lower.includes('lab')) return 'lab';
-    if (lower.includes('read')) return 'reading';
-    if (lower.includes('essay') || lower.includes('writing')) return 'essay';
-    if (lower.includes('project')) return 'project';
-    if (lower.includes('quiz') || lower.includes('test') || lower.includes('exam')) return 'test-prep';
-    return 'general';
-  };
-
-  const extractKeywords = (title) => {
-    const lower = title.toLowerCase();
-    const keywords = new Set();
-    const subjects = ['math', 'science', 'history', 'english', 'physics', 'chemistry', 'biology', 'geography', 'literature', 'spanish', 'french', 'german'];
-    subjects.forEach(subject => { if (lower.includes(subject)) keywords.add(subject); });
-    const types = ['homework', 'assignment', 'essay', 'lab', 'project', 'reading', 'study', 'review', 'quiz', 'test', 'exam'];
-    types.forEach(type => { if (lower.includes(type)) keywords.add(type); });
-    const chapterMatch = lower.match(/chapter\s*(\d+)/);
-    if (chapterMatch) keywords.add('chapter');
-    const unitMatch = lower.match(/unit\s*(\d+)/);
-    if (unitMatch) keywords.add('unit');
-    const actions = ['complete', 'write', 'read', 'finish', 'prepare', 'practice', 'solve'];
-    actions.forEach(action => { if (lower.includes(action)) keywords.add(action); });
-    return Array.from(keywords);
-  };
-
-  const estimateTaskTime = async (title) => {
-    const lower = title.toLowerCase();
-    if (lower.includes('homeroom')) return 0;
-    try {
-      const globalData = await apiCall(`/tasks/global-estimate/${encodeURIComponent(title)}`, 'GET');
-      if (globalData.estimate) return globalData.estimate;
-    } catch (error) {}
-    if (lower.includes('lab')) return 60;
-    if (lower.includes('summative') || lower.includes('assessment') || lower.includes('project')) return 60;
-    if (lower.includes('[osg accelerate]')) return 5;
-    if (lower.includes('quiz') || lower.includes('exam') || lower.includes('test')) {
-      const testHistory = completionHistory.filter(h => {
-        const hLower = h.taskTitle.toLowerCase();
-        return hLower.includes('quiz') || hLower.includes('exam') || hLower.includes('test');
-      });
-      if (testHistory.length > 0) {
-        return Math.round(testHistory.reduce((sum, h) => sum + h.actualTime, 0) / testHistory.length);
-      }
-    }
-    const keywords = extractKeywords(title);
-    if (keywords.length > 0) {
-      const matchingHistory = completionHistory.filter(h => {
-        const hKeywords = extractKeywords(h.taskTitle);
-        return keywords.some(k => hKeywords.includes(k));
-      });
-      if (matchingHistory.length > 0) {
-        return Math.round(matchingHistory.reduce((sum, h) => sum + h.actualTime, 0) / matchingHistory.length);
-      }
-    }
-    return 20;
-  };
-
-  const generateSessions = (taskList, scheduleData) => {
-  console.log('generateSessions called with:', { taskList, scheduleData }); // Debug log
-  
-  if (!scheduleData || Object.keys(scheduleData).length === 0) {
-    console.log('No schedule data available');
-    setSessions([]);
-    return;
-  }
-  
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  
-  // Remove past due tasks from the task list
-  const validTasks = taskList.filter(t => {
-    const dueDate = new Date(t.dueDate);
-    dueDate.setHours(0, 0, 0, 0);
-    return dueDate >= today;
-  });
-
-  console.log('Valid tasks (not past due):', validTasks.length);
-
-  const incompleteTasks = validTasks.filter(t => {
-    return !t.completed && !t.title.toLowerCase().includes('homeroom');
-  }).sort((a, b) => a.dueDate - b.dueDate);
-  
-  console.log('Incomplete tasks:', incompleteTasks.length);
-  
-  if (incompleteTasks.length === 0) {
-    console.log('No incomplete tasks to schedule');
-    setSessions([]);
-    return;
-  }
-  
-  const newSessions = [];
-  let taskIndex = 0;
-  const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-  const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-  
-  // Convert to our day array index (0 = Monday)
-  const currentDayArrayIndex = currentDayIndex === 0 ? -1 : currentDayIndex - 1;
-  
-  console.log('Today is:', days[currentDayArrayIndex] || 'Sunday', 'Day index:', currentDayArrayIndex);
-  
-  for (const day of days) {
-    const dayIndex = days.indexOf(day);
-    
-    // Skip days that have already passed this week
-    if (currentDayArrayIndex !== -1 && dayIndex < currentDayArrayIndex) {
-      console.log(`Skipping ${day} - already passed this week`);
-      continue;
-    }
-    
-    if (!scheduleData[day]) {
-      console.log(`No schedule for ${day}`);
-      continue;
-    }
-    
-    const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
-    console.log(`${day} has periods:`, periods);
-    
-    for (const period of periods) {
-      const sessionId = `${day}-${period}`;
-      
-      if (completedSessionIds.includes(sessionId)) {
-        console.log(`Session ${sessionId} already completed, skipping`);
-        continue;
-      }
-      
-      const periodType = scheduleData[day][period];
-      console.log(`${sessionId} is type: ${periodType}`);
-      
-      if (periodType === 'Study') {
-        const sessionTasks = [];
-        let totalTime = 0;
-        
-        while (taskIndex < incompleteTasks.length && totalTime < 60) {
-          const task = incompleteTasks[taskIndex];
-          const taskTime = task.userEstimate || task.estimatedTime;
-          
-          if (totalTime + taskTime <= 60) {
-            sessionTasks.push(task);
-            totalTime += taskTime;
-            taskIndex++;
-          } else {
-            break;
-          }
+  // Timer effect
+  useEffect(() => {
+    if (!isTimerRunning || !currentSession) return;
+    const interval = setInterval(() => {
+      setSessionTime(prev => {
+        if (prev <= 1) {
+          handleEndSession();
+          return 0;
         }
-        
-        if (sessionTasks.length > 0) {
-          console.log(`Created session ${sessionId} with ${sessionTasks.length} tasks (${totalTime} min)`);
-          newSessions.push({ 
-            id: sessionId, 
-            day, 
-            period: parseInt(period), 
-            tasks: sessionTasks, 
-            totalTime 
-          });
-        }
-      }
-    }
-    
-    if (taskIndex >= incompleteTasks.length) {
-      console.log('All tasks scheduled, stopping');
-      break;
-    }
-  }
-  
-  console.log('Total sessions created:', newSessions.length);
-  setSessions(newSessions);
-};
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isTimerRunning, currentSession]);
 
-  const updateTaskEstimate = async (taskId, estimate) => {
-    try {
-      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { userEstimate: estimate });
-      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, userEstimate: estimate } : t);
-      setTasks(updatedTasks);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to update estimate:', error);
-    }
-  };
-
-  const handleManualComplete = async (taskId) => {
-    try {
-      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
-      setTasks(updatedTasks);
-      setShowCompleteConfirm(null);
-      generateSessions(updatedTasks, accountSetup.schedule);
-    } catch (error) {
-      console.error('Failed to complete task:', error);
-      alert('Failed to complete task');
-    }
-  };
-
+  // Mark task complete
   const handleCompleteTask = async (taskId) => {
+    setMarkingComplete(true);
     try {
-      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
-      setTasks(updatedTasks);
-      setShowCompleteConfirm(null);
-      generateSessions(updatedTasks, accountSetup.schedule);
-    } catch (error) {
-      console.error('Failed to complete task:', error);
-      alert('Failed to complete task');
-    }
-  };
+      const currentTask = tasks.find(t => t.id === taskId);
+      if (!currentTask) return;
 
-  const toggleTaskCompletion = async (taskId) => {
-    // Find task in the current tasks array by ID
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) {
-      console.error('Task not found:', taskId);
-      alert('Task not found. Please try refreshing the page.');
-      return;
-    }
-
-    // Update local state immediately for better UX
-    const newCompletedStatus = !task.completed;
-    const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: newCompletedStatus } : t);
-    setTasks(updatedTasks);
-    generateSessions(updatedTasks, accountSetup.schedule);
-
-    try {
-      if (newCompletedStatus) {
-        // Complete the task
-        await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-      } else {
-        // Uncomplete the task
-        await apiCall(`/tasks/${taskId}/uncomplete`, 'PATCH');
-      }
-      // Successfully saved to backend
-      console.log('Task completion toggled successfully');
-    } catch (error) {
-      console.error('Failed to toggle task completion:', error);
-      console.error('Task ID:', taskId);
-      console.error('Task details:', task);
+      const timeSpent = taskStartTime - sessionTime;
       
-      // Check if this is a newly split task that hasn't been saved yet
-      if (error.message.includes('Failed to complete task') || error.message.includes('500')) {
-        alert('This task needs to be saved first. Click "Save and Adjust Plan" to save your changes, then you can mark it complete.');
-        // Revert the change
-        setTasks(tasks);
-        generateSessions(tasks, accountSetup.schedule);
-      } else {
-        alert('Failed to update task: ' + error.message);
-        // Revert on error
-        setTasks(tasks);
-        generateSessions(tasks, accountSetup.schedule);
-      }
-    }
-  };
-
-  // Manual time editing handlers
-  const handleStartEditTime = (taskId, currentTime) => {
-    setEditingTimeTaskId(taskId);
-    setTempTimeValue(currentTime.toString());
-  };
-
-  const handleTimeInputChange = (e) => {
-    const value = e.target.value;
-    // Only allow numbers
-    if (/^\d*$/.test(value)) {
-      const numValue = parseInt(value) || 0;
-      // Limit to 60 minutes
-      if (numValue <= 60) {
-        setTempTimeValue(value);
-      }
-    }
-  };
-
-  const handleSaveTimeEstimate = async (taskId) => {
-    try {
-      const newTime = parseInt(tempTimeValue) || 0;
-      if (newTime < 1 || newTime > 60) {
-        alert('Please enter a time between 1 and 60 minutes');
-        return;
-      }
-
-      // Update local state
-      const updatedTasks = tasks.map(t =>
-        t.id === taskId ? { ...t, userEstimate: newTime } : t
-      );
-      setTasks(updatedTasks);
-
-      // Update backend
-      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', {
-        userEstimate: newTime
+      // FIXED: Call complete endpoint - backend handles accumulated_time + new time
+      await apiCall(`/tasks/${taskId}/complete`, 'POST', { 
+        timeSpent: Math.round(timeSpent / 60) // Convert seconds to minutes
       });
 
+      // Remove from tasks list
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      setSessionCompletions(prev => [...prev, { ...currentTask, actualTime: Math.round(timeSpent / 60) }]);
+      
+      // Move to next task
+      if (currentTaskIndex < tasks.length - 1) {
+        setCurrentTaskIndex(prev => prev + 1);
+        setTaskStartTime(sessionTime);
+      } else {
+        handleEndSession();
+      }
+      
+      setHasUnsavedChanges(false);
+      setShowCompleteConfirm(null);
+    } catch (error) {
+      alert('Failed to complete task');
+      console.error('Complete task error:', error);
+    } finally {
+      setMarkingComplete(false);
+    }
+  };
+
+  // Skip task
+  const handleSkipTask = async () => {
+    const currentTask = tasks[currentTaskIndex];
+    if (!currentTask) return;
+
+    const timeSpent = taskStartTime - sessionTime;
+    
+    if (timeSpent > 60) { // Only log if more than 1 minute spent
+      try {
+        // FIXED: Use /partial endpoint to ADD time to accumulated_time
+        await apiCall(`/tasks/${currentTask.id}/partial`, 'POST', { 
+          timeSpent: Math.round(timeSpent / 60) // Convert seconds to minutes
+        });
+        
+        // Update local state
+        setTasks(prev => prev.map(t => 
+          t.id === currentTask.id 
+            ? { ...t, accumulatedTime: (t.accumulatedTime || 0) + Math.round(timeSpent / 60) }
+            : t
+        ));
+      } catch (error) {
+        console.error('Failed to save partial completion:', error);
+      }
+    }
+
+    // Move to next task
+    if (currentTaskIndex < tasks.length - 1) {
+      setCurrentTaskIndex(prev => prev + 1);
+      setTaskStartTime(sessionTime);
+      setHasUnsavedChanges(false);
+    } else {
+      handleEndSession();
+    }
+  };
+
+  // Save session state
+  const handleSaveSession = async () => {
+    setSavingSession(true);
+    try {
+      const currentTask = tasks[currentTaskIndex];
+      if (!currentTask) return;
+
+      const timeSpent = taskStartTime - sessionTime;
+      
+      // Save partial time if any
+      if (timeSpent > 60) {
+        await apiCall(`/tasks/${currentTask.id}/partial`, 'POST', { 
+          timeSpent: Math.round(timeSpent / 60)
+        });
+      }
+
+      // Save session state
+      await apiCall('/sessions/save-state', 'POST', {
+        day: currentSession.day,
+        period: currentSession.period,
+        remainingTime: sessionTime,
+        currentTaskIndex: currentTask.id, // FIXED: Use task ID not index
+        taskStartTime: taskStartTime,
+        completedTaskIds: sessionCompletions.map(c => c.id)
+      });
+
+      setHasUnsavedChanges(false);
+      setIsTimerRunning(false);
+      setCurrentPage('hub');
+    } catch (error) {
+      alert('Failed to save session');
+      console.error('Save session error:', error);
+    } finally {
+      setSavingSession(false);
+    }
+  };
+
+  // Resume saved session
+  const resumeSavedSession = async () => {
+    try {
+      const sessionStateData = await apiCall('/sessions/saved-state');
+      if (!sessionStateData.sessionId) return;
+
+      const session = sessions.find(s => 
+        s.day === sessionStateData.day && 
+        s.period === sessionStateData.period
+      );
+
+      if (session) {
+        setCurrentSession(session);
+        setSessionTime(sessionStateData.remainingTime);
+        setTaskStartTime(sessionStateData.taskStartTime);
+        
+        // FIXED: Find task by ID not index
+        const taskIndex = tasks.findIndex(t => t.id === sessionStateData.currentTaskIndex);
+        setCurrentTaskIndex(taskIndex >= 0 ? taskIndex : 0);
+        
+        setSessionCompletions(tasks.filter(t => 
+          sessionStateData.completedTaskIds.includes(t.id)
+        ));
+        setCurrentPage('session');
+        
+        // Delete saved state after resuming
+        await apiCall('/sessions/saved-state', 'DELETE');
+        setSavedSessionState(null);
+      }
+    } catch (error) {
+      console.error('Resume session error:', error);
+    }
+  };
+
+  // End session
+  const handleEndSession = () => {
+    setEndingSession(true);
+    const summary = {
+      day: currentSession.day,
+      period: currentSession.period,
+      completions: sessionCompletions,
+      timeUsed: currentSession.duration - sessionTime
+    };
+    setSessionSummary(summary);
+    setShowSessionSummary(true);
+    setIsTimerRunning(false);
+    setCurrentSession(null);
+    setHasUnsavedChanges(false);
+    loadUserData(token);
+    setEndingSession(false);
+  };
+
+  // Close session summary
+  const closeSessionSummary = () => {
+    setShowSessionSummary(false);
+    setSessionSummary(null);
+    setCurrentPage('hub');
+  };
+
+  // Update task time estimate
+  const handleUpdateTaskTime = async (taskId, newTime) => {
+    try {
+      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { 
+        userEstimate: parseInt(newTime) 
+      });
+      setTasks(prev => prev.map(t => 
+        t.id === taskId ? { ...t, userEstimate: parseInt(newTime) } : t
+      ));
       setEditingTimeTaskId(null);
       setTempTimeValue('');
-      setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
     } catch (error) {
-      console.error('Error updating time estimate:', error);
-      alert('Error updating time estimate: ' + error.message);
+      alert('Failed to update time estimate');
+      console.error('Update time error:', error);
     }
   };
 
-  const handleCancelEditTime = () => {
-    setEditingTimeTaskId(null);
-    setTempTimeValue('');
+  // Split task
+  const handleSplitTask = async (taskId) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return;
+    setShowSplitTask(task);
+    setSplitSegments([{ name: 'Part 1' }]);
   };
 
-  const handleSplitTask = async (taskId) => {
+  const addSegment = () => {
+    setSplitSegments(prev => [...prev, { name: `Part ${prev.length + 1}` }]);
+  };
+
+  const removeSegment = (index) => {
+    if (splitSegments.length > 1) {
+      setSplitSegments(prev => prev.filter((_, i) => i !== index));
+    }
+  };
+
+  const updateSegmentName = (index, name) => {
+    setSplitSegments(prev => prev.map((seg, i) => i === index ? { name } : seg));
+  };
+
+  const confirmSplitTask = async () => {
+    const task = showSplitTask;
+    const taskIndex = tasks.findIndex(t => t.id === task.id);
+    if (taskIndex === -1) return;
+
     try {
-      const task = tasks.find(t => t.id === taskId);
-      if (!task) return;
-      
-      const taskIndex = tasks.findIndex(t => t.id === taskId);
-      const totalTime = task.userEstimate || task.estimatedTime;
-      const timePerSegment = Math.round(totalTime / splitSegments.length);
+      const timePerSegment = Math.ceil((task.userEstimate || task.estimatedTime) / splitSegments.length);
       
       // Generate unique split_task_ids for each segment
       const baseId = Date.now();
@@ -969,9 +691,8 @@ const PlanAssist = () => {
         estimatedTime: timePerSegment,
         userEstimate: timePerSegment,
         completed: false,
-        segment: seg.name
-        
-        className: task.className,
+        segment: seg.name,
+        className: task.className, // FIXED: Added missing comma
         url: task.url,
         accumulatedTime: 0
       }));
@@ -980,12 +701,13 @@ const PlanAssist = () => {
       const updatedTasks = [...tasks];
       updatedTasks.splice(taskIndex, 1, ...newTasks);
       
-      // Save to backend to get real database IDs with parent_task_id and split_task_id
+      // Save to backend to get real database IDs
       try {
         const saveResult = await apiCall('/tasks', 'POST', { tasks: updatedTasks.map(taskToBackendFormat) });
         
-        // Update tasks with the real database IDs
-        const tasksWithRealIds = saveResult.tasks.map(t => ({
+        // Reload tasks from backend to get correct IDs
+        const tasksData = await apiCall('/tasks');
+        const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
           id: t.id,
           title: t.title,
           segment: t.segment,
@@ -995,1585 +717,955 @@ const PlanAssist = () => {
           dueDate: new Date(t.deadline),
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
-          priorityOrder: t.priority_order || 0,
-          completed: t.completed || false,
+          priorityOrder: t.priority_order,
+          completed: t.completed,
           accumulatedTime: t.accumulated_time || 0
         }));
         
-        setTasks(tasksWithRealIds);
-        setShowSplitTask(null);
-        setSplitSegments([{ name: 'Part 1' }]);
-        generateSessions(tasksWithRealIds, accountSetup.schedule);
-        alert(`Split "${task.title}" into ${splitSegments.length} segments successfully!`);
-      } catch (saveError) {
-        console.error('Failed to save split tasks:', saveError);
-        alert('Failed to save split tasks: ' + saveError.message);
-        return;
+        setTasks(loadedTasks);
+        generateSessions(loadedTasks, accountSetup.schedule);
+      } catch (error) {
+        console.error('Failed to save split tasks:', error);
+        // Fallback: use local state
+        setTasks(updatedTasks);
+        generateSessions(updatedTasks, accountSetup.schedule);
       }
-    } catch (error) {
-      console.error('Failed to split task:', error);
-      alert('Failed to split task: ' + error.message);
-    }
-  };
-
-  // Priority lock and drag-and-drop functions
-  const togglePriorityLock = async () => {
-    try {
-      const newLockedState = !priorityLocked;
-      await apiCall('/user/priority-lock', 'PATCH', { locked: newLockedState });
-      setPriorityLocked(newLockedState);
       
-      if (!newLockedState) {
-        // If unlocking, merge new tasks into main list and regenerate
-        setTasks([...tasks, ...newTasks]);
-        setNewTasks([]);
-        setHasUnsavedChanges(true);
-      }
+      setShowSplitTask(null);
+      setSplitSegments([{ name: 'Part 1' }]);
     } catch (error) {
-      console.error('Failed to toggle priority lock:', error);
-      alert('Failed to toggle priority lock');
+      alert('Failed to split task');
+      console.error('Split task error:', error);
     }
   };
 
-  const handleDragStart = (e, task) => {
-    setDraggedTask(task);
-    e.dataTransfer.effectAllowed = 'move';
+  // Priority management
+  const handleTogglePriorityLock = async () => {
+    try {
+      const newLocked = !priorityLocked;
+      await apiCall('/user/priority-lock', 'POST', { locked: newLocked });
+      setPriorityLocked(newLocked);
+    } catch (error) {
+      alert('Failed to update priority lock');
+      console.error('Priority lock error:', error);
+    }
+  };
+
+  const handleDragStart = (task) => {
+    if (!priorityLocked) {
+      setDraggedTask(task);
+    }
   };
 
   const handleDragOver = (e, task) => {
     e.preventDefault();
-    if (draggedTask && draggedTask.id !== task.id) {
+    if (!priorityLocked && draggedTask && draggedTask.id !== task.id) {
       setDragOverTask(task);
     }
   };
 
-  const handleDragEnd = () => {
-    setDraggedTask(null);
-    setDragOverTask(null);
-  };
-
-  const handleDrop = async (e, dropTask) => {
-    e.preventDefault();
-    if (!draggedTask || draggedTask.id === dropTask.id) return;
-
-    const reorderedTasks = [...tasks];
-    const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
-    const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
-
-    if (draggedIndex >= 0) {
-      // Dragging within main list
-      const [removed] = reorderedTasks.splice(draggedIndex, 1);
-      reorderedTasks.splice(dropIndex, 0, removed);
-      setTasks(reorderedTasks);
-    } else {
-      // Dragging from sidebar to main list - insert at drop position
-      const updatedNewTasks = newTasks.filter(t => t.id !== draggedTask.id);
-      reorderedTasks.splice(dropIndex, 0, draggedTask);
+  const handleDrop = async (task) => {
+    if (!priorityLocked && draggedTask && draggedTask.id !== task.id) {
+      const draggedIndex = tasks.findIndex(t => t.id === draggedTask.id);
+      const droppedIndex = tasks.findIndex(t => t.id === task.id);
       
-      setTasks(reorderedTasks);
-      setNewTasks(updatedNewTasks);
+      const newTasks = [...tasks];
+      newTasks.splice(draggedIndex, 1);
+      newTasks.splice(droppedIndex, 0, draggedTask);
       
-      // Clear new flag for this task
-      try {
-        await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [draggedTask.id] });
-      } catch (error) {
-        console.error('Failed to clear new flag:', error);
-      }
-      
-      // Close sidebar if no more new tasks
-      if (updatedNewTasks.length === 0) {
-        setNewTasksSidebarOpen(false);
-      }
-    }
-    
-    // Send new order to backend
-    try {
-      const taskOrder = reorderedTasks.map(t => t.id);
-      await apiCall('/tasks/reorder', 'POST', { taskOrder });
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to save task order:', error);
-      // Don't show alert - reordering still works locally and will sync on next save
-    }
-
-    setDraggedTask(null);
-    setDragOverTask(null);
-  };
-
-  const moveNewTaskToMain = async (taskId) => {
-    const taskToMove = newTasks.find(t => t.id === taskId);
-    if (!taskToMove) return;
-
-    try {
-      // Clear the is_new flag
-      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [taskId] });
-      
-      // Move to main list
-      setNewTasks(newTasks.filter(t => t.id !== taskId));
-      setTasks([...tasks, taskToMove]);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to move task:', error);
-      alert('Failed to move task');
-    }
-  };
-
-  const clearAllNewTasks = async () => {
-    if (newTasks.length === 0) return;
-    
-    try {
-      const taskIds = newTasks.map(t => t.id);
-      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
-      
-      // Move all to main list
-      setTasks([...tasks, ...newTasks]);
-      setNewTasks([]);
-      setNewTasksSidebarOpen(false);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to clear new tasks:', error);
-      alert('Failed to clear new tasks');
-    }
-  };
-
-  const closeSidebarWithoutSaving = () => {
-    if (newTasks.length > 0) {
-      const confirmClose = window.confirm(
-        `You have ${newTasks.length} new task(s) that haven't been added to your list. If you close this sidebar without adding them, they will be lost. Are you sure?`
-      );
-      if (!confirmClose) return;
-    }
-    setNewTasksSidebarOpen(false);
-    setNewTasks([]);
-    setHasUnsavedChanges(false);
-  };
-
-  const handleSaveAndAdjustPlan = async () => {
-    try {
-      // Save all tasks with their current priority order to backend
-      await apiCall('/tasks', 'POST', { tasks: tasks.map(taskToBackendFormat) });
-      generateSessions(tasks, accountSetup.schedule);
-      setHasUnsavedChanges(false);
-      setNewTasksSidebarOpen(false);
-      setCurrentPage('hub');
-    } catch (error) {
-      console.error('Failed to save tasks:', error);
-      alert('Failed to save changes: ' + error.message);
-    }
-  };
-
-  const startSession = (session) => {
-    setCurrentSession(session);
-    setCurrentTaskIndex(0);
-    setSessionTime(3600);
-    setTaskStartTime(3600);
-    setIsTimerRunning(true);
-    setSessionCompletions([]);
-    setPartialTaskTimes({}); // Clear partial times for new session
-    setCurrentPage('session-active');
-  };
-
-  const resumeSession = async () => {
-    try {
-      if (!savedSessionState) {
-        alert('No saved session found');
-        return;
-      }
-      const session = sessions.find(s => s.id === savedSessionState.sessionId);
-      if (!session) {
-        alert('Session no longer exists');
-        await apiCall('/sessions/saved-state', 'DELETE');
-        setSavedSessionState(null);
-        return;
-      }
-      
-      console.log('Resuming session:', session.id);
-      console.log('Saved state completed IDs:', savedSessionState.completedTaskIds);
-      console.log('Original session tasks:', session.tasks.map(t => ({id: t.id, title: t.title})));
-      
-      // Filter out tasks that were already completed in the saved session
-      const completedIds = savedSessionState.completedTaskIds || [];
-      let remainingTasks = session.tasks.filter(t => !completedIds.includes(t.id));
-      
-      // IMPORTANT: Also filter out tasks that no longer exist in the current tasks list
-      // This prevents working on deleted/completed tasks from old sessions
-      const validTaskIds = new Set(tasks.map(t => t.id));
-      const beforeValidation = remainingTasks.length;
-      remainingTasks = remainingTasks.filter(t => {
-        const exists = validTaskIds.has(t.id);
-        if (!exists) {
-          console.warn(`⚠ Task ${t.id} ("${t.title}") no longer exists in database, removing from session`);
-        }
-        return exists;
-      });
-      
-      if (remainingTasks.length < beforeValidation) {
-        console.log(`ℹ Filtered out ${beforeValidation - remainingTasks.length} non-existent tasks`);
-      }
-      
-      console.log('Remaining tasks after filter:', remainingTasks.map(t => ({id: t.id, title: t.title})));
-      
-      if (remainingTasks.length === 0) {
-        alert('All tasks in this session have been completed!');
-        await apiCall('/sessions/saved-state', 'DELETE');
-        setSavedSessionState(null);
-        return;
-      }
-      
-      // Reconstruct session with only remaining tasks
-      const resumedSession = {
-        ...session,
-        tasks: remainingTasks
-      };
-      
-      setCurrentSession(resumedSession);
-      setSessionTime(savedSessionState.remainingTime);
-      
-      // Always start at index 0 since we've filtered the tasks
-      setCurrentTaskIndex(0);
-      // Set task start time to current remaining time
-      setTaskStartTime(savedSessionState.remainingTime);
-      
-      // Clear completions since they're already saved
-      setSessionCompletions([]);
-      
-      // Restore partial task times from backend
-      if (savedSessionState.partialTaskTimes) {
-        console.log('✓ Restoring partial times from backend:', savedSessionState.partialTaskTimes);
-        console.log('  Tasks with partial time:');
-        Object.entries(savedSessionState.partialTaskTimes).forEach(([taskId, time]) => {
-          const task = remainingTasks.find(t => t.id === parseInt(taskId));
-          console.log(`  - Task ${taskId}: ${time} min${task ? ` (${task.title})` : ' (not in session)'}`);
-        });
-        setPartialTaskTimes(savedSessionState.partialTaskTimes);
-      } else {
-        console.log('ℹ No partial times to restore');
-        setPartialTaskTimes({});
-      }
-      
-      setIsTimerRunning(true);
-      setCurrentPage('session-active');
-      
-      console.log('Session resumed successfully');
-    } catch (error) {
-      console.error('Failed to resume session:', error);
-      alert('Failed to resume session: ' + error.message);
-    }
-  };
-
-  const pauseSession = async () => {
-    try {
-      setSavingSession(true);
-      setIsTimerRunning(false);
-      
-      // Calculate partial time spent on current task
-      const currentTask = currentSession.tasks[currentTaskIndex];
-      const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
-      
-      // Get IDs of all completed tasks in this session
-      const completedTaskIds = sessionCompletions.map(c => c.task.id);
-      
-      // Validate that the current task still exists in the tasks list
-      const taskStillExists = tasks.find(t => t.id === currentTask.id && !t.completed);
-      if (!taskStillExists) {
-        console.warn('⚠ Current task (ID:', currentTask.id, ') no longer exists or is completed');
-        console.warn('  This task may have been deleted or marked complete in another session');
-      }
-      
-      // Only save if there's actually time spent on current task AND task still exists
-      if (currentTaskTimeSpent > 0 && taskStillExists) {
-        console.log('✓ Task validated, saving partial completion for:', currentTask.title);
-        
-        const parentId = currentTask.parent_task_id || currentTask.id; // Get parent ID
-        
-        // Save session state with partial time for current task
-        await apiCall('/sessions/save-state', 'POST', {
-          sessionId: currentSession.id,
-          day: currentSession.day,
-          period: currentSession.period,
-          remainingTime: sessionTime,
-          currentTaskIndex: currentTaskIndex,
-          taskStartTime: taskStartTime,
-          completedTaskIds: completedTaskIds,
-          partialTaskId: currentTask.id,
-          partialTaskTime: currentTaskTimeSpent,
-          partialTaskTitle: currentTask.title  // Send task title to backend
-        });
-        
-        // Update local partial times for display using parent ID
-        const updatedPartialTimes = { ...partialTaskTimes };
-        updatedPartialTimes[parentId] = (updatedPartialTimes[parentId] || 0) + currentTaskTimeSpent;
-        setPartialTaskTimes(updatedPartialTimes);
-        
-        // Show partial task in summary
-        const partiallyCompletedTask = {
-          ...currentTask,
-          partialTime: updatedPartialTimes[parentId]
-        };
-        
-        const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
-        
-        setSessionSummary({
-          day: currentSession.day,
-          period: currentSession.period,
-          completions: sessionCompletions,
-          partialTask: partiallyCompletedTask,
-          missedTasks: missedTasks,
-          timeExpired: false,
-          totalTime: Math.round((3600 - sessionTime) / 60),
-          remainingTime: Math.round(sessionTime / 60),
-          isSaveAndExit: true
-        });
-      } else {
-        // Either no time spent OR task no longer exists - save session without partial
-        const reason = !taskStillExists ? 'task no longer exists' : 'no time spent';
-        console.log(`ℹ Saving session without partial completion (${reason})`);
-        
-        await apiCall('/sessions/save-state', 'POST', {
-          sessionId: currentSession.id,
-          day: currentSession.day,
-          period: currentSession.period,
-          remainingTime: sessionTime,
-          currentTaskIndex: currentTaskIndex,
-          taskStartTime: taskStartTime,
-          completedTaskIds: completedTaskIds,
-          partialTaskId: null,
-          partialTaskTime: 0
-        });
-        
-        const missedTasks = currentSession.tasks.slice(currentTaskIndex);
-        
-        setSessionSummary({
-          day: currentSession.day,
-          period: currentSession.period,
-          completions: sessionCompletions,
-          partialTask: null,
-          missedTasks: missedTasks,
-          timeExpired: false,
-          totalTime: Math.round((3600 - sessionTime) / 60),
-          remainingTime: Math.round(sessionTime / 60),
-          isSaveAndExit: true
-        });
-      }
-      
-      setShowSessionSummary(true);
-      setSavingSession(false);
-    } catch (error) {
-      console.error('Failed to save session state:', error);
-      alert('Failed to save and exit session: ' + error.message);
-      setSavingSession(false);
-    }
-  };
-
-  useEffect(() => {
-    let interval;
-    if (isTimerRunning && sessionTime > 0) {
-      interval = setInterval(() => setSessionTime(prev => prev - 1), 1000);
-    } else if (sessionTime === 0 && isTimerRunning) {
-      endSession(true);
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, sessionTime]);
-
-  const completeTask = async () => {
-    if (!currentSession) return;
-    
-    try {
-      setMarkingComplete(true);
-      
-      const task = currentSession.tasks[currentTaskIndex];
-      const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-      
-      // Get parent ID for grouping
-      const parentId = task.parent_task_id || task.id;
-      
-      console.log('=== COMPLETING TASK ===');
-      console.log('Task:', task.title, 'ID:', task.id);
-      console.log('Parent ID:', parentId);
-      console.log('Current session time:', currentSessionTime, 'min');
-      console.log('Previous partial time:', partialTaskTimes[parentId] || 0, 'min');
-      
-      // Add any previously accumulated partial time
-      const previousPartialTime = partialTaskTimes[parentId] || 0;
-      const totalTimeSpent = currentSessionTime + previousPartialTime;
-      
-      console.log('Total time for completion:', totalTimeSpent, 'min');
-      
-      // Immediately save completion to backend
-      await apiCall('/sessions/complete-task', 'POST', {
-        taskId: task.id,
-        taskTitle: task.title,
-        taskType: task.type,
-        estimatedTime: task.userEstimate || task.estimatedTime,
-        actualTime: totalTimeSpent
-      });
-      
-      console.log('✓ Task completion saved to backend');
-      
-      const completion = { 
-        task, 
-        timeSpent: totalTimeSpent, 
-        timestamp: new Date() 
-      };
-      
-      setSessionCompletions(prev => [...prev, completion]);
-      setCompletionHistory(prev => [...prev, {
-        taskTitle: task.title,
-        estimatedTime: task.userEstimate || task.estimatedTime,
-        actualTime: totalTimeSpent,
-        date: new Date()
-      }]);
-      
-      // Mark task as complete in local state (already done by backend)
-      setTasks(prev => prev.map(t => t.id === task.id ? { ...t, completed: true } : t));
-      
-      // Clear partial time for this PARENT task (all segments share same parent time)
-      const updatedPartialTimes = { ...partialTaskTimes };
-      delete updatedPartialTimes[parentId];
-      setPartialTaskTimes(updatedPartialTimes);
-      
-      setMarkingComplete(false);
-      
-      console.log('Task index:', currentTaskIndex, '/', currentSession.tasks.length - 1);
-      
-      // Move to next task or end session
-      if (currentTaskIndex < currentSession.tasks.length - 1) {
-        console.log('Moving to next task');
-        setCurrentTaskIndex(prev => prev + 1);
-        setTaskStartTime(sessionTime);
-      } else {
-        console.log('Last task completed, ending session');
-        endSession(false);
-      }
-      
-      console.log('=======================\n');
-    } catch (error) {
-      console.error('Failed to mark task complete:', error);
-      alert('Failed to mark task complete: ' + error.message);
-      setMarkingComplete(false);
-    }
-  };
-
-  const endSession = async (timeExpired) => {
-    try {
-      setEndingSession(true);
-      setIsTimerRunning(false);
-      
-      // Check if current task is actually incomplete
-      const currentTask = currentSession.tasks[currentTaskIndex];
-      const isCurrentTaskCompleted = sessionCompletions.find(c => c.task.id === currentTask.id);
-      const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
-      const parentId = currentTask.parent_task_id || currentTask.id; // Get parent ID
-      
-      // Save partial time ONLY if current task is incomplete and has time spent
-      if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
-        try {
-          await apiCall('/sessions/save-state', 'POST', {
-            sessionId: currentSession.id,
-            day: currentSession.day,
-            period: currentSession.period,
-            remainingTime: 0,
-            currentTaskIndex: currentTaskIndex,
-            taskStartTime: 0,
-            completedTaskIds: sessionCompletions.map(c => c.task.id),
-            partialTaskId: currentTask.id,
-            partialTaskTime: currentTaskTimeSpent
-          });
-        } catch (error) {
-          console.error('Failed to save partial completion:', error);
-        }
-      }
-      
-      // Update local partial times for display using parent ID
-      const updatedPartialTimes = { ...partialTaskTimes };
-      if (currentTaskTimeSpent > 0 && !isCurrentTaskCompleted) {
-        updatedPartialTimes[parentId] = (updatedPartialTimes[parentId] || 0) + currentTaskTimeSpent;
-      }
-      setPartialTaskTimes(updatedPartialTimes);
-      
-      // Prepare summary data - only show partial if task is actually incomplete
-      const partiallyCompletedTask = (!isCurrentTaskCompleted && currentTaskTimeSpent > 0)
-        ? { ...currentTask, partialTime: updatedPartialTimes[parentId] || currentTaskTimeSpent }
-        : null;
-      
-      // Calculate missed tasks - start from next task if current is partial, otherwise from current
-      const missedTaskStartIndex = partiallyCompletedTask ? currentTaskIndex + 1 : currentTaskIndex;
-      const missedTasks = currentSession.tasks.slice(missedTaskStartIndex);
-      
-      setSessionSummary({
-        day: currentSession.day,
-        period: currentSession.period,
-        completions: sessionCompletions,
-        partialTask: partiallyCompletedTask,
-        missedTasks: missedTasks,
-        timeExpired,
-        totalTime: Math.round((3600 - sessionTime) / 60),
-        remainingTime: 0,
-        isSaveAndExit: false
-      });
-      
-      // Completions were already saved individually when marked complete
-      // No need to save again here
-      
-      // Clear saved session state since we're ending
-      await apiCall('/sessions/saved-state', 'DELETE');
-      
-      // Reload tasks to get updated completion status
-      const tasksData = await apiCall('/tasks', 'GET');
-      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        priorityOrder: t.priority_order,
-        completed: t.completed,
-        segment: t.segment,
-        className: t.class,
-        url: t.url,
-        accumulatedTime: t.accumulated_time || 0
+      // Update priority orders
+      const updatedTasks = newTasks.map((t, idx) => ({
+        ...t,
+        priorityOrder: idx + 1
       }));
       
-      // Re-estimate incomplete tasks
-      const reestimatedTasks = [...loadedTasks];
-      for (let i = 0; i < reestimatedTasks.length; i++) {
-        if (!reestimatedTasks[i].completed) {
-          reestimatedTasks[i].estimatedTime = await estimateTaskTime(reestimatedTasks[i].title);
-        }
+      setTasks(updatedTasks);
+      
+      // Save to backend
+      try {
+        await apiCall('/tasks/priority', 'PATCH', {
+          priorities: updatedTasks.map(t => ({ id: t.id, priorityOrder: t.priorityOrder }))
+        });
+      } catch (error) {
+        console.error('Failed to update priorities:', error);
       }
       
-      setTasks(reestimatedTasks);
-      generateSessions(reestimatedTasks, accountSetup.schedule);
-      
-      setSessions(prev => prev.filter(s => s.id !== currentSession.id));
-      setCompletedSessionIds(prev => [...prev, currentSession.id]);
-      setShowSessionSummary(true);
-      setEndingSession(false);
-    } catch (error) {
-      console.error('Failed to save session:', error);
-      alert('Failed to end session properly: ' + error.message);
-      setShowSessionSummary(true);
-      setEndingSession(false);
+      setDraggedTask(null);
+      setDragOverTask(null);
     }
   };
 
+  // Feedback
+  const handleSendFeedback = async () => {
+    if (!feedbackText.trim()) return;
+    setFeedbackSending(true);
+    try {
+      await apiCall('/feedback', 'POST', {
+        feedback: feedbackText,
+        userEmail: user.email,
+        userName: user.name
+      });
+      alert('Thank you for your feedback!');
+      setShowFeedbackForm(false);
+      setFeedbackText('');
+    } catch (error) {
+      alert('Failed to send feedback. Please try again.');
+      console.error('Feedback error:', error);
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
+
+  // Format time
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  useEffect(() => {
-    if (accountSetup.presentPeriods) {
-      const [start, end] = accountSetup.presentPeriods.split('-').map(Number);
-      const newSchedule = {};
-      const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-      days.forEach(day => {
-        newSchedule[day] = {};
-        for (let period = start; period <= end; period++) {
-          newSchedule[day][period] = accountSetup.schedule[day]?.[period] || 'Study';
-        }
-      });
-      if (JSON.stringify(newSchedule) !== JSON.stringify(accountSetup.schedule)) {
-        setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
-      }
+  const formatDuration = (minutes) => {
+    const hrs = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    if (hrs > 0) {
+      return `${hrs}h ${mins}m`;
     }
-  }, [accountSetup.presentPeriods]);
+    return `${mins}m`;
+  };
 
+  // Sort tasks
+  const sortedTasks = React.useMemo(() => {
+    const sorted = [...tasks].sort((a, b) => {
+      // First by priority order if set
+      if (a.priorityOrder !== null && b.priorityOrder !== null) {
+        return a.priorityOrder - b.priorityOrder;
+      }
+      if (a.priorityOrder !== null) return -1;
+      if (b.priorityOrder !== null) return 1;
+      
+      // Then by due date
+      return new Date(a.dueDate) - new Date(b.dueDate);
+    });
+    return sorted;
+  }, [tasks]);
+
+  // Get current task being worked on
+  const getCurrentTask = () => {
+    if (!currentSession || !tasks.length) return null;
+    return sortedTasks[currentTaskIndex];
+  };
+
+  // Render auth screen
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
+      <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
           <div className="text-center mb-8">
-            <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-2xl flex items-center justify-center">
-              <BookOpen className="w-12 h-12 text-white" />
+            <div className="w-16 h-16 bg-gradient-to-r from-yellow-400 to-purple-600 rounded-full flex items-center justify-center mx-auto mb-4">
+              <BookOpen className="w-8 h-8 text-white" />
             </div>
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">PlanAssist</h1>
-            <p className="text-lg font-semibold text-purple-600">OneSchool Global Study Planner</p>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-yellow-500 to-purple-600 bg-clip-text text-transparent">
+              PlanAssist
+            </h1>
+            <p className="text-gray-600 mt-2">OneSchool Global Study Planner</p>
           </div>
-          <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
-            <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 rounded-md font-medium transition-colors ${authMode === 'login' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>Login</button>
-            <button onClick={() => setAuthMode('register')} className={`flex-1 py-2 rounded-md font-medium transition-colors ${authMode === 'register' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>Sign Up</button>
-          </div>
-          {authError && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{authError}</div>}
-          <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">OneSchool Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="first.last##@na.oneschoolglobal.com" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" required />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" required />
-            </div>
-            <button type="submit" disabled={authLoading} className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 transition-all disabled:opacity-50">
-              {authLoading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Create Account')}
-            </button>
-          </form>
+
+          {authMode === 'login' ? (
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="first.last##@na.oneschoolglobal.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              </div>
+              {authError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+                  {authError}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {authLoading ? 'Logging in...' : 'Log In'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('register');
+                  setAuthError('');
+                }}
+                className="w-full text-purple-600 hover:text-purple-700 font-medium"
+              >
+                Don't have an account? Sign up
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={handleRegister} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="first.last##@na.oneschoolglobal.com"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Password</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  required
+                  minLength={6}
+                />
+                <p className="text-xs text-gray-500 mt-1">At least 6 characters</p>
+              </div>
+              {authError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm">
+                  {authError}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={authLoading}
+                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {authLoading ? 'Creating Account...' : 'Sign Up'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('login');
+                  setAuthError('');
+                }}
+                className="w-full text-purple-600 hover:text-purple-700 font-medium"
+              >
+                Already have an account? Log in
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
   }
 
+  // Main app render
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
-      <nav className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-lg flex items-center justify-center">
-              <BookOpen className="w-6 h-6 text-white" />
+    <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50">
+      {/* Navigation */}
+      <nav className="bg-white shadow-md sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gradient-to-r from-yellow-400 to-purple-600 rounded-full flex items-center justify-center">
+                <BookOpen className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-xl font-bold bg-gradient-to-r from-yellow-500 to-purple-600 bg-clip-text text-transparent">
+                  PlanAssist
+                </h1>
+                <p className="text-xs text-gray-600">Welcome, {user?.name}</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">PlanAssist</h1>
-              <p className="text-sm text-gray-600">{accountSetup.name}</p>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setCurrentPage('hub')}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === 'hub'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Home className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage('tasks')}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === 'tasks'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <List className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage('learning')}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === 'learning'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Brain className="w-5 h-5" />
+              </button>
+              <button
+                onClick={() => setCurrentPage('setup')}
+                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                  currentPage === 'setup'
+                    ? 'bg-purple-100 text-purple-700'
+                    : 'text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2 rounded-lg font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('hub')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Home className="w-5 h-5" />
-              <span className="font-medium">Hub</span>
-            </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('tasks')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <List className="w-5 h-5" />
-              <span className="font-medium">Tasks</span>
-              {hasUnsavedChanges && currentPage !== 'session-active' && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
-            </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('sessions')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Play className="w-5 h-5" />
-              <span className="font-medium">Sessions</span>
-            </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('settings')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Settings className="w-5 h-5" />
-            </button>
-            <button onClick={handleLogout} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
-              <LogOut className="w-5 h-5" />
-            </button>
           </div>
         </div>
       </nav>
-      <div className="py-6">
+
+      {/* New Tasks Sidebar */}
+      {newTasks.length > 0 && newTasksSidebarOpen && (
+        <div className="fixed right-0 top-16 h-full w-96 bg-white shadow-2xl z-50 p-6 overflow-y-auto">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-gray-900">New Tasks ({newTasks.length})</h3>
+            <button
+              onClick={() => setNewTasksSidebarOpen(false)}
+              className="p-2 hover:bg-gray-100 rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 mb-4">
+            These tasks were just imported from Canvas. Review and accept them to add to your task list.
+          </p>
+          <div className="space-y-3 mb-4">
+            {newTasks.map(task => (
+              <div key={task.id} className="border border-gray-200 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <div
+                    className="w-3 h-3 rounded-full mt-1 flex-shrink-0"
+                    style={{ backgroundColor: getClassColor(task.className) }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-medium text-gray-900 text-sm line-clamp-2">{cleanTaskTitle(task.title)}</h4>
+                    <p className="text-xs text-gray-500 mt-1">{task.className}</p>
+                    <p className="text-xs text-gray-500">
+                      Due: {task.dueDate.toLocaleDateString()}
+                    </p>
+                    <p className="text-xs text-purple-600 font-medium mt-1">
+                      Est: {formatDuration(task.estimatedTime)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={dismissNewTasks}
+              className="flex-1 bg-gray-200 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-300 font-medium"
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={acceptNewTasks}
+              className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-4 py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700"
+            >
+              Accept All
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main content */}
+      <div className="max-w-7xl mx-auto p-6">
+        {/* Hub Page */}
         {currentPage === 'hub' && (
-          <div className="max-w-7xl mx-auto p-6 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 shadow-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <BarChart3 className="w-8 h-8" />
-                  <span className="text-2xl font-bold">{completionHistory.length}</span>
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Study Hub</h2>
+              
+              {savedSessionState && (
+                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
+                  <div className="flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-yellow-600 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1">
+                      <h3 className="font-semibold text-yellow-900">Resume Your Session</h3>
+                      <p className="text-sm text-yellow-700 mt-1">
+                        You have a saved session from {savedSessionState.day}, Period {savedSessionState.period}
+                      </p>
+                      <button
+                        onClick={resumeSavedSession}
+                        className="mt-3 bg-yellow-500 text-white px-4 py-2 rounded-lg hover:bg-yellow-600 font-medium"
+                      >
+                        Resume Session
+                      </button>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-blue-100 font-medium">Tasks Completed</p>
-              </div>
-              <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-6 shadow-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <Clock className="w-8 h-8" />
-                  <span className="text-2xl font-bold">{tasks.filter(t => !t.completed).length}</span>
-                </div>
-                <p className="text-purple-100 font-medium">Pending Tasks</p>
-              </div>
-              <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-6 shadow-lg">
-                <div className="flex items-center justify-between mb-2">
-                  <TrendingUp className="w-8 h-8" />
-                  <span className="text-2xl font-bold">{sessions.length}</span>
-                </div>
-                <p className="text-green-100 font-medium">Upcoming Sessions</p>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {sessions.length > 0 ? (
+                  sessions.map((session, idx) => (
+                    <button
+                      key={idx}
+                      onClick={() => startSession(idx)}
+                      className="bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200 rounded-xl p-6 hover:shadow-lg transition-all text-left"
+                    >
+                      <div className="flex items-center justify-between mb-3">
+                        <Calendar className="w-8 h-8 text-purple-600" />
+                        <span className="px-3 py-1 bg-purple-600 text-white rounded-full text-sm font-semibold">
+                          P{session.period}
+                        </span>
+                      </div>
+                      <h3 className="font-bold text-gray-900 text-lg">{session.day}</h3>
+                      <div className="mt-2 flex items-center gap-2 text-sm text-gray-600">
+                        <Clock className="w-4 h-4" />
+                        <span>{formatDuration(session.duration / 60)}</span>
+                      </div>
+                    </button>
+                  ))
+                ) : (
+                  <div className="col-span-3 text-center py-12">
+                    <Calendar className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                    <p className="text-gray-600">No study sessions available</p>
+                    <p className="text-sm text-gray-500 mt-2">Configure your schedule in Settings</p>
+                  </div>
+                )}
               </div>
             </div>
-            {tasks.filter(t => !t.completed).length > 0 && (
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Next Up</h2>
-                {(() => {
-                  const nextTask = tasks.filter(t => !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
-                  return (
-                    <div className="bg-gradient-to-r from-yellow-50 to-purple-50 border-2 border-purple-200 rounded-lg p-6">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="text-lg font-bold text-gray-900 mb-2">{nextTask.title}</h3>
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {nextTask.userEstimate || nextTask.estimatedTime} min
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" />
-                              Due {nextTask.dueDate.toLocaleDateString()}
-                            </span>
-                          </div>
-                        </div>
-                        <button onClick={() => setCurrentPage('tasks')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium">
-                          View All
-                        </button>
+
+            {tasks.length > 0 && (
+              <div className="bg-white rounded-xl shadow-lg p-6">
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Upcoming Tasks</h2>
+                <div className="space-y-4">
+                  {sortedTasks.slice(0, 5).map(task => (
+                    <div key={task.id} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                      <div
+                        className="w-4 h-4 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: getClassColor(task.className) }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <h4 className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</h4>
+                        {task.segment && (
+                          <p className="text-sm text-purple-600">• {task.segment}</p>
+                        )}
+                        <p className="text-sm text-gray-500">{task.className}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-medium text-gray-900">
+                          {task.dueDate.toLocaleDateString()}
+                        </p>
+                        <p className="text-xs text-purple-600">
+                          {formatDuration(task.userEstimate || task.estimatedTime)}
+                        </p>
                       </div>
                     </div>
-                  );
-                })()}
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <button onClick={() => setCurrentPage('sessions')} className="bg-white rounded-xl shadow-md p-8 hover:shadow-lg transition-shadow text-left">
-                <Play className="w-12 h-12 text-green-600 mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Start Study Session</h3>
-                <p className="text-gray-600">Begin your scheduled study period</p>
-              </button>
-              <button onClick={() => setCurrentPage('tasks')} className="bg-white rounded-xl shadow-md p-8 hover:shadow-lg transition-shadow text-left">
-                <List className="w-12 h-12 text-blue-600 mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Manage Tasks</h3>
-                <p className="text-gray-600">View and adjust your task list</p>
-              </button>
-            </div>
-            {tasks.length === 0 && (
-              <div className="bg-white rounded-xl shadow-md p-12 text-center">
-                <Brain className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Tasks Yet</h3>
-                <p className="text-gray-600 mb-6">Connect your Canvas calendar to get started</p>
-                <button onClick={() => setCurrentPage('settings')} className="bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                  Set Up Canvas
-                </button>
+                  ))}
+                </div>
               </div>
             )}
           </div>
         )}
+
+        {/* Tasks Page */}
         {currentPage === 'tasks' && (
-          <div className="flex h-[calc(100vh-80px)] overflow-hidden">
-            {/* Main Task List */}
-            <div className={`flex-1 transition-all duration-300 ${newTasksSidebarOpen ? 'mr-96' : 'mr-0'}`}>
-              <div className="h-full overflow-y-auto p-6">
-                <div className="max-w-4xl mx-auto">
-                  <div className="bg-white rounded-xl shadow-md p-6">
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
-                        <p className="text-gray-600">Manage your upcoming tasks</p>
-                      </div>
-                      <div className="flex gap-2 items-center">
-                        <button 
-                          onClick={togglePriorityLock}
-                          className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all ${priorityLocked ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                          title={priorityLocked ? 'Priority Lock ON - New tasks go to sidebar' : 'Priority Lock OFF - Tasks sorted by deadline'}
-                        >
-                          {priorityLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                          <span className="hidden sm:inline">{priorityLocked ? 'Locked' : 'Unlocked'}</span>
-                        </button>
-                        <input type="file" accept=".ics" onChange={handleICSUpload} className="hidden" id="ics-upload" />
-                        <label htmlFor="ics-upload" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer transition-all">
-                          <Upload className="w-4 h-4" />
-                          <span className="hidden sm:inline">Upload ICS</span>
-                        </label>
-                        <button 
-                          onClick={fetchCanvasTasks} 
-                          disabled={isLoadingTasks} 
-                          className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
-                        >
-                          {isLoadingTasks ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              <span className="hidden sm:inline">Sync</span>
-                            </>
-                          ) : (
-                            <>
-                              <Upload className="w-4 h-4" />
-                              <span className="hidden sm:inline">Sync</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Tip Banner */}
-                    {accountSetup.canvasUrl && (
-                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-                        <p className="text-blue-800">
-                          <strong>Tip:</strong> Sync from URL preserves completed tasks and split tasks. Only new tasks will be added.
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Unsaved Changes Warning */}
-                    {hasUnsavedChanges && (
-                      <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
-                        <p className="text-orange-800 font-medium">
-                          WARNING: You have unsaved changes. Click Save and Adjust Plan to apply.
-                        </p>
-                        <button 
-                          onClick={handleSaveAndAdjustPlan} 
-                          className="bg-orange-600 text-white px-6 py-2 rounded-lg hover:bg-orange-700 font-semibold flex items-center gap-2 shadow-md"
-                        >
-                          <Save className="w-5 h-5" />
-                          Save and Adjust Plan
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Task List */}
-                    <div className="space-y-4">
-                      {(() => {
-                        if (priorityLocked) {
-                          const incompleteTasks = tasks.filter(t => !t.completed);
-                          
-                          if (incompleteTasks.length === 0) {
-                            return (
-                              <div className="text-center py-12">
-                                <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                                <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                                <p className="text-gray-600">No pending tasks</p>
-                              </div>
-                            );
-                          }
-                          
-                          return incompleteTasks.map((task, index) => {
-                            const taskTime = task.userEstimate || task.estimatedTime;
-                            const className = extractClassName(task.title);
-                            const classColor = getClassColor(className);
-                            const dueDate = new Date(task.dueDate);
-                            const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                            
-                            return (
-                              <div 
-                                key={task.id}
-                                draggable={true}
-                                onDragStart={(e) => handleDragStart(e, task)}
-                                onDragOver={(e) => handleDragOver(e, task)}
-                                onDragEnd={handleDragEnd}
-                                onDrop={(e) => handleDrop(e, task)}
-                                className={`border-2 rounded-lg p-4 transition-all cursor-move bg-white hover:shadow-lg ${
-                                  dragOverTask?.id === task.id ? 'opacity-50 scale-98 ring-2 ring-purple-400' : ''
-                                }`}
-                                style={{ 
-                                  borderColor: classColor,
-                                  borderLeftWidth: '6px'
-                                }}
-                              >
-                                <div className="flex items-center gap-4">
-                                  <div className="flex flex-col items-center gap-1 flex-shrink-0">
-                                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm shadow-md">
-                                      {index + 1}
-                                    </div>
-                                    <GripVertical className="w-4 h-4 text-gray-400" />
-                                  </div>
-                                  
-                                  {/* Checkbox */}
-                                  <input
-                                    type="checkbox"
-                                    checked={task.completed || false}
-                                    onChange={() => toggleTaskCompletion(task.id)}
-                                    className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer flex-shrink-0"
-                                  />
-                                  
-                                  <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                      <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task.title)}</h3>
-                                      <span 
-                                        className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
-                                        style={{ backgroundColor: classColor }}
-                                      >
-                                        {className}
-                                      </span>
-                                    </div>
-                                    
-                                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                                      <span className="flex items-center gap-1">
-                                        <Calendar className="w-4 h-4" />
-                                        {dayName}
-                                      </span>
-                                      {taskTime > 0 && (
-                                        <span className="flex items-center gap-2">
-                                          <Brain className="w-4 h-4" />
-                                          {editingTimeTaskId === task.id ? (
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                type="text"
-                                                value={tempTimeValue}
-                                                onChange={handleTimeInputChange}
-                                                className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                                                autoFocus
-                                                onKeyDown={(e) => {
-                                                  if (e.key === 'Enter') {
-                                                    handleSaveTimeEstimate(task.id);
-                                                  } else if (e.key === 'Escape') {
-                                                    handleCancelEditTime();
-                                                  }
-                                                }}
-                                              />
-                                              <span>min</span>
-                                              <button
-                                                onClick={() => handleSaveTimeEstimate(task.id)}
-                                                className="text-green-600 hover:text-green-700"
-                                              >
-                                                <Check className="w-4 h-4" />
-                                              </button>
-                                              <button
-                                                onClick={handleCancelEditTime}
-                                                className="text-red-600 hover:text-red-700"
-                                              >
-                                                <X className="w-4 h-4" />
-                                              </button>
-                                            </div>
-                                          ) : (
-                                            <div className="flex items-center gap-2">
-                                              <span>{taskTime} min</span>
-                                              <button
-                                                onClick={() => handleStartEditTime(task.id, taskTime)}
-                                                className="text-purple-600 hover:text-purple-700"
-                                                title="Edit time estimate"
-                                              >
-                                                <Edit2 className="w-4 h-4" />
-                                              </button>
-                                            </div>
-                                          )}
-                                        </span>
-                                      )}
-                                    </div>
-                                  </div>
-                                  
-                                  <div className="flex gap-2 flex-shrink-0">
-                                    <button 
-                                      onClick={() => setShowTaskDescription(task)}
-                                      className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
-                                    >
-                                      Details
-                                    </button>
-                                    <button 
-                                      onClick={() => setShowSplitTask(task.id)}
-                                      className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
-                                    >
-                                      Split
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          });
-                        } else {
-                          // Unlocked mode - group by day
-                          const groupedTasks = groupTasksByDay(tasks.filter(t => !t.completed));
-                          const sortedDays = Object.keys(groupedTasks).sort((a, b) => {
-                            const dateA = new Date(groupedTasks[a][0].dueDate);
-                            const dateB = new Date(groupedTasks[b][0].dueDate);
-                            return dateA - dateB;
-                          });
-                          
-                          if (sortedDays.length === 0) {
-                            return (
-                              <div className="text-center py-12">
-                                <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                                <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                                <p className="text-gray-600">No pending tasks</p>
-                              </div>
-                            );
-                          }
-                          
-                          return sortedDays.map(day => (
-                            <div key={day} className="space-y-3">
-                              <h3 className="text-lg font-bold text-gray-900 sticky top-0 bg-white py-2 border-b-2 border-gray-200">
-                                {day}
-                              </h3>
-                              {groupedTasks[day].map((task) => {
-                                const taskTime = task.userEstimate || task.estimatedTime;
-                                const className = extractClassName(task.title);
-                                const classColor = getClassColor(className);
-                                
-                                return (
-                                  <div 
-                                    key={task.id}
-                                    className="border-2 rounded-lg p-4 bg-white hover:shadow-lg transition-all"
-                                    style={{ 
-                                      borderColor: classColor,
-                                      borderLeftWidth: '6px'
-                                    }}
-                                  >
-                                    <div className="flex items-center gap-4">
-                                      {/* Checkbox */}
-                                      <input
-                                        type="checkbox"
-                                        checked={task.completed || false}
-                                        onChange={() => toggleTaskCompletion(task.id)}
-                                        className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                      />
-                                      
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                          <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task.title)}</h3>
-                                          <span 
-                                            className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
-                                            style={{ backgroundColor: classColor }}
-                                          >
-                                            {className}
-                                          </span>
-                                        </div>
-                                        {taskTime > 0 && (
-                                          <div className="text-sm text-gray-600 flex items-center gap-2">
-                                            <Brain className="w-4 h-4" />
-                                            {editingTimeTaskId === task.id ? (
-                                              <div className="flex items-center gap-2">
-                                                <input
-                                                  type="text"
-                                                  value={tempTimeValue}
-                                                  onChange={handleTimeInputChange}
-                                                  className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                                                  autoFocus
-                                                  onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                      handleSaveTimeEstimate(task.id);
-                                                    } else if (e.key === 'Escape') {
-                                                      handleCancelEditTime();
-                                                    }
-                                                  }}
-                                                />
-                                                <span>min</span>
-                                                <button
-                                                  onClick={() => handleSaveTimeEstimate(task.id)}
-                                                  className="text-green-600 hover:text-green-700"
-                                                >
-                                                  <Check className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                  onClick={handleCancelEditTime}
-                                                  className="text-red-600 hover:text-red-700"
-                                                >
-                                                  <X className="w-4 h-4" />
-                                                </button>
-                                              </div>
-                                            ) : (
-                                              <div className="flex items-center gap-2">
-                                                <span>{taskTime} min</span>
-                                                <button
-                                                  onClick={() => handleStartEditTime(task.id, taskTime)}
-                                                  className="text-purple-600 hover:text-purple-700"
-                                                  title="Edit time estimate"
-                                                >
-                                                  <Edit2 className="w-4 h-4" />
-                                                </button>
-                                              </div>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                      
-                                      <div className="flex gap-2 flex-shrink-0">
-                                        <button 
-                                          onClick={() => setShowTaskDescription(task)}
-                                          className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium"
-                                        >
-                                          Details
-                                        </button>
-                                        <button 
-                                          onClick={() => setShowSplitTask(task.id)}
-                                          className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
-                                        >
-                                          Split
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ));
-                        }
-                      })()}
-                    </div>
-                  </div>
-                </div>
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-gray-900">All Tasks</h2>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleTogglePriorityLock}
+                  className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors ${
+                    priorityLocked
+                      ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {priorityLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                  {priorityLocked ? 'Locked' : 'Unlocked'}
+                </button>
+                {newTasks.length > 0 && (
+                  <button
+                    onClick={() => setNewTasksSidebarOpen(true)}
+                    className="px-4 py-2 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 font-medium"
+                  >
+                    {newTasks.length} New Tasks
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* New Tasks Sidebar */}
-            {newTasksSidebarOpen && priorityLocked && (
-              <div className="fixed right-0 top-[80px] w-96 h-[calc(100vh-80px)] bg-gradient-to-br from-yellow-50 to-orange-50 border-l-4 border-yellow-400 shadow-2xl overflow-y-auto z-50">
-                <div className="p-6">
-                  {/* Sidebar Header */}
-                  <div className="flex items-center justify-between mb-4 sticky top-0 bg-gradient-to-br from-yellow-50 to-orange-50 pb-4 border-b-2 border-yellow-300">
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="w-6 h-6 text-yellow-700" />
-                      <h3 className="text-xl font-bold text-yellow-900">New Tasks</h3>
-                      <span className="bg-yellow-600 text-white px-2 py-1 rounded-full text-sm font-bold">{newTasks.length}</span>
-                    </div>
-                    <button 
-                      onClick={closeSidebarWithoutSaving}
-                      className="text-gray-600 hover:text-gray-800"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
+            {!priorityLocked && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <Info className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h3 className="font-semibold text-blue-900">Priority Mode</h3>
+                    <p className="text-sm text-blue-700 mt-1">
+                      Drag and drop tasks to reorder them. Your custom order will be used during study sessions. Lock priorities when you're done.
+                    </p>
                   </div>
+                </div>
+              </div>
+            )}
 
-                  {/* Instructions */}
-                  <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg text-sm">
-                    <p className="text-yellow-900 font-medium mb-1">📌 Drag tasks to your list</p>
-                    <p className="text-yellow-800">Drag each task to its priority position in your main list, or click "Add All" to append them to the end.</p>
-                  </div>
-
-                  {/* Add All Button */}
-                  <button 
-                    onClick={clearAllNewTasks}
-                    className="w-full mb-4 bg-yellow-600 text-white px-4 py-3 rounded-lg hover:bg-yellow-700 font-semibold shadow-md flex items-center justify-center gap-2"
+            {sortedTasks.length > 0 ? (
+              <div className="space-y-3">
+                {sortedTasks.map((task, idx) => (
+                  <div
+                    key={task.id}
+                    draggable={!priorityLocked}
+                    onDragStart={() => handleDragStart(task)}
+                    onDragOver={(e) => handleDragOver(e, task)}
+                    onDrop={() => handleDrop(task)}
+                    className={`border-2 rounded-xl p-4 transition-all ${
+                      !priorityLocked ? 'cursor-move' : 'cursor-default'
+                    } ${
+                      dragOverTask?.id === task.id
+                        ? 'border-purple-500 bg-purple-50'
+                        : 'border-gray-200 bg-white hover:shadow-md'
+                    }`}
                   >
-                    <Check className="w-5 h-5" />
-                    Add All to List
-                  </button>
-
-                  {/* New Tasks */}
-                  <div className="space-y-3">
-                    {newTasks.map((task) => {
-                      const className = extractClassName(task.title);
-                      const classColor = getClassColor(className);
-                      const dueDate = new Date(task.dueDate);
-                      const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                      
-                      return (
-                        <div 
-                          key={task.id}
-                          draggable={true}
-                          onDragStart={(e) => handleDragStart(e, task)}
-                          onDragEnd={handleDragEnd}
-                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 cursor-move hover:shadow-md transition-all hover:scale-105"
-                        >
-                          <div className="flex items-start gap-2 mb-2">
-                            <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
-                            <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{cleanTaskTitle(task.title)}</h4>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span 
-                                  className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
-                                  style={{ backgroundColor: classColor }}
-                                >
-                                  {className}
-                                </span>
-                                <span className="text-xs text-gray-600 flex items-center gap-1">
-                                  <Calendar className="w-3 h-3" />
-                                  {dayName}
-                                </span>
-                                <span className="text-xs text-gray-600 flex items-center gap-1">
-                                  <Brain className="w-3 h-3" />
-                                  {task.estimatedTime} min
-                                </span>
-                              </div>
-                            </div>
+                    <div className="flex items-start gap-4">
+                      {!priorityLocked && (
+                        <GripVertical className="w-5 h-5 text-gray-400 mt-1 flex-shrink-0" />
+                      )}
+                      <div
+                        className="w-4 h-4 rounded-full mt-1 flex-shrink-0"
+                        style={{ backgroundColor: getClassColor(task.className) }}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start gap-2">
+                          <div className="flex-1">
+                            <h4 className="font-semibold text-gray-900">{cleanTaskTitle(task.title)}</h4>
+                            {task.segment && (
+                              <p className="text-sm text-purple-600 font-medium">• {task.segment}</p>
+                            )}
+                            <p className="text-sm text-gray-600 mt-1">{task.className}</p>
                           </div>
-                          <div className="text-xs text-gray-500 italic pl-7">
-                            Drag to priority list →
+                          {task.description && (
+                            <button
+                              onClick={() => setShowTaskDescription(showTaskDescription === task.id ? null : task.id)}
+                              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                              title="View description"
+                            >
+                              <Info className="w-4 h-4 text-gray-500" />
+                            </button>
+                          )}
+                        </div>
+                        {showTaskDescription === task.id && task.description && (
+                          <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                            <p className="text-sm text-gray-700">{task.description}</p>
+                            {task.url && (
+                              <a
+                                href={task.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-sm text-purple-600 hover:text-purple-700 mt-2 inline-block"
+                              >
+                                View in Canvas →
+                              </a>
+                            )}
+                          </div>
+                        )}
+                        <div className="mt-2 flex flex-wrap items-center gap-4 text-sm">
+                          <span className="text-gray-600">
+                            Due: {task.dueDate.toLocaleDateString()}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {editingTimeTaskId === task.id ? (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  value={tempTimeValue}
+                                  onChange={(e) => setTempTimeValue(e.target.value)}
+                                  className="w-20 px-2 py-1 border border-gray-300 rounded"
+                                  placeholder="mins"
+                                  autoFocus
+                                />
+                                <button
+                                  onClick={() => handleUpdateTaskTime(task.id, tempTimeValue)}
+                                  className="text-green-600 hover:text-green-700"
+                                >
+                                  <Check className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setEditingTimeTaskId(null);
+                                    setTempTimeValue('');
+                                  }}
+                                  className="text-red-600 hover:text-red-700"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <span className="text-purple-600 font-medium">
+                                  Est: {formatDuration(task.userEstimate || task.estimatedTime)}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    setEditingTimeTaskId(task.id);
+                                    setTempTimeValue(String(task.userEstimate || task.estimatedTime));
+                                  }}
+                                  className="text-gray-500 hover:text-gray-700"
+                                  title="Edit time estimate"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                          {task.accumulatedTime > 0 && (
+                            <span className="text-orange-600 font-medium">
+                              Spent: {formatDuration(task.accumulatedTime)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => handleSplitTask(task.id)}
+                          className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium"
+                        >
+                          Split
+                        </button>
+                        {task.url && (
+                          <a
+                            href={task.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium text-center"
+                          >
+                            Canvas
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <List className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-600">No tasks yet</p>
+                <p className="text-sm text-gray-500 mt-2">Import tasks from Canvas in Settings</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Learning Page */}
+        {currentPage === 'learning' && (
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <h2 className="text-2xl font-bold text-gray-900 mb-6">Learning Analytics</h2>
+            
+            {completionHistory.length > 0 ? (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                  <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-6 border-2 border-green-200">
+                    <div className="flex items-center gap-3 mb-2">
+                      <TrendingUp className="w-6 h-6 text-green-600" />
+                      <h3 className="font-semibold text-gray-900">Total Completed</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-green-600">{completionHistory.length}</p>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border-2 border-blue-200">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Clock className="w-6 h-6 text-blue-600" />
+                      <h3 className="font-semibold text-gray-900">Total Time</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-blue-600">
+                      {formatDuration(completionHistory.reduce((sum, h) => sum + h.actualTime, 0))}
+                    </p>
+                  </div>
+                  
+                  <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6 border-2 border-purple-200">
+                    <div className="flex items-center gap-3 mb-2">
+                      <Brain className="w-6 h-6 text-purple-600" />
+                      <h3 className="font-semibold text-gray-900">Accuracy</h3>
+                    </div>
+                    <p className="text-3xl font-bold text-purple-600">
+                      {Math.round(
+                        (completionHistory.reduce((sum, h) => sum + (h.estimatedTime / h.actualTime), 0) /
+                          completionHistory.length) * 100
+                      )}%
+                    </p>
+                  </div>
+                </div>
+
+                <div className="border-t pt-6">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-4">Completion History</h3>
+                  <div className="space-y-3">
+                    {completionHistory.map((entry, idx) => (
+                      <div key={idx} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          <h4 className="font-medium text-gray-900">{entry.taskTitle}</h4>
+                          <p className="text-sm text-gray-500">{entry.type}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm text-gray-600">
+                            {entry.date.toLocaleDateString()}
+                          </p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-gray-500">
+                              Est: {formatDuration(entry.estimatedTime)}
+                            </span>
+                            <span className="text-xs text-gray-400">→</span>
+                            <span className="text-xs font-medium text-purple-600">
+                              Actual: {formatDuration(entry.actualTime)}
+                            </span>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            )}
-            {showCompleteConfirm && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-xl p-6 max-w-md mx-4">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Complete Task?</h3>
-                  <p className="text-gray-600 mb-6">
-                    Mark "{showCompleteConfirm.title}" as complete?
-                  </p>
-                  <div className="flex gap-3">
-                    <button 
-                      onClick={() => setShowCompleteConfirm(null)}
-                      className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium"
-                    >
-                      Cancel
-                    </button>
-                    <button 
-                      onClick={() => handleCompleteTask(showCompleteConfirm.id)}
-                      className="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium"
-                    >
-                      Complete
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-            {showSplitTask && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
-                  <h3 className="text-xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
-                  <p className="text-gray-600 mb-4">
-                    Split this task into multiple parts. Time will be divided equally.
-                  </p>
-                  <div className="space-y-3 mb-4">
-                    {splitSegments.map((seg, idx) => (
-                      <div key={idx} className="flex gap-2">
-                        <input 
-                          type="text" 
-                          value={seg.name} 
-                          onChange={(e) => {
-                            const newSegs = [...splitSegments];
-                            newSegs[idx].name = e.target.value;
-                            setSplitSegments(newSegs);
-                          }} 
-                          placeholder={`Segment ${idx + 1} name`} 
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" 
-                        />
-                        {splitSegments.length > 1 && (
-                          <button onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))} className="text-red-600 hover:text-red-800">
-                            <X className="w-5 h-5" />
-                          </button>
-                        )}
                       </div>
                     ))}
                   </div>
-                  <button onClick={() => setSplitSegments([...splitSegments, { name: `Part ${splitSegments.length + 1}` }])} className="w-full mb-4 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-200 font-medium">
-                    + Add Segment
-                  </button>
-                  <div className="flex gap-3">
-                    <button onClick={() => {
-                      setShowSplitTask(null);
-                      setSplitSegments([{ name: 'Part 1' }]);
-                    }} className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium">
-                      Cancel
-                    </button>
-                    <button onClick={() => handleSplitTask(showSplitTask)} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium">
-                      Split Task
-                    </button>
-                  </div>
                 </div>
               </div>
-            )}
-            {showTaskDescription && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-                  <div className="flex items-start justify-between mb-4">
-                    <h3 className="text-xl font-bold text-gray-900 pr-8">{showTaskDescription.title}</h3>
-                    <button 
-                      onClick={() => setShowTaskDescription(null)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-                  <div className="space-y-3 mb-6">
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Calendar className="w-4 h-4" />
-                      Due: {new Date(showTaskDescription.dueDate).toLocaleDateString('en-US', { 
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Clock className="w-4 h-4" />
-                      Estimated Time: {showTaskDescription.userEstimate || showTaskDescription.estimatedTime} min
-                    </div>
-                  </div>
-                  <div className="border-t pt-4">
-                    <h4 className="font-semibold text-gray-700 mb-2">Description</h4>
-                    {showTaskDescription.description ? (
-                      <p className="text-gray-600 whitespace-pre-wrap">{showTaskDescription.description}</p>
-                    ) : (
-                      <p className="text-gray-400 italic">No description available</p>
-                    )}
-                  </div>
-                  <div className="mt-6 flex justify-end">
-                    <button 
-                      onClick={() => setShowTaskDescription(null)} 
-                      className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 font-medium"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
+            ) : (
+              <div className="text-center py-12">
+                <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-600">No completion history yet</p>
+                <p className="text-sm text-gray-500 mt-2">Complete some tasks to see your progress</p>
               </div>
             )}
           </div>
         )}
-        {currentPage === 'sessions' && (
-          <div className="max-w-5xl mx-auto p-6">
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Study Sessions</h2>
-                <p className="text-gray-600">Your scheduled study periods</p>
+
+        {/* Session Page */}
+        {currentPage === 'session' && currentSession && (
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-white rounded-xl shadow-2xl p-8">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-3xl font-bold text-gray-900">{currentSession.day}</h2>
+                  <p className="text-gray-600 mt-1">Period {currentSession.period}</p>
+                </div>
+                <div className="text-right">
+                  <div className={`text-4xl font-bold ${sessionTime < 300 ? 'text-red-600' : 'text-purple-600'}`}>
+                    {formatTime(sessionTime)}
+                  </div>
+                  <p className="text-sm text-gray-500 mt-1">Time Remaining</p>
+                </div>
               </div>
-              <div className="space-y-4">
-                {sessions.map(session => {
-                  // Check if this session has a saved state
-                  const hasSavedState = savedSessionState && savedSessionState.sessionId === session.id;
-                  
-                  return (
-                    <div key={session.id} className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition-colors">
-                      <div className="flex items-center justify-between mb-4">
-                        <div>
-                          <h3 className="text-lg font-bold text-gray-900">
-                            {session.day} - Period {session.period}
-                          </h3>
-                          <p className="text-sm text-gray-600">
-                            {session.tasks.length} tasks - {session.totalTime} minutes
+
+              {getCurrentTask() ? (
+                <div className="mb-8">
+                  <div className="bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl p-6 border-2 border-purple-200">
+                    <div className="flex items-start gap-4">
+                      <div
+                        className="w-6 h-6 rounded-full flex-shrink-0 mt-1"
+                        style={{ backgroundColor: getClassColor(getCurrentTask().className) }}
+                      />
+                      <div className="flex-1">
+                        <h3 className="text-2xl font-bold text-gray-900 mb-2">
+                          {cleanTaskTitle(getCurrentTask().title)}
+                        </h3>
+                        {getCurrentTask().segment && (
+                          <p className="text-lg text-purple-600 font-medium mb-2">
+                            • {getCurrentTask().segment}
                           </p>
+                        )}
+                        <p className="text-gray-700 mb-3">{getCurrentTask().className}</p>
+                        {getCurrentTask().description && (
+                          <p className="text-gray-600 text-sm mb-3">{getCurrentTask().description}</p>
+                        )}
+                        <div className="flex flex-wrap items-center gap-4 text-sm">
+                          <span className="text-gray-600">
+                            Due: {getCurrentTask().dueDate.toLocaleDateString()}
+                          </span>
+                          <span className="text-purple-600 font-medium">
+                            Estimated: {formatDuration(getCurrentTask().userEstimate || getCurrentTask().estimatedTime)}
+                          </span>
+                          {getCurrentTask().accumulatedTime > 0 && (
+                            <span className="text-orange-600 font-medium">
+                              Previous time: {formatDuration(getCurrentTask().accumulatedTime)}
+                            </span>
+                          )}
                         </div>
-                        {hasSavedState ? (
-                          <button onClick={resumeSession} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2">
-                            <Play className="w-5 h-5" />
-                            Resume
-                          </button>
-                        ) : (
-                          <button onClick={() => startSession(session)} className="bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2">
-                            <Play className="w-5 h-5" />
-                            Start Session
-                          </button>
+                        {getCurrentTask().url && (
+                          <a
+                            href={getCurrentTask().url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block mt-4 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-medium"
+                          >
+                            Open in Canvas
+                          </a>
                         )}
                       </div>
-                      <div className="space-y-2">
-                        {session.tasks.map((task, idx) => (
-                          <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                            <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                              {idx + 1}
-                            </span>
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</p>
-                              <p className="text-sm text-gray-600">
-                                {task.userEstimate || task.estimatedTime} min
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
                     </div>
-                  );
-                })}
-              </div>
-              {sessions.length === 0 && (
+                  </div>
+
+                  <div className="mt-6 flex gap-3">
+                    <button
+                      onClick={() => setIsTimerRunning(!isTimerRunning)}
+                      className="flex-1 bg-gradient-to-r from-yellow-400 to-orange-500 text-white py-4 rounded-xl font-bold hover:from-yellow-500 hover:to-orange-600 flex items-center justify-center gap-2 text-lg"
+                    >
+                      {isTimerRunning ? (
+                        <>
+                          <Pause className="w-6 h-6" />
+                          Pause
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-6 h-6" />
+                          Resume
+                        </>
+                      )}
+                    </button>
+                    <button
+                      onClick={() => setShowCompleteConfirm(getCurrentTask().id)}
+                      disabled={markingComplete}
+                      className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white py-4 rounded-xl font-bold hover:from-green-600 hover:to-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-lg"
+                    >
+                      {markingComplete ? (
+                        <>
+                          <div className="w-6 h-6 border-3 border-white border-t-transparent rounded-full animate-spin"></div>
+                          Completing...
+                        </>
+                      ) : (
+                        <>
+                          <Check className="w-6 h-6" />
+                          Complete
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  <div className="mt-4 flex gap-3">
+                    <button
+                      onClick={handleSkipTask}
+                      className="flex-1 bg-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-300"
+                    >
+                      Skip Task
+                    </button>
+                    <button
+                      onClick={handleSaveSession}
+                      disabled={savingSession}
+                      className="flex-1 bg-blue-100 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                    >
+                      {savingSession ? (
+                        <>
+                          <div className="w-5 h-5 border-2 border-blue-700 border-t-transparent rounded-full animate-spin"></div>
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-5 h-5" />
+                          Save & Exit
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ) : (
                 <div className="text-center py-12">
-                  <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">No Sessions Scheduled</h3>
-                  <p className="text-gray-600">Add tasks and set up your schedule to generate sessions</p>
+                  <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">All Tasks Complete!</h3>
+                  <p className="text-gray-600 mb-6">Great work! You've finished all your tasks for this session.</p>
+                  <button
+                    onClick={handleEndSession}
+                    disabled={endingSession}
+                    className="bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-8 py-4 rounded-xl font-bold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {endingSession ? 'Ending Session...' : 'End Session'}
+                  </button>
+                </div>
+              )}
+
+              {sessionCompletions.length > 0 && (
+                <div className="mt-8 border-t pt-6">
+                  <h4 className="font-semibold text-gray-900 mb-4">Completed This Session ({sessionCompletions.length})</h4>
+                  <div className="space-y-2">
+                    {sessionCompletions.map((completion, idx) => (
+                      <div key={idx} className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
+                        <Check className="w-5 h-5 text-green-600 flex-shrink-0" />
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-900">{cleanTaskTitle(completion.title)}</p>
+                          <p className="text-sm text-gray-600">{completion.className}</p>
+                        </div>
+                        <span className="text-sm text-green-600 font-medium">
+                          {formatDuration(completion.actualTime)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
           </div>
         )}
-        {currentPage === 'session-active' && currentSession && (
-          showSessionSummary ? (
-            <div className="max-w-4xl mx-auto p-6">
-              <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
-                <Check className="w-16 h-16 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">
-                  {sessionSummary.isSaveAndExit ? 'Session Saved!' : 'Session Complete!'}
-                </h2>
-                <p className="text-lg">
-                  {sessionSummary.day} - Period {sessionSummary.period}
-                </p>
-              </div>
-              <div className="bg-white rounded-xl shadow-md p-6 mb-6">
-                <h3 className="text-xl font-bold mb-4">Summary</h3>
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="bg-blue-50 p-4 rounded-lg text-center">
-                    <div className="text-3xl font-bold text-blue-600">{sessionSummary.completions.length}</div>
-                    <div className="text-sm text-gray-600">Tasks Completed</div>
-                  </div>
-                  <div className="bg-purple-50 p-4 rounded-lg text-center">
-                    <div className="text-3xl font-bold text-purple-600">{sessionSummary.totalTime} min</div>
-                    <div className="text-sm text-gray-600">Time Used</div>
-                  </div>
+
+        {/* Settings/Setup Page */}
+        {currentPage === 'setup' && (
+          <div className="max-w-4xl mx-auto">
+            <div className="bg-white rounded-xl shadow-lg p-8">
+              <h2 className="text-2xl font-bold text-gray-900 mb-6">Account Settings</h2>
+              <div className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Grade Level</label>
+                  <select value={accountSetup.grade} onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
+                    <option value="">Select Grade</option>
+                    <option value="7">Grade 7</option>
+                    <option value="8">Grade 8</option>
+                    <option value="9">Grade 9</option>
+                    <option value="10">Grade 10</option>
+                    <option value="11">Grade 11</option>
+                    <option value="12">Grade 12</option>
+                  </select>
                 </div>
                 
-                {/* Completed Tasks */}
-                {sessionSummary.completions.length > 0 && (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-semibold text-gray-700">Completed Tasks</h4>
-                    {sessionSummary.completions.map((comp, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{cleanTaskTitle(comp.task.title)}</span>
-                        <span className="text-sm text-gray-600">{comp.timeSpent} min</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Partially Completed Task */}
-                {sessionSummary.partialTask && (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-semibold text-gray-700">Partially Completed</h4>
-                    <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
-                      <span className="font-medium text-gray-900">{cleanTaskTitle(sessionSummary.partialTask.title)}</span>
-                      <span className="text-sm text-orange-600">{sessionSummary.partialTask.partialTime} min progress</span>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Missed Tasks */}
-                {sessionSummary.missedTasks && sessionSummary.missedTasks.length > 0 && (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-semibold text-gray-700">
-                      {sessionSummary.isSaveAndExit ? 'Remaining Tasks' : 'Missed Tasks (Rescheduled)'}
-                    </h4>
-                    {sessionSummary.missedTasks.map((task, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{cleanTaskTitle(task.title)}</span>
-                        <span className="text-sm text-gray-600">
-                          {sessionSummary.isSaveAndExit ? 'Saved for later' : 'Rescheduled'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Save and Exit info */}
-                {sessionSummary.isSaveAndExit && sessionSummary.remainingTime > 0 && (
-                  <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <p className="text-sm text-blue-800">
-                      <strong>{sessionSummary.remainingTime} minutes</strong> saved for when you resume this session.
-                    </p>
-                  </div>
-                )}
-              </div>
-              <button onClick={() => {
-                setShowSessionSummary(false);
-                setCurrentSession(null);
-                setCurrentPage('hub');
-                loadUserData(token);
-              }} className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                Back to Hub
-              </button>
-            </div>
-          ) : (
-            <div className="max-w-4xl mx-auto p-6">
-              <div className="bg-gradient-to-br from-purple-500 to-blue-600 text-white rounded-xl p-8 mb-6">
-                <div className="text-center mb-6">
-                  <h2 className="text-2xl font-bold mb-2">
-                    {currentSession.day} - Period {currentSession.period}
-                  </h2>
-                  <div className="text-6xl font-bold mb-2">{formatTime(sessionTime)}</div>
-                  <p className="text-purple-100">Time Remaining</p>
-                </div>
-                <div className="flex gap-4 justify-center">
-                  <button onClick={() => setIsTimerRunning(!isTimerRunning)} className="bg-white text-purple-600 px-6 py-3 rounded-lg font-semibold hover:bg-purple-50 flex items-center gap-2">
-                    {isTimerRunning ? (
-                      <>
-                        <Pause className="w-5 h-5" />
-                        Pause Timer
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5" />
-                        Resume Timer
-                      </>
-                    )}
-                  </button>
-                  <button onClick={pauseSession} disabled={savingSession} className="bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-800 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                    {savingSession ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Please Wait...
-                      </>
-                    ) : (
-                      <>
-                        <X className="w-5 h-5" />
-                        Save & Exit
-                      </>
-                    )}
-                  </button>
-                  <button onClick={() => endSession(false)} disabled={endingSession} className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-                    {endingSession ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Please Wait...
-                      </>
-                    ) : (
-                      'End Session'
-                    )}
-                  </button>
-                </div>
-              </div>
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Current Task</h3>
-                  <span className="text-sm text-gray-600">
-                    Task {currentTaskIndex + 1} of {currentSession.tasks.length}
-                  </span>
-                </div>
-                {currentSession.tasks[currentTaskIndex] && (
-                  <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-6 mb-6">
-                    <h4 className="text-xl font-bold text-gray-900 mb-4">{currentSession.tasks[currentTaskIndex].title}</h4>
-                    <div className="flex items-center gap-4 text-sm text-gray-600 mb-6">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" />
-                        Est. {currentSession.tasks[currentTaskIndex].userEstimate || currentSession.tasks[currentTaskIndex].estimatedTime} min
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" />
-                        Due {currentSession.tasks[currentTaskIndex].dueDate.toLocaleDateString()}
-                      </span>
-                    </div>
-                    <div className="mb-4 text-sm text-gray-600">
-                      {(() => {
-                        const currentTask = currentSession.tasks[currentTaskIndex];
-                        const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-                        const parentId = currentTask.parent_task_id || currentTask.id; // Use parent if exists
-                        const previousTime = partialTaskTimes[parentId] || 0;
-                        const totalTime = currentSessionTime + previousTime;
-                        
-                        if (previousTime > 0) {
-                          return (
-                            <>
-                              Time on this task: {currentSessionTime} min <span className="text-blue-600">(+{previousTime} min from previous session = {totalTime} min total)</span>
-                              {currentTask.parent_task_id && (
-                                <span className="text-xs text-gray-500 ml-2">
-                                  (combined from all segments)
-                                </span>
-                              )}
-                            </>
-                          );
-                        }
-                        return `Time on this task: ${currentSessionTime} min`;
-                      })()}
-                    </div>
-                    <button onClick={completeTask} disabled={markingComplete} className="w-full bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                      {markingComplete ? (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Canvas Calendar Feed URL
+                  </label>
+                  <input
+                    type="url"
+                    value={accountSetup.canvasUrl}
+                    onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasUrl: e.target.value }))}
+                    placeholder="https://canvas.oneschoolglobal.com/feeds/calendars/..."
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 mb-2"
+                  />
+                  <div className="flex gap-3 mb-3">
+                    <button
+                      onClick={loadTasksFromCanvas}
+                      disabled={isLoadingTasks || !accountSetup.canvasUrl}
+                      className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                    >
+                      {isLoadingTasks ? (
                         <>
                           <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          Please Wait...
+                          Loading...
                         </>
                       ) : (
                         <>
-                          <Check className="w-5 h-5" />
-                          Mark Complete
+                          <Upload className="w-5 h-5" />
+                          Import Tasks from Canvas
                         </>
                       )}
                     </button>
                   </div>
-                )}
-                <div className="space-y-2">
-                  <h4 className="font-semibold text-gray-700 text-sm mb-3">Upcoming in This Session</h4>
-                  {currentSession.tasks.slice(currentTaskIndex + 1).map((task, idx) => {
-                    const parentId = task.parent_task_id || task.id;
-                    const hasPartialTime = partialTaskTimes[parentId] > 0;
-                    return (
-                      <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-60">
-                        <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
-                          {currentTaskIndex + idx + 2}
-                        </span>
-                        <div className="flex-1">
-                          <span className="text-gray-700">{cleanTaskTitle(task.title)}</span>
-                          {hasPartialTime && (
-                            <span className="ml-2 text-xs text-blue-600">
-                              ({partialTaskTimes[parentId]} min in progress)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          )
-        )}
-        {currentPage === 'settings' && (
-          <div className="max-w-4xl mx-auto p-6">
-            <div className="bg-white rounded-xl shadow-md p-8">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Account Setup</h2>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                  <input type="text" value={accountSetup.name} className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50" disabled />
-                  <p className="text-xs text-gray-500 mt-1">Extracted from your email</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
-                  <input type="text" value={accountSetup.grade} onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))} placeholder="e.g., 10" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Canvas Calendar ICS URL</label>
-                  <input type="url" value={accountSetup.canvasUrl} onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasUrl: e.target.value }))} placeholder="https://canvas.oneschoolglobal.com/feeds/calendars/user_..." className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
                   <p className="text-xs text-gray-500 mt-1">Find this in Canvas: Calendar → Calendar Feed → Copy the URL</p>
                   <p className="text-xs text-blue-600 mt-1">💡 The URL should contain "/feeds/calendars/"</p>
                 </div>
@@ -2701,6 +1793,158 @@ const PlanAssist = () => {
         )}
       </div>
       
+      {/* Complete Task Confirmation Modal */}
+      {showCompleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-xl font-bold text-gray-900 mb-4">Mark Task as Complete?</h3>
+            <p className="text-gray-600 mb-6">
+              This will mark the task as complete and record the time you spent on it.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowCompleteConfirm(null)}
+                className="flex-1 bg-gray-200 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleCompleteTask(showCompleteConfirm)}
+                className="flex-1 bg-gradient-to-r from-green-500 to-emerald-600 text-white px-4 py-3 rounded-lg font-semibold hover:from-green-600 hover:to-emerald-700"
+              >
+                Complete Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Split Task Modal */}
+      {showSplitTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <h3 className="text-2xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <h4 className="font-semibold text-gray-900 mb-1">{cleanTaskTitle(showSplitTask.title)}</h4>
+              <p className="text-sm text-gray-600">{showSplitTask.className}</p>
+            </div>
+            <p className="text-gray-600 mb-6">
+              Break this task into smaller parts. Each segment will become a separate task with its own time estimate.
+            </p>
+            
+            <div className="space-y-3 mb-6">
+              {splitSegments.map((segment, idx) => (
+                <div key={idx} className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={segment.name}
+                    onChange={(e) => updateSegmentName(idx, e.target.value)}
+                    placeholder={`Segment ${idx + 1} name`}
+                    className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  />
+                  {splitSegments.length > 1 && (
+                    <button
+                      onClick={() => removeSegment(idx)}
+                      className="p-3 text-red-600 hover:bg-red-50 rounded-lg"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            
+            <button
+              onClick={addSegment}
+              className="w-full bg-purple-100 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-200 mb-4"
+            >
+              + Add Segment
+            </button>
+            
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+              <p className="text-sm text-blue-700">
+                The time estimate will be divided equally among {splitSegments.length} segment{splitSegments.length > 1 ? 's' : ''} 
+                ({formatDuration(Math.ceil((showSplitTask.userEstimate || showSplitTask.estimatedTime) / splitSegments.length))} each)
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => {
+                  setShowSplitTask(null);
+                  setSplitSegments([{ name: 'Part 1' }]);
+                }}
+                className="flex-1 bg-gray-200 text-gray-700 px-4 py-3 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmSplitTask}
+                className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-4 py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700"
+              >
+                Split Task
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Session Summary Modal */}
+      {showSessionSummary && sessionSummary && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-8 max-w-2xl w-full">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-gradient-to-r from-green-400 to-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Check className="w-10 h-10 text-white" />
+              </div>
+              <h2 className="text-3xl font-bold text-gray-900 mb-2">Session Complete!</h2>
+              <p className="text-gray-600">{sessionSummary.day}, Period {sessionSummary.period}</p>
+            </div>
+
+            <div className="bg-gradient-to-br from-purple-50 to-blue-50 rounded-xl p-6 mb-6">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="text-center">
+                  <p className="text-gray-600 text-sm mb-1">Tasks Completed</p>
+                  <p className="text-4xl font-bold text-purple-600">{sessionSummary.completions.length}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-gray-600 text-sm mb-1">Time Studied</p>
+                  <p className="text-4xl font-bold text-purple-600">{formatDuration(Math.floor(sessionSummary.timeUsed / 60))}</p>
+                </div>
+              </div>
+            </div>
+
+            {sessionSummary.completions.length > 0 && (
+              <div className="mb-6">
+                <h3 className="font-semibold text-gray-900 mb-3">Completed Tasks:</h3>
+                <div className="space-y-2">
+                  {sessionSummary.completions.map((completion, idx) => (
+                    <div key={idx} className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
+                      <Check className="w-5 h-5 text-green-600 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="font-medium text-gray-900">{cleanTaskTitle(completion.title)}</p>
+                        <p className="text-sm text-gray-600">{completion.className}</p>
+                      </div>
+                      <span className="text-sm text-green-600 font-medium">
+                        {formatDuration(completion.actualTime)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <button
+              onClick={closeSessionSummary}
+              className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-4 rounded-xl font-bold hover:from-yellow-500 hover:to-purple-700 text-lg"
+            >
+              Return to Hub
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Feedback Form Modal */}
       {showFeedbackForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full">
