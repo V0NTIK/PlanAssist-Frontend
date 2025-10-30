@@ -2318,7 +2318,7 @@ const fetchCanvasTasks = async () => {
                     <h4 className="font-semibold text-gray-700">Completed Tasks</h4>
                     {sessionSummary.completions.map((comp, idx) => (
                       <div key={idx} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{cleanTaskTitle(comp.task.title)}</span>
+                        <span className="font-medium text-gray-900">{cleanTaskTitle(comp.task)}</span>
                         <span className="text-sm text-gray-600">{comp.timeSpent} min</span>
                       </div>
                     ))}
@@ -2330,7 +2330,7 @@ const fetchCanvasTasks = async () => {
                   <div className="space-y-2 mb-4">
                     <h4 className="font-semibold text-gray-700">Partially Completed</h4>
                     <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
-                      <span className="font-medium text-gray-900">{cleanTaskTitle(sessionSummary.partialTask.title)}</span>
+                      <span className="font-medium text-gray-900">{cleanTaskTitle(sessionSummary.partialTask)}</span>
                       <span className="text-sm text-orange-600">{sessionSummary.partialTask.partialTime} min progress</span>
                     </div>
                   </div>
