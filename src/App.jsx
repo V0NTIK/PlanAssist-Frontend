@@ -1317,7 +1317,7 @@ const fetchCanvasTasks = async () => {
       
       const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
     
-      // ✅ Calculate and save partial time
+      // ✅ Calculate and save partial time (non-blocking - continue even if this fails)
       const previousAccumulatedTime = currentTask.accumulatedTime || 0;
       const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
     
@@ -1327,12 +1327,17 @@ const fetchCanvasTasks = async () => {
       console.log('Previous accumulated:', previousAccumulatedTime, 'min');
       console.log('New total accumulated:', newAccumulatedTime, 'min');
     
-      // Save accumulated time to database
-      await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
-        accumulatedTime: newAccumulatedTime
-      });
+      // Try to save accumulated time to database, but don't fail if it doesn't work
+      try {
+        await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
+          accumulatedTime: newAccumulatedTime
+        });
+      } catch (partialError) {
+        console.error('Failed to save partial time (non-critical):', partialError);
+        // Continue anyway - we'll still save the session state
+      }
     
-      // Save session state
+      // Save session state (this is critical)
       await apiCall('/sessions/saved-state', 'POST', {
         sessionId: currentSession.id,
         day: currentSession.day,
@@ -1443,7 +1448,7 @@ const fetchCanvasTasks = async () => {
       const currentTask = currentSession.tasks[currentTaskIndex];
       const currentTaskTimeSpent = currentTask ? Math.round((taskStartTime - sessionTime) / 60) : 0;
     
-      // ✅ Save partial time if any time spent on current task
+      // ✅ Save partial time if any time spent on current task (non-blocking)
       if (currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
         const previousAccumulatedTime = currentTask.accumulatedTime || 0;
         const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
@@ -1454,14 +1459,24 @@ const fetchCanvasTasks = async () => {
         console.log('Previous accumulated:', previousAccumulatedTime, 'min');
         console.log('New total accumulated:', newAccumulatedTime, 'min');
       
-        await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
-          accumulatedTime: newAccumulatedTime
-        });
+        try {
+          await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
+            accumulatedTime: newAccumulatedTime
+          });
+        } catch (partialError) {
+          console.error('Failed to save partial time (non-critical):', partialError);
+          // Continue anyway
+        }
       }
     
       // Delete saved session
-      await apiCall('/sessions/saved-state', 'DELETE');
-      setSavedSessionState(null);
+      try {
+        await apiCall('/sessions/saved-state', 'DELETE');
+        setSavedSessionState(null);
+      } catch (deleteError) {
+        console.error('Failed to delete saved state (non-critical):', deleteError);
+        // Continue anyway
+      }
     
       // Determine missed tasks
       let missedTaskStartIndex = currentTaskIndex;
