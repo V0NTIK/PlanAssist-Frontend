@@ -80,10 +80,17 @@ const PlanAssist = () => {
 
   // Extract class name from task class field or title
   const extractClassName = (task) => {
+    // Safety check: ensure task exists
+    if (!task) return 'No Class';
+    
     // If task has a class field, use it directly
     if (task.class) {
       return task.class.replace(/[\[\]]/g, ''); // Remove brackets if present
     }
+    
+    // Safety check: ensure title exists before matching
+    if (!task.title) return 'No Class';
+    
     // Fallback to title parsing (for legacy or imported tasks)
     const match = task.title.match(/\[([^\]]+)\]/);
     return match ? match[1] : 'No Class';
@@ -91,13 +98,22 @@ const PlanAssist = () => {
 
   // Display task title with segment if present
   const cleanTaskTitle = (task) => {
+    if (!task || !task.title) return '';
     const baseTitle = task.title.replace(/\s*\[([^\]]+)\]\s*/, '').trim();
     return task.segment ? `${baseTitle} - ${task.segment}` : baseTitle;
   };
 
   // Get color for a class
-  const getClassColor = (task) => {
-    const className = extractClassName(task);
+  const getClassColor = (taskOrClassName) => {
+    // Handle if passed a string directly (className)
+    let className;
+    if (typeof taskOrClassName === 'string') {
+      className = taskOrClassName;
+    } else {
+      // It's a task object
+      className = extractClassName(taskOrClassName);
+    }
+    
     if (accountSetup.classColors[className]) {
       return accountSetup.classColors[className];
     }
@@ -113,14 +129,16 @@ const PlanAssist = () => {
   // Group tasks by day and due date
   const groupTasksByDay = (taskList) => {
     const grouped = {};
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     
     taskList.forEach(task => {
       const dueDate = new Date(task.dueDate);
-      dueDate.setHours(0, 0, 0, 0);
-      if (!task.completed && dueDate >= today) {
-        const dayKey = dueDate.toDateString();
+      const normalizedDueDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate(), 0, 0, 0, 0);
+      
+      // Only include tasks from today onwards
+      if (!task.completed && normalizedDueDate >= today) {
+        const dayKey = normalizedDueDate.toDateString();
         if (!grouped[dayKey]) {
           grouped[dayKey] = [];
         }
@@ -169,15 +187,25 @@ const PlanAssist = () => {
       }).then(r => r.json());
 
       const savedColors = localStorage.getItem('classColors');
+      const savedUser = localStorage.getItem('user');
+      const userName = savedUser ? JSON.parse(savedUser).name : '';
+      
       if (setupData.grade) {
         setAccountSetup({
-          name: JSON.parse(localStorage.getItem('user')).name,
+          name: userName || '',
           grade: setupData.grade || '',
           canvasUrl: setupData.canvasUrl || '',
           presentPeriods: setupData.presentPeriods || '2-6',
           schedule: setupData.schedule || {},
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
+      } else {
+        // If no grade setup yet, still set the name
+        setAccountSetup(prev => ({
+          ...prev,
+          name: userName || '',
+          classColors: savedColors ? JSON.parse(savedColors) : {}
+        }));
       }
 
       const tasksData = await fetch(`${API_URL}/tasks`, {
@@ -2533,7 +2561,7 @@ const fetchCanvasTasks = async () => {
               <div className="space-y-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                  <input type="text" value={accountSetup.name} className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50" disabled />
+                  <input type="text" value={accountSetup.name || ''} className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50" disabled />
                   <p className="text-xs text-gray-500 mt-1">Extracted from your email</p>
                 </div>
                 <div>
@@ -2611,7 +2639,11 @@ const fetchCanvasTasks = async () => {
                     </label>
                     <p className="text-xs text-gray-500 mb-3">Customize colors for your classes. Changes save automatically.</p>
                     <div className="space-y-2">
-                      {Array.from(new Set(tasks.map(t => extractClassName(t)))).map(className => (
+                      {Array.from(new Set(
+                        tasks
+                          .filter(t => t && (t.title || t.class)) // Filter out invalid tasks
+                          .map(t => extractClassName(t))
+                      )).map(className => (
                         <div key={className} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg">
                           <input 
                             type="color" 
