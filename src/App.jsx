@@ -133,16 +133,26 @@ const PlanAssist = () => {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
     
     taskList.forEach(task => {
-      const dueDate = new Date(task.dueDate);
-      const normalizedDueDate = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate(), 0, 0, 0, 0);
-      
-      // Only include tasks from today onwards
-      if (!task.completed && normalizedDueDate >= today) {
-        const dayKey = normalizedDueDate.toDateString();
-        if (!grouped[dayKey]) {
-          grouped[dayKey] = [];
+      if (!task.completed) {
+        const dueDate = new Date(task.dueDate);
+        
+        // Normalize the due date to just the date part for comparison
+        // If it's 11:59 PM, that counts as being due "that day"
+        const normalizedDueDate = new Date(
+          dueDate.getFullYear(), 
+          dueDate.getMonth(), 
+          dueDate.getDate(),
+          0, 0, 0, 0
+        );
+        
+        // Only include tasks from today onwards
+        if (normalizedDueDate >= today) {
+          const dayKey = normalizedDueDate.toDateString();
+          if (!grouped[dayKey]) {
+            grouped[dayKey] = [];
+          }
+          grouped[dayKey].push(task);
         }
-        grouped[dayKey].push(task);
       }
     });
     
