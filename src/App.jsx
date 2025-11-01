@@ -1600,7 +1600,7 @@ const fetchCanvasTasks = async () => {
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('settings')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => setCurrentPage('settings')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Settings className="w-5 h-5" />
             </button>
             <button onClick={handleLogout} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
@@ -2444,7 +2444,7 @@ const fetchCanvasTasks = async () => {
                 </div>
                 {currentSession.tasks[currentTaskIndex] && (
                   <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-6 mb-6">
-                    <h4 className="text-xl font-bold text-gray-900 mb-4">{currentSession.tasks[currentTaskIndex].title}</h4>
+                    <h4 className="text-xl font-bold text-gray-900 mb-4">{cleanTaskTitle(currentSession.tasks[currentTaskIndex])}</h4>
                     <div className="flex items-center gap-4 text-sm text-gray-600 mb-6">
                       <span className="flex items-center gap-1">
                         <Clock className="w-4 h-4" />
@@ -2490,6 +2490,13 @@ const fetchCanvasTasks = async () => {
                           Mark Complete
                         </>
                       )}
+                    </button>
+                    <button 
+                      onClick={() => openWorkspace(currentSession.tasks[currentTaskIndex])} 
+                      className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 flex items-center justify-center gap-2 mt-3"
+                    >
+                      <BookOpen className="w-5 h-5" />
+                      Open Workspace
                     </button>
                   </div>
                 )}
@@ -2707,142 +2714,138 @@ const fetchCanvasTasks = async () => {
           </div>
         </div>
       )}
-    </div>
-  );
-};
-
-// Task Workspace Component
-const TaskWorkspace = () => {
-  if (!showWorkspace || !workspaceTask) return null;
-    
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl w-full h-full max-w-[95vw] max-h-[95vh] flex flex-col">
-        {/* Header */}
-        <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 rounded-t-xl flex items-center justify-between">
-          <div className="flex-1">
-            <h2 className="text-xl font-bold">{cleanTaskTitle(workspaceTask)}</h2>
-            <p className="text-sm text-purple-100">
-              <span className="mr-3">{extractClassName(workspaceTask)}</span>
-              <span>Due: {workspaceTask.dueDate.toLocaleDateString()}</span>
-            </p>
-          </div>
-          <button
-            onClick={closeWorkspace}
-            className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2"
-          >
-            <X className="w-5 h-5" />
-            Close Workspace
-          </button>
-        </div>
-          
-        {/* Content */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Side: Notes/Calculator (35%) */}
-          <div className="w-[35%] border-r border-gray-200 flex flex-col">
-            {/* Tab selector */}
-            <div className="flex border-b border-gray-200">
+      
+      {/* Task Workspace Modal */}
+      {showWorkspace && workspaceTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl w-full h-full max-w-[95vw] max-h-[95vh] flex flex-col">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-4 rounded-t-xl flex items-center justify-between">
+              <div className="flex-1">
+                <h2 className="text-xl font-bold">{cleanTaskTitle(workspaceTask)}</h2>
+                <p className="text-sm text-purple-100">
+                  <span className="mr-3">{extractClassName(workspaceTask)}</span>
+                  <span>Due: {workspaceTask.dueDate.toLocaleDateString()}</span>
+                </p>
+              </div>
               <button
-                onClick={() => switchWorkspaceTab('notes')}
-                className={`flex-1 py-3 px-4 font-semibold ${
-                  workspaceTab === 'notes'
-                    ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
+                onClick={closeWorkspace}
+                className="bg-white bg-opacity-20 hover:bg-opacity-30 text-white px-4 py-2 rounded-lg font-semibold flex items-center gap-2"
               >
-                Notes
-              </button>
-              <button
-                onClick={() => switchWorkspaceTab('calculator')}
-                className={`flex-1 py-3 px-4 font-semibold ${
-                  workspaceTab === 'calculator'
-                    ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                Calculator
+                <X className="w-5 h-5" />
+                Close Workspace
               </button>
             </div>
               
-            {/* Tab content */}
-            <div className="flex-1 overflow-hidden">
-              {workspaceTab === 'notes' ? (
-                <div className="h-full flex flex-col p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="font-semibold text-gray-700">Your Notes</h3>
-                    <button
-                      onClick={saveTaskNotes}
-                      disabled={savingNotes}
-                      className="bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1"
-                    >
-                      {savingNotes ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          Saving...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-4 h-4" />
-                          Save
-                        </>
-                      )}
-                    </button>
-                  </div>
-                  <textarea
-                    value={workspaceNotes}
-                    onChange={(e) => setWorkspaceNotes(e.target.value)}
-                    placeholder="Type your notes here... bullet points, reminders, key concepts, etc."
-                    className="flex-1 w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                  />
+            {/* Content */}
+            <div className="flex-1 flex overflow-hidden">
+              {/* Left Side: Notes/Calculator (35%) */}
+              <div className="w-[35%] border-r border-gray-200 flex flex-col">
+                {/* Tab selector */}
+                <div className="flex border-b border-gray-200">
+                  <button
+                    onClick={() => switchWorkspaceTab('notes')}
+                    className={`flex-1 py-3 px-4 font-semibold ${
+                      workspaceTab === 'notes'
+                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Notes
+                  </button>
+                  <button
+                    onClick={() => switchWorkspaceTab('calculator')}
+                    className={`flex-1 py-3 px-4 font-semibold ${
+                      workspaceTab === 'calculator'
+                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    Calculator
+                  </button>
                 </div>
-              ) : (
-                <div className="h-full flex flex-col items-center justify-center p-4">
-                  <iframe
-                    src="https://graphingcalculator.pro/graphing-calculator"
-                    height="100%"
-                    width="100%"
-                    frameBorder="0"
-                    allow="fullscreen"
-                    className="rounded-lg"
-                    title="Graphing Calculator"
-                  />
+                  
+                {/* Tab content */}
+                <div className="flex-1 overflow-hidden">
+                  {workspaceTab === 'notes' ? (
+                    <div className="h-full flex flex-col p-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="font-semibold text-gray-700">Your Notes</h3>
+                        <button
+                          onClick={saveTaskNotes}
+                          disabled={savingNotes}
+                          className="bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1"
+                        >
+                          {savingNotes ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              Save
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <textarea
+                        value={workspaceNotes}
+                        onChange={(e) => setWorkspaceNotes(e.target.value)}
+                        placeholder="Type your notes here... bullet points, reminders, key concepts, etc."
+                        className="flex-1 w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center p-4">
+                      <iframe
+                        src="https://graphingcalculator.pro/graphing-calculator"
+                        height="100%"
+                        width="100%"
+                        frameBorder="0"
+                        allow="fullscreen"
+                        className="rounded-lg"
+                        title="Graphing Calculator"
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </div>
-            
-          {/* Right Side: Canvas Task (65%) */}
-          <div className="w-[65%] flex flex-col">
-            <div className="bg-gray-50 p-3 border-b border-gray-200">
-              <h3 className="font-semibold text-gray-700 mb-1">Canvas Assignment</h3>
-              <a
-                href={workspaceTask.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-600 hover:text-blue-700 break-all"
-              >
-                {workspaceTask.url}
-              </a>
-            </div>
-            <div className="flex-1 overflow-hidden">
-              {workspaceTask.url ? (
-                <iframe
-                  src={workspaceTask.url}
-                  className="w-full h-full border-0"
-                  title="Canvas Assignment"
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-gray-500">
-                  <div className="text-center">
-                    <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                    <p>No URL available for this task</p>
-                  </div>
+              </div>
+                
+              {/* Right Side: Canvas Task (65%) */}
+              <div className="w-[65%] flex flex-col">
+                <div className="bg-gray-50 p-3 border-b border-gray-200">
+                  <h3 className="font-semibold text-gray-700 mb-1">Canvas Assignment</h3>
+                  <a
+                    href={workspaceTask.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-blue-600 hover:text-blue-700 break-all"
+                  >
+                    {workspaceTask.url}
+                  </a>
                 </div>
-              )}
+                <div className="flex-1 overflow-hidden">
+                  {workspaceTask.url ? (
+                    <iframe
+                      src={workspaceTask.url}
+                      className="w-full h-full border-0"
+                      title="Canvas Assignment"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-gray-500">
+                      <div className="text-center">
+                        <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                        <p>No URL available for this task</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
