@@ -2947,7 +2947,7 @@ const fetchCanvasTasks = async () => {
                 <div className="flex-1 overflow-hidden">
                   {workspaceTask.url ? (
                     <iframe
-                      src={`${API_URL}/canvas-proxy?url=${encodeURIComponent(workspaceTask.url)}&token=${token}`}
+                      src={`${API_URL}/proxy-canvas?url=${encodeURIComponent(workspaceTask.url)}&token=${token}`}
                       className="w-full h-full border-0"
                       title="Canvas Assignment"
                       sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-top-navigation"
