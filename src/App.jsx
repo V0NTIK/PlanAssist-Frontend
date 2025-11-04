@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
 
@@ -75,6 +75,18 @@ const PlanAssist = () => {
   const [popupNotesSaving, setPopupNotesSaving] = useState(false);
   const [popupNotesLastSaved, setPopupNotesLastSaved] = useState(null);
   const [tasksWithNotes, setTasksWithNotes] = useState(new Set());
+
+  // Hub features state
+  const [completionFeed, setCompletionFeed] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [userLeaderboardPosition, setUserLeaderboardPosition] = useState(null);
+  const [hubStats, setHubStats] = useState({
+    tasksCompletedToday: 0,
+    tasksCompletedWeek: 0,
+    totalStudyTime: 0,
+    averageAccuracy: 0,
+    streak: 0
+  });
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -1384,6 +1396,126 @@ const fetchCanvasTasks = async () => {
     loadTasksWithNotes();
   }, [isAuthenticated, tasks.length]);
 
+  // ============================================================================
+  // HUB FEATURES - Load completion feed, leaderboard, and stats
+  // ============================================================================
+
+  const loadCompletionFeed = async () => {
+    try {
+      const data = await apiCall('/completion-feed', 'GET');
+      setCompletionFeed(data || []);
+    } catch (error) {
+      console.error('Failed to load completion feed:', error);
+    }
+  };
+
+  const loadLeaderboard = async () => {
+    if (!user || !user.grade) return;
+    
+    try {
+      const data = await apiCall(`/leaderboard/${user.grade}`, 'GET');
+      setLeaderboard(data || []);
+      
+      // Also get user's position
+      const position = await apiCall(`/leaderboard/position/${user.grade}`, 'GET');
+      setUserLeaderboardPosition(position);
+    } catch (error) {
+      console.error('Failed to load leaderboard:', error);
+    }
+  };
+
+  const calculateHubStats = () => {
+    if (!completionHistory || completionHistory.length === 0) {
+      setHubStats({
+        tasksCompletedToday: 0,
+        tasksCompletedWeek: 0,
+        totalStudyTime: 0,
+        averageAccuracy: 0,
+        streak: 0
+      });
+      return;
+    }
+
+    const now = new Date();
+    const todayStart = new Date(now.setHours(0, 0, 0, 0));
+    const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+    weekStart.setHours(0, 0, 0, 0);
+
+    const tasksCompletedToday = completionHistory.filter(task => 
+      new Date(task.completedAt) >= todayStart
+    ).length;
+
+    const tasksCompletedWeek = completionHistory.filter(task => 
+      new Date(task.completedAt) >= weekStart
+    ).length;
+
+    const totalStudyTime = completionHistory.reduce((sum, task) => 
+      sum + (task.actualTime || 0), 0
+    );
+
+    // Calculate accuracy (actual time vs estimated time)
+    const accuracySum = completionHistory.reduce((sum, task) => {
+      if (task.estimatedTime && task.actualTime) {
+        const accuracy = Math.min(100, (task.estimatedTime / task.actualTime) * 100);
+        return sum + accuracy;
+      }
+      return sum;
+    }, 0);
+    const averageAccuracy = completionHistory.length > 0 
+      ? Math.round(accuracySum / completionHistory.length) 
+      : 0;
+
+    // Calculate streak (consecutive days with completions)
+    const sortedCompletions = [...completionHistory].sort((a, b) => 
+      new Date(b.completedAt) - new Date(a.completedAt)
+    );
+    
+    let streak = 0;
+    let currentDate = new Date();
+    currentDate.setHours(0, 0, 0, 0);
+    
+    for (let i = 0; i < sortedCompletions.length; i++) {
+      const completionDate = new Date(sortedCompletions[i].completedAt);
+      completionDate.setHours(0, 0, 0, 0);
+      
+      const daysDiff = Math.floor((currentDate - completionDate) / (1000 * 60 * 60 * 24));
+      
+      if (daysDiff === streak) {
+        streak++;
+      } else if (daysDiff > streak) {
+        break;
+      }
+    }
+
+    setHubStats({
+      tasksCompletedToday,
+      tasksCompletedWeek,
+      totalStudyTime,
+      averageAccuracy,
+      streak
+    });
+  };
+
+  // Load Hub data when authenticated or when completion history changes
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      loadCompletionFeed();
+      loadLeaderboard();
+      
+      // Refresh feed and leaderboard every 30 seconds
+      const interval = setInterval(() => {
+        loadCompletionFeed();
+        loadLeaderboard();
+      }, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated, user]);
+
+  useEffect(() => {
+    calculateHubStats();
+  }, [completionHistory]);
+
 
   const switchWorkspaceTab = async (tab) => {
     if (workspaceTab === 'notes' && tab !== 'notes') {
@@ -1822,77 +1954,254 @@ const fetchCanvasTasks = async () => {
       <div className="py-6">
         {currentPage === 'hub' && (
           <div className="max-w-7xl mx-auto p-6 space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-xl p-6 shadow-lg">
+            {/* Welcome Header */}
+            <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
+              <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.name || 'Student'}!</h1>
+              <p className="text-purple-100">Here's how you're doing today</p>
+            </div>
+
+            {/* Enhanced Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-blue-100">
                 <div className="flex items-center justify-between mb-2">
-                  <BarChart3 className="w-8 h-8" />
-                  <span className="text-2xl font-bold">{completionHistory.length}</span>
+                  <Check className="w-6 h-6 text-blue-600" />
+                  <span className="text-3xl font-bold text-gray-900">{hubStats.tasksCompletedToday}</span>
                 </div>
-                <p className="text-blue-100 font-medium">Tasks Completed</p>
+                <p className="text-sm text-gray-600 font-medium">Today</p>
               </div>
-              <div className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-xl p-6 shadow-lg">
+              
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-purple-100">
                 <div className="flex items-center justify-between mb-2">
-                  <Clock className="w-8 h-8" />
-                  <span className="text-2xl font-bold">{tasks.filter(t => !t.completed).length}</span>
+                  <Calendar className="w-6 h-6 text-purple-600" />
+                  <span className="text-3xl font-bold text-gray-900">{hubStats.tasksCompletedWeek}</span>
                 </div>
-                <p className="text-purple-100 font-medium">Pending Tasks</p>
+                <p className="text-sm text-gray-600 font-medium">This Week</p>
               </div>
-              <div className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-xl p-6 shadow-lg">
+              
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-amber-100">
                 <div className="flex items-center justify-between mb-2">
-                  <TrendingUp className="w-8 h-8" />
-                  <span className="text-2xl font-bold">{sessions.length}</span>
+                  <Clock className="w-6 h-6 text-amber-600" />
+                  <span className="text-3xl font-bold text-gray-900">{Math.floor(hubStats.totalStudyTime / 60)}h</span>
                 </div>
-                <p className="text-green-100 font-medium">Upcoming Sessions</p>
+                <p className="text-sm text-gray-600 font-medium">Study Time</p>
+              </div>
+              
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-green-100">
+                <div className="flex items-center justify-between mb-2">
+                  <Target className="w-6 h-6 text-green-600" />
+                  <span className="text-3xl font-bold text-gray-900">{hubStats.averageAccuracy}%</span>
+                </div>
+                <p className="text-sm text-gray-600 font-medium">Accuracy</p>
+              </div>
+              
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-orange-100">
+                <div className="flex items-center justify-between mb-2">
+                  <Zap className="w-6 h-6 text-orange-600" />
+                  <span className="text-3xl font-bold text-gray-900">{hubStats.streak}</span>
+                </div>
+                <p className="text-sm text-gray-600 font-medium">Day Streak</p>
               </div>
             </div>
-            {tasks.filter(t => !t.completed).length > 0 && (
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-xl font-bold text-gray-900 mb-4">Next Up</h2>
-                {(() => {
-                  const nextTask = tasks.filter(t => !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
-                  return (
-                    <div className="bg-gradient-to-r from-yellow-50 to-purple-50 border-2 border-purple-200 rounded-lg p-6">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <h3 className="text-lg font-bold text-gray-900 mb-2">{nextTask.title}</h3>
-                          <div className="flex items-center gap-4 text-sm text-gray-600">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {nextTask.userEstimate || nextTask.estimatedTime} min
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4" />
-                              Due {nextTask.dueDate.toLocaleDateString()}
-                            </span>
+
+            {/* Main Content Grid - Two Columns */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Left Column - Next Task and Quick Actions */}
+              <div className="lg:col-span-2 space-y-6">
+                {/* Next Up Task */}
+                {tasks.filter(t => !t.completed).length > 0 && (
+                  <div className="bg-white rounded-xl shadow-md p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <TrendingUp className="w-5 h-5 text-purple-600" />
+                      <h2 className="text-xl font-bold text-gray-900">Next Up</h2>
+                    </div>
+                    {(() => {
+                      const nextTask = tasks.filter(t => !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
+                      return (
+                        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <h3 className="text-lg font-bold text-gray-900 mb-2">{nextTask.title}</h3>
+                              <div className="flex items-center gap-4 text-sm text-gray-600">
+                                <span className="flex items-center gap-1">
+                                  <Clock className="w-4 h-4" />
+                                  {nextTask.userEstimate || nextTask.estimatedTime} min
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Calendar className="w-4 h-4" />
+                                  Due {nextTask.dueDate.toLocaleDateString()}
+                                </span>
+                              </div>
+                            </div>
+                            <button onClick={() => setCurrentPage('tasks')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium transition-colors flex-shrink-0">
+                              View All
+                            </button>
                           </div>
                         </div>
-                        <button onClick={() => setCurrentPage('tasks')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium">
-                          View All
-                        </button>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Live Completion Feed */}
+                <div className="bg-white rounded-xl shadow-md p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Award className="w-5 h-5 text-green-600" />
+                    <h2 className="text-xl font-bold text-gray-900">Live Activity</h2>
+                    <span className="ml-auto text-xs text-gray-500">Updates every 30s</span>
+                  </div>
+                  <div className="space-y-3 max-h-80 overflow-y-auto">
+                    {completionFeed.length > 0 ? (
+                      completionFeed.map((item, index) => {
+                        const timeAgo = (() => {
+                          const seconds = Math.floor((new Date() - new Date(item.completed_at)) / 1000);
+                          if (seconds < 60) return 'just now';
+                          if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+                          if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+                          return `${Math.floor(seconds / 86400)}d ago`;
+                        })();
+                        
+                        return (
+                          <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                              <Check className="w-4 h-4 text-white" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-gray-900">
+                                <span className="font-semibold">{item.user_name}</span>
+                                {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
+                                <span className="text-gray-600"> completed </span>
+                                <span className="font-medium text-purple-600">{item.task_class}</span>
+                              </p>
+                              <p className="text-xs text-gray-500 mt-1">{timeAgo}</p>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="text-center py-8 text-gray-500">
+                        <Award className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                        <p>No recent activity</p>
+                        <p className="text-xs mt-1">Complete tasks to appear here!</p>
                       </div>
-                    </div>
-                  );
-                })()}
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick Actions */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <button onClick={() => setCurrentPage('sessions')} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-green-200">
+                    <Play className="w-10 h-10 text-green-600 mb-3" />
+                    <h3 className="text-lg font-bold text-gray-900 mb-1">Start Session</h3>
+                    <p className="text-sm text-gray-600">Begin your study period</p>
+                  </button>
+                  <button onClick={() => setCurrentPage('tasks')} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-blue-200">
+                    <List className="w-10 h-10 text-blue-600 mb-3" />
+                    <h3 className="text-lg font-bold text-gray-900 mb-1">Manage Tasks</h3>
+                    <p className="text-sm text-gray-600">View your task list</p>
+                  </button>
+                </div>
               </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <button onClick={() => setCurrentPage('sessions')} className="bg-white rounded-xl shadow-md p-8 hover:shadow-lg transition-shadow text-left">
-                <Play className="w-12 h-12 text-green-600 mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Start Study Session</h3>
-                <p className="text-gray-600">Begin your scheduled study period</p>
-              </button>
-              <button onClick={() => setCurrentPage('tasks')} className="bg-white rounded-xl shadow-md p-8 hover:shadow-lg transition-shadow text-left">
-                <List className="w-12 h-12 text-blue-600 mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Manage Tasks</h3>
-                <p className="text-gray-600">View and adjust your task list</p>
-              </button>
+
+              {/* Right Column - Leaderboard */}
+              <div className="space-y-6">
+                {user?.grade && (
+                  <div className="bg-white rounded-xl shadow-md p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <Trophy className="w-5 h-5 text-yellow-600" />
+                      <h2 className="text-xl font-bold text-gray-900">Grade {user.grade} Leaders</h2>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-4">Weekly tasks completed • Resets Monday</p>
+                    
+                    {/* User's Position */}
+                    {userLeaderboardPosition && userLeaderboardPosition.position && (
+                      <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-4 mb-4">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-gray-600">Your Rank</p>
+                            <p className="text-2xl font-bold text-purple-600">#{userLeaderboardPosition.position}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm text-gray-600">Tasks Done</p>
+                            <p className="text-2xl font-bold text-gray-900">{userLeaderboardPosition.tasks_completed}</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Leaderboard List */}
+                    <div className="space-y-2">
+                      {leaderboard.length > 0 ? (
+                        leaderboard.map((entry, index) => {
+                          const isCurrentUser = entry.user_name === user?.name;
+                          const medals = ['🥇', '🥈', '🥉'];
+                          
+                          return (
+                            <div 
+                              key={index} 
+                              className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
+                                isCurrentUser 
+                                  ? 'bg-purple-100 border-2 border-purple-300' 
+                                  : 'bg-gray-50 hover:bg-gray-100'
+                              }`}
+                            >
+                              <div className="w-8 text-center font-bold text-gray-900">
+                                {index < 3 ? medals[index] : `#${index + 1}`}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-sm font-semibold truncate ${
+                                  isCurrentUser ? 'text-purple-900' : 'text-gray-900'
+                                }`}>
+                                  {entry.user_name}
+                                  {isCurrentUser && <span className="ml-2 text-xs text-purple-600">(You)</span>}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="text-lg font-bold text-gray-900">{entry.tasks_completed}</p>
+                                <p className="text-xs text-gray-500">tasks</p>
+                              </div>
+                            </div>
+                          );
+                        })
+                      ) : (
+                        <div className="text-center py-8 text-gray-500">
+                          <Trophy className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                          <p>No leaderboard yet</p>
+                          <p className="text-xs mt-1">Complete tasks to appear!</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Pending Tasks Summary */}
+                <div className="bg-white rounded-xl shadow-md p-6">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Clock className="w-5 h-5 text-blue-600" />
+                    <h2 className="text-xl font-bold text-gray-900">Pending</h2>
+                  </div>
+                  <div className="text-center py-6">
+                    <div className="text-5xl font-bold text-gray-900 mb-2">
+                      {tasks.filter(t => !t.completed).length}
+                    </div>
+                    <p className="text-gray-600">tasks to complete</p>
+                  </div>
+                  <button 
+                    onClick={() => setCurrentPage('tasks')} 
+                    className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-medium transition-colors"
+                  >
+                    View All Tasks
+                  </button>
+                </div>
+              </div>
             </div>
+
+            {/* No Tasks State */}
             {tasks.length === 0 && (
               <div className="bg-white rounded-xl shadow-md p-12 text-center">
                 <Brain className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-gray-900 mb-2">No Tasks Yet</h3>
                 <p className="text-gray-600 mb-6">Connect your Canvas calendar to get started</p>
-                <button onClick={() => setCurrentPage('settings')} className="bg-gradient-to-r from-yellow-400 to-purple-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                <button onClick={() => setCurrentPage('settings')} className="bg-gradient-to-r from-purple-600 to-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-blue-700 transition-all">
                   Set Up Canvas
                 </button>
               </div>
@@ -2937,6 +3246,41 @@ const fetchCanvasTasks = async () => {
                           <span className="flex-1 font-medium text-gray-700">{className}</span>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Completion Feed Preference - Only shown after initial setup */}
+                {!user?.isNewUser && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Privacy Settings
+                    </label>
+                    <div className="border border-gray-200 rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <input 
+                          type="checkbox"
+                          checked={user?.showInFeed !== false}
+                          onChange={async (e) => {
+                            try {
+                              await apiCall('/user/feed-preference', 'PUT', { 
+                                showInFeed: e.target.checked 
+                              });
+                              setUser(prev => ({ ...prev, showInFeed: e.target.checked }));
+                            } catch (error) {
+                              console.error('Failed to update feed preference:', error);
+                            }
+                          }}
+                          className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                        />
+                        <div className="flex-1">
+                          <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            When enabled, other students will see when you complete tasks on the Hub page. 
+                            Only your name and grade are shown.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 )}
