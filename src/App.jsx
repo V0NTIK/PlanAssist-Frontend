@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2 } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
+const CANVAS_PROXY_URL = 'https://canvas-proxy.ocwyman.workers.dev';
 
 const PlanAssist = () => {
   // Auth state
@@ -2946,7 +2947,7 @@ const fetchCanvasTasks = async () => {
                 <div className="flex-1 overflow-hidden">
                   {workspaceTask.url ? (
                     <iframe
-                      src={workspaceTask.url}
+                      src={`${CANVAS_PROXY_URL}?url=${encodeURIComponent(workspaceTask.url)}`}
                       className="w-full h-full border-0"
                       title="Canvas Assignment"
                       sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-top-navigation"
