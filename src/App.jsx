@@ -1204,6 +1204,11 @@ const fetchCanvasTasks = async () => {
     setWorkspaceTab('notes');
     await loadTaskNotes(task.id);
     setShowWorkspace(true);
+    
+    // Automatically open Canvas in split-screen
+    if (task.url) {
+      openSplitScreen(task.url);
+    }
   };
 
   const closeWorkspace = async () => {
@@ -2847,8 +2852,25 @@ const fetchCanvasTasks = async () => {
               
             {/* Content */}
             <div className="flex-1 flex overflow-hidden">
-              {/* Left Side: Notes/Calculator (35%) */}
-              <div className="w-[35%] border-r border-gray-200 flex flex-col">
+              {/* Main Content: Notes/Calculator (Full Width) */}
+              <div className="flex-1 flex flex-col">
+                {/* Info Banner */}
+                <div className="bg-blue-50 border-b border-blue-200 p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-blue-700">
+                    <Info className="w-5 h-5" />
+                    <span className="text-sm font-medium">Canvas page opened in separate window (right side of screen)</span>
+                  </div>
+                  <button
+                    onClick={() => workspaceTask.url && openSplitScreen(workspaceTask.url)}
+                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                    </svg>
+                    Reopen Canvas
+                  </button>
+                </div>
+                
                 {/* Tab selector */}
                 <div className="flex border-b border-gray-200">
                   <button
@@ -2919,38 +2941,10 @@ const fetchCanvasTasks = async () => {
                   )}
                 </div>
               </div>
-                
-              {/* Right Side: Canvas Task (65%) */}
-              <div className="w-[65%] flex flex-col">
-                <div className="bg-gray-50 p-3 border-b border-gray-200 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-gray-700 mb-1">Canvas Task</h3>
-                    <a
-                      href={workspaceTask.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:text-blue-700 break-all"
-                    >
-                      {workspaceTask.url}
-                    </a>
-                  </div>
-                  <button
-                    onClick={() => openSplitScreen(workspaceTask.url)}
-                    className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium text-sm flex items-center gap-2 whitespace-nowrap"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                    </svg>
-                    Split-Screen
-                  </button>
-                </div>
-                <div className="flex-1 overflow-hidden">
-                  {workspaceTask.url ? (
-                    <iframe
-                      src={`${API_URL}/proxy-canvas?url=${encodeURIComponent(workspaceTask.url)}&token=${token}`}
-                      className="w-full h-full border-0"
-                      title="Canvas Assignment"
-                      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-top-navigation"
+            </div>
+          </div>
+        </div>
+      )}
                     />
                   ) : (
                     <div className="flex items-center justify-center h-full text-gray-500">
