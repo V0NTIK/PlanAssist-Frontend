@@ -1384,57 +1384,6 @@ const fetchCanvasTasks = async () => {
     loadTasksWithNotes();
   }, [isAuthenticated, tasks.length]);
 
-  const openSplitScreen = (url) => {
-    const screenWidth = window.screen.availWidth;
-    const screenHeight = window.screen.availHeight;
-    
-    // Close existing Canvas window if open
-    if (canvasWindow && !canvasWindow.closed) {
-      canvasWindow.close();
-    }
-    
-    // Calculate half screen width
-    const halfWidth = Math.floor(screenWidth / 2);
-    
-    // Open Canvas window on RIGHT half
-    const newCanvasWindow = window.open(
-      url,
-      'canvas-window',
-      `width=${halfWidth},height=${screenHeight},left=${halfWidth},top=0,resizable=yes,scrollbars=yes,menubar=no,toolbar=no,location=yes,status=yes,alwaysRaised=yes`
-    );
-    
-    if (newCanvasWindow) {
-      setCanvasWindow(newCanvasWindow);
-      
-      // Resize and position PlanAssist on LEFT half
-      setTimeout(() => {
-        try {
-          window.resizeTo(halfWidth, screenHeight);
-          window.moveTo(0, 0);
-        } catch (e) {
-          console.log('Window resize blocked:', e);
-        }
-        
-        // Focus Canvas window after positioning
-        setTimeout(() => {
-          if (newCanvasWindow && !newCanvasWindow.closed) {
-            newCanvasWindow.focus();
-          }
-        }, 100);
-      }, 100);
-      
-      // Detect when Canvas window is closed
-      const checkClosed = setInterval(() => {
-        if (newCanvasWindow.closed) {
-          clearInterval(checkClosed);
-          setCanvasWindow(null);
-        }
-      }, 1000);
-      
-    } else {
-      alert('Pop-up blocked! Please allow pop-ups for PlanAssist and try again.');
-    }
-  };
 
   const switchWorkspaceTab = async (tab) => {
     if (workspaceTab === 'notes' && tab !== 'notes') {
