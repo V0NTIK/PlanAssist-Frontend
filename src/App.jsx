@@ -67,6 +67,7 @@ const PlanAssist = () => {
   const [workspaceNotes, setWorkspaceNotes] = useState('');
   const [workspaceTab, setWorkspaceTab] = useState('notes');
   const [savingNotes, setSavingNotes] = useState(false);
+  const [canvasWindow, setCanvasWindow] = useState(null);
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -1208,9 +1209,73 @@ const fetchCanvasTasks = async () => {
     if (workspaceNotes) {
       await saveTaskNotes();
     }
+    // Close Canvas window if open
+    if (canvasWindow && !canvasWindow.closed) {
+      canvasWindow.close();
+    }
     setShowWorkspace(false);
     setWorkspaceTask(null);
     setWorkspaceNotes('');
+    setCanvasWindow(null);
+    // Restore window to full size
+    try {
+      window.moveTo(0, 0);
+      window.resizeTo(window.screen.availWidth, window.screen.availHeight);
+    } catch (e) {
+      // Ignore errors if window manipulation is blocked
+    }
+  };
+
+  const openSplitScreen = (url) => {
+    const screenWidth = window.screen.availWidth;
+    const screenHeight = window.screen.availHeight;
+    
+    // Close existing Canvas window if open
+    if (canvasWindow && !canvasWindow.closed) {
+      canvasWindow.close();
+    }
+    
+    // Calculate half screen width
+    const halfWidth = Math.floor(screenWidth / 2);
+    
+    // Open Canvas window on RIGHT half
+    const newCanvasWindow = window.open(
+      url,
+      'canvas-window',
+      `width=${halfWidth},height=${screenHeight},left=${halfWidth},top=0,resizable=yes,scrollbars=yes,menubar=no,toolbar=no,location=yes,status=yes,alwaysRaised=yes`
+    );
+    
+    if (newCanvasWindow) {
+      setCanvasWindow(newCanvasWindow);
+      
+      // Resize and position PlanAssist on LEFT half
+      setTimeout(() => {
+        try {
+          window.resizeTo(halfWidth, screenHeight);
+          window.moveTo(0, 0);
+        } catch (e) {
+          console.log('Window resize blocked:', e);
+        }
+        
+        // Focus Canvas window after positioning
+        setTimeout(() => {
+          if (newCanvasWindow && !newCanvasWindow.closed) {
+            newCanvasWindow.focus();
+          }
+        }, 100);
+      }, 100);
+      
+      // Detect when Canvas window is closed
+      const checkClosed = setInterval(() => {
+        if (newCanvasWindow.closed) {
+          clearInterval(checkClosed);
+          setCanvasWindow(null);
+        }
+      }, 1000);
+      
+    } else {
+      alert('Pop-up blocked! Please allow pop-ups for PlanAssist and try again.');
+    }
   };
 
   const switchWorkspaceTab = async (tab) => {
@@ -2869,16 +2934,7 @@ const fetchCanvasTasks = async () => {
                     </a>
                   </div>
                   <button
-                    onClick={() => {
-                      window.open(
-                        workspaceTask.url,
-                        'canvas-window',
-                        `width=${Math.floor(window.screen.availWidth / 2)},height=${window.screen.availHeight},left=${Math.floor(window.screen.availWidth / 2)},top=0,resizable=yes,scrollbars=yes,status=yes`
-                      );
-                      // Also resize current window to left half
-                      window.resizeTo(Math.floor(window.screen.availWidth / 2), window.screen.availHeight);
-                      window.moveTo(0, 0);
-                    }}
+                    onClick={() => openSplitScreen(workspaceTask.url)}
                     className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium text-sm flex items-center gap-2 whitespace-nowrap"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2898,16 +2954,16 @@ const fetchCanvasTasks = async () => {
                       Work Side-by-Side
                     </h3>
                     <p className="text-gray-600 mb-6">
-                      Click "Open Split-Screen" to view your Canvas assignment alongside your notes and calculator. 
+                      Click "Open Split-Screen" to view your Canvas task alongside your notes and calculator. 
                       Both windows will automatically arrange for the perfect workspace.
                     </p>
                     <div className="bg-purple-100 border border-purple-200 rounded-lg p-4 text-sm text-left">
-                      <div className="font-semibold text-purple-900 mb-2">💡 Why Split-Screen?</div>
+                      <div className="font-semibold text-purple-900 mb-2">💡 How to Use Split-Screen</div>
                       <ul className="space-y-1 text-purple-800">
-                        <li>✓ Full Canvas functionality (no restrictions)</li>
-                        <li>✓ Login works normally</li>
-                        <li>✓ All features & tools available</li>
-                        <li>✓ Easy to switch between windows</li>
+                        <li>✓ Canvas opens on the right, stays on top</li>
+                        <li>✓ PlanAssist stays on the left for notes</li>
+                        <li>✓ Use <kbd className="bg-purple-200 px-1 rounded text-xs">Alt</kbd>+<kbd className="bg-purple-200 px-1 rounded text-xs">Tab</kbd> to switch windows</li>
+                        <li>✓ Both windows resize automatically</li>
                       </ul>
                     </div>
                     <button
