@@ -1437,16 +1437,21 @@ const fetchCanvasTasks = async () => {
     }
 
     const now = new Date();
-    const todayStart = new Date(now.setHours(0, 0, 0, 0));
-    const weekStart = new Date(now.setDate(now.getDate() - now.getDay()));
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    // Get Monday of this week
+    const weekStart = new Date(now);
+    const day = weekStart.getDay();
+    const diff = weekStart.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+    weekStart.setDate(diff);
     weekStart.setHours(0, 0, 0, 0);
 
     const tasksCompletedToday = completionHistory.filter(task => 
-      new Date(task.completedAt) >= todayStart
+      task.date >= todayStart
     ).length;
 
     const tasksCompletedWeek = completionHistory.filter(task => 
-      new Date(task.completedAt) >= weekStart
+      task.date >= weekStart
     ).length;
 
     const totalStudyTime = completionHistory.reduce((sum, task) => 
@@ -1454,37 +1459,64 @@ const fetchCanvasTasks = async () => {
     );
 
     // Calculate accuracy (actual time vs estimated time)
-    const accuracySum = completionHistory.reduce((sum, task) => {
-      if (task.estimatedTime && task.actualTime) {
-        const accuracy = Math.min(100, (task.estimatedTime / task.actualTime) * 100);
-        return sum + accuracy;
-      }
-      return sum;
-    }, 0);
-    const averageAccuracy = completionHistory.length > 0 
-      ? Math.round(accuracySum / completionHistory.length) 
-      : 0;
-
-    // Calculate streak (consecutive days with completions)
-    const sortedCompletions = [...completionHistory].sort((a, b) => 
-      new Date(b.completedAt) - new Date(a.completedAt)
+    // Only include tasks where both values exist
+    const tasksWithBothTimes = completionHistory.filter(task => 
+      task.estimatedTime && task.actualTime && task.estimatedTime > 0 && task.actualTime > 0
     );
     
-    let streak = 0;
-    let currentDate = new Date();
-    currentDate.setHours(0, 0, 0, 0);
+    const accuracySum = tasksWithBothTimes.reduce((sum, task) => {
+      // Accuracy = how close you were to your estimate
+      // If actual time matches estimated time = 100%
+      // If you underestimate (actual > estimated) = lower score
+      // If you overestimate (actual < estimated) = also lower score
+      const ratio = Math.min(task.estimatedTime / task.actualTime, task.actualTime / task.estimatedTime);
+      const accuracy = ratio * 100;
+      return sum + accuracy;
+    }, 0);
     
-    for (let i = 0; i < sortedCompletions.length; i++) {
-      const completionDate = new Date(sortedCompletions[i].completedAt);
-      completionDate.setHours(0, 0, 0, 0);
+    const averageAccuracy = tasksWithBothTimes.length > 0 
+      ? Math.round(accuracySum / tasksWithBothTimes.length) 
+      : 0;
+
+    // Calculate streak (consecutive WEEKDAYS with completions, excluding weekends)
+    const sortedCompletions = [...completionHistory].sort((a, b) => 
+      b.date - a.date
+    );
+    
+    // Get unique dates (ignore time)
+    const completionDates = [...new Set(sortedCompletions.map(task => {
+      const d = new Date(task.date);
+      return d.toDateString();
+    }))].map(dateStr => new Date(dateStr));
+    
+    let streak = 0;
+    let checkDate = new Date();
+    checkDate.setHours(0, 0, 0, 0);
+    
+    // Skip weekends when looking backwards
+    while (checkDate.getDay() === 0 || checkDate.getDay() === 6) {
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+    
+    // Check each weekday going backwards
+    while (true) {
+      const dateStr = checkDate.toDateString();
+      const hasCompletion = completionDates.some(d => d.toDateString() === dateStr);
       
-      const daysDiff = Math.floor((currentDate - completionDate) / (1000 * 60 * 60 * 24));
-      
-      if (daysDiff === streak) {
+      if (hasCompletion) {
         streak++;
-      } else if (daysDiff > streak) {
+        // Move to previous weekday
+        checkDate.setDate(checkDate.getDate() - 1);
+        while (checkDate.getDay() === 0 || checkDate.getDay() === 6) {
+          checkDate.setDate(checkDate.getDate() - 1);
+        }
+      } else {
+        // Streak broken
         break;
       }
+      
+      // Safety: don't go back more than 365 days
+      if (streak > 365) break;
     }
 
     setHubStats({
@@ -2067,10 +2099,10 @@ const fetchCanvasTasks = async () => {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-gray-900">
-                                <span className="font-semibold">{item.user_name}</span>
+                                <span className="font-semibold">{item.user_name.split(' ')[0]}</span>
                                 {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
                                 <span className="text-gray-600"> completed </span>
-                                <span className="font-medium text-purple-600">{item.task_class}</span>
+                                <span className="font-medium text-purple-600">{item.task_title}</span>
                               </p>
                               <p className="text-xs text-gray-500 mt-1">{timeAgo}</p>
                             </div>
