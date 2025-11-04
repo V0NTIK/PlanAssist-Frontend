@@ -2,10 +2,9 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2 } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText } from 'lucide-react';
 
 const API_URL = 'https://planassist.onrender.com/api';
-const CANVAS_PROXY_URL = 'https://canvas-proxy.ocwyman.workers.dev';
 
 const PlanAssist = () => {
   // Auth state
@@ -69,6 +68,13 @@ const PlanAssist = () => {
   const [workspaceTab, setWorkspaceTab] = useState('notes');
   const [savingNotes, setSavingNotes] = useState(false);
   const [canvasWindow, setCanvasWindow] = useState(null);
+  
+  // Notes popup state (for quick notes from task list)
+  const [showNotesPopup, setShowNotesPopup] = useState(null);
+  const [popupNotes, setPopupNotes] = useState('');
+  const [popupNotesSaving, setPopupNotesSaving] = useState(false);
+  const [popupNotesLastSaved, setPopupNotesLastSaved] = useState(null);
+  const [tasksWithNotes, setTasksWithNotes] = useState(new Set());
 
   // Calculate selected periods based on presentPeriods
   const selectedPeriods = React.useMemo(() => {
@@ -1271,6 +1277,152 @@ const fetchCanvasTasks = async () => {
         }, 100);
       }, 100);
       
+    }
+  };
+
+  // ============================================================================
+  // NOTES POPUP FUNCTIONS (Quick notes from task list)
+  // ============================================================================
+
+  const openNotesPopup = async (task) => {
+    setShowNotesPopup(task);
+    setPopupNotesLastSaved(null);
+    
+    // Load existing notes
+    try {
+      const data = await apiCall(`/tasks/${task.id}/notes`, 'GET');
+      setPopupNotes(data.notes || '');
+    } catch (error) {
+      console.error('Failed to load notes:', error);
+      setPopupNotes('');
+    }
+  };
+
+  const closeNotesPopup = async () => {
+    // Auto-save before closing if there are notes
+    if (popupNotes && showNotesPopup) {
+      await savePopupNotes();
+    }
+    setShowNotesPopup(null);
+    setPopupNotes('');
+    setPopupNotesLastSaved(null);
+  };
+
+  const savePopupNotes = async () => {
+    if (!showNotesPopup) return;
+
+    setPopupNotesSaving(true);
+    try {
+      await apiCall(`/tasks/${showNotesPopup.id}/notes`, 'POST', { notes: popupNotes });
+      setPopupNotesLastSaved(new Date());
+      
+      // Update the tasksWithNotes set
+      if (popupNotes.trim()) {
+        setTasksWithNotes(prev => new Set([...prev, showNotesPopup.id]));
+      } else {
+        setTasksWithNotes(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(showNotesPopup.id);
+          return newSet;
+        });
+      }
+    } catch (error) {
+      console.error('Failed to save notes:', error);
+      alert('Failed to save notes');
+    } finally {
+      setPopupNotesSaving(false);
+    }
+  };
+
+  // Auto-save notes after 2 seconds of inactivity
+  useEffect(() => {
+    if (!showNotesPopup) return;
+
+    const timer = setTimeout(() => {
+      savePopupNotes();
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, [popupNotes, showNotesPopup]);
+
+  // Handle Escape key to close notes popup
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === 'Escape' && showNotesPopup) {
+        closeNotesPopup();
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [showNotesPopup]);
+
+  // Load which tasks have notes on mount
+  useEffect(() => {
+    const loadTasksWithNotes = async () => {
+      if (!isAuthenticated || tasks.length === 0) return;
+      
+      try {
+        const notesPromises = tasks.map(task => 
+          apiCall(`/tasks/${task.id}/notes`, 'GET').catch(() => ({ notes: '' }))
+        );
+        const notesResults = await Promise.all(notesPromises);
+        
+        const tasksWithNotesSet = new Set();
+        notesResults.forEach((result, index) => {
+          if (result.notes && result.notes.trim()) {
+            tasksWithNotesSet.add(tasks[index].id);
+          }
+        });
+        
+        setTasksWithNotes(tasksWithNotesSet);
+      } catch (error) {
+        console.error('Failed to load tasks with notes:', error);
+      }
+    };
+
+    loadTasksWithNotes();
+  }, [isAuthenticated, tasks.length]);
+
+  const openSplitScreen = (url) => {
+    const screenWidth = window.screen.availWidth;
+    const screenHeight = window.screen.availHeight;
+    
+    // Close existing Canvas window if open
+    if (canvasWindow && !canvasWindow.closed) {
+      canvasWindow.close();
+    }
+    
+    // Calculate half screen width
+    const halfWidth = Math.floor(screenWidth / 2);
+    
+    // Open Canvas window on RIGHT half
+    const newCanvasWindow = window.open(
+      url,
+      'canvas-window',
+      `width=${halfWidth},height=${screenHeight},left=${halfWidth},top=0,resizable=yes,scrollbars=yes,menubar=no,toolbar=no,location=yes,status=yes,alwaysRaised=yes`
+    );
+    
+    if (newCanvasWindow) {
+      setCanvasWindow(newCanvasWindow);
+      
+      // Resize and position PlanAssist on LEFT half
+      setTimeout(() => {
+        try {
+          window.resizeTo(halfWidth, screenHeight);
+          window.moveTo(0, 0);
+        } catch (e) {
+          console.log('Window resize blocked:', e);
+        }
+        
+        // Focus Canvas window after positioning
+        setTimeout(() => {
+          if (newCanvasWindow && !newCanvasWindow.closed) {
+            newCanvasWindow.focus();
+          }
+        }, 100);
+      }, 100);
+      
       // Detect when Canvas window is closed
       const checkClosed = setInterval(() => {
         if (newCanvasWindow.closed) {
@@ -1998,6 +2150,18 @@ const fetchCanvasTasks = async () => {
                                     >
                                       Details
                                     </button>
+                                    <button 
+                                      onClick={() => openNotesPopup(task)}
+                                      className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 text-sm font-medium transition-all relative"
+                                    >
+                                      <span className="flex items-center gap-1">
+                                        <FileText className="w-4 h-4" />
+                                        Notes
+                                      </span>
+                                      {tasksWithNotes.has(task.id) && (
+                                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" title="Has notes" />
+                                      )}
+                                    </button>
                                     {!className.toLowerCase().includes('homeroom') && (
                                       <button 
                                         onClick={() => setShowSplitTask(task.id)}
@@ -2123,6 +2287,18 @@ const fetchCanvasTasks = async () => {
                                           className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium"
                                         >
                                           Details
+                                        </button>
+                                        <button 
+                                          onClick={() => openNotesPopup(task)}
+                                          className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 text-sm font-medium relative"
+                                        >
+                                          <span className="flex items-center gap-1">
+                                            <FileText className="w-4 h-4" />
+                                            Notes
+                                          </span>
+                                          {tasksWithNotes.has(task.id) && (
+                                            <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" title="Has notes" />
+                                          )}
                                         </button>
                                         {!className.toLowerCase().includes('homeroom') && (
                                           <button 
@@ -2338,6 +2514,77 @@ const fetchCanvasTasks = async () => {
                     <button 
                       onClick={() => setShowTaskDescription(null)} 
                       className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 font-medium"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Notes Popup Modal */}
+            {showNotesPopup && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1 pr-8">
+                      <h3 className="text-xl font-bold text-gray-900 mb-1">{showNotesPopup.title}</h3>
+                      <p className="text-sm text-gray-600">{extractClassName(showNotesPopup)}</p>
+                    </div>
+                    <button 
+                      onClick={closeNotesPopup}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between mb-3 pb-3 border-b">
+                    <div className="flex items-center gap-2">
+                      <FileText className="w-5 h-5 text-amber-600" />
+                      <h4 className="font-semibold text-gray-700">Your Notes</h4>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {popupNotesLastSaved && (
+                        <span className="text-xs text-green-600">
+                          Saved {popupNotesLastSaved.toLocaleTimeString()}
+                        </span>
+                      )}
+                      <button
+                        onClick={savePopupNotes}
+                        disabled={popupNotesSaving}
+                        className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
+                      >
+                        {popupNotesSaving ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            <Save className="w-4 h-4" />
+                            Save Notes
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <textarea
+                    value={popupNotes}
+                    onChange={(e) => setPopupNotes(e.target.value)}
+                    placeholder="Type your notes here... bullet points, reminders, key concepts, study tips, etc."
+                    className="flex-1 w-full p-4 border-2 border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-gray-900"
+                    autoFocus
+                  />
+
+                  <div className="mt-4 flex justify-between items-center">
+                    <p className="text-xs text-gray-500">
+                      💡 Notes auto-save after 2 seconds of inactivity
+                    </p>
+                    <button 
+                      onClick={closeNotesPopup} 
+                      className="bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700 font-medium"
                     >
                       Close
                     </button>
