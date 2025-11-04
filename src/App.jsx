@@ -2923,7 +2923,7 @@ const fetchCanvasTasks = async () => {
               <div className="w-[65%] flex flex-col">
                 <div className="bg-gray-50 p-3 border-b border-gray-200 flex items-center justify-between">
                   <div>
-                    <h3 className="font-semibold text-gray-700 mb-1">Canvas Assignment</h3>
+                    <h3 className="font-semibold text-gray-700 mb-1">Canvas Task</h3>
                     <a
                       href={workspaceTask.url}
                       target="_blank"
@@ -2940,39 +2940,25 @@ const fetchCanvasTasks = async () => {
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                     </svg>
-                    Open Split-Screen
+                    Split-Screen
                   </button>
                 </div>
-                <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-purple-50 to-blue-50 p-8">
-                  <div className="text-center max-w-md">
-                    <div className="bg-white rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6 shadow-lg">
-                      <svg className="w-10 h-10 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                      </svg>
+                <div className="flex-1 overflow-hidden">
+                  {workspaceTask.url ? (
+                    <iframe
+                      src={workspaceTask.url}
+                      className="w-full h-full border-0"
+                      title="Canvas Assignment"
+                      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-top-navigation"
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-gray-500">
+                      <div className="text-center">
+                        <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
+                        <p>No URL available for this task</p>
+                      </div>
                     </div>
-                    <h3 className="text-2xl font-bold text-gray-900 mb-3">
-                      Work Side-by-Side
-                    </h3>
-                    <p className="text-gray-600 mb-6">
-                      Click "Open Split-Screen" to view your Canvas task alongside your notes and calculator. 
-                      Both windows will automatically arrange for the perfect workspace.
-                    </p>
-                    <div className="bg-purple-100 border border-purple-200 rounded-lg p-4 text-sm text-left">
-                      <div className="font-semibold text-purple-900 mb-2">💡 How to Use Split-Screen</div>
-                      <ul className="space-y-1 text-purple-800">
-                        <li>✓ Canvas opens on the right, stays on top</li>
-                        <li>✓ PlanAssist stays on the left for notes</li>
-                        <li>✓ Use <kbd className="bg-purple-200 px-1 rounded text-xs">Alt</kbd>+<kbd className="bg-purple-200 px-1 rounded text-xs">Tab</kbd> to switch windows</li>
-                        <li>✓ Both windows resize automatically</li>
-                      </ul>
-                    </div>
-                    <button
-                      onClick={() => window.open(workspaceTask.url, '_blank')}
-                      className="mt-6 text-purple-600 hover:text-purple-700 font-medium text-sm"
-                    >
-                      Or open in a new tab instead →
-                    </button>
-                  </div>
+                  )}
                 </div>
               </div>
             </div>
