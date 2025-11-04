@@ -447,6 +447,11 @@ const PlanAssist = () => {
       });
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
       
+      // Update user state with the new grade so leaderboard can load
+      const updatedUser = { ...user, grade: accountSetup.grade };
+      setUser(updatedUser);
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      
       // Fetch tasks and generate sessions if Canvas URL is provided
       if (accountSetup.canvasUrl) {
         await fetchCanvasTasks();
