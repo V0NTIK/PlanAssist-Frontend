@@ -2945,21 +2945,6 @@ const fetchCanvasTasks = async () => {
           </div>
         </div>
       )}
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500">
-                      <div className="text-center">
-                        <AlertCircle className="w-16 h-16 mx-auto mb-4 text-gray-400" />
-                        <p>No URL available for this task</p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
