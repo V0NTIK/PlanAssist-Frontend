@@ -1186,7 +1186,11 @@ const fetchCanvasTasks = async () => {
       
       // Save all tasks with their current priority order to backend
       await apiCall('/tasks', 'POST', { tasks: tasksForBackend });
-      generateSessions(tasks, accountSetup.schedule);
+      
+      // IMPORTANT: Reload tasks from server to get new IDs
+      // The backend deletes and re-creates tasks, so we need fresh IDs
+      await loadTasks();
+      
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
       setCurrentPage('hub');
