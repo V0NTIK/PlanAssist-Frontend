@@ -1821,7 +1821,8 @@ const fetchCanvasTasks = async () => {
         setCurrentTaskIndex(prev => prev + 1);
         setTaskStartTime(sessionTime);
       } else {
-        await endSession(true, task.id);
+        // Pass the completed task data directly to avoid state timing issues
+        await endSession(true, task.id, { task, timeSpent: totalTimeSpent });
       }
     } catch (error) {
       console.error('Failed to complete task:', error);
@@ -1831,7 +1832,7 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  const endSession = async (natural = false, justCompletedTaskId = null) => {
+  const endSession = async (natural = false, justCompletedTaskId = null, justCompletedTaskData = null) => {
     if (!natural) {
       setEndingSession(true);
     }
@@ -1889,11 +1890,17 @@ const fetchCanvasTasks = async () => {
     
       const missedTasks = currentSession.tasks.slice(missedTaskStartIndex);
     
+      // Build completions list - include just-completed task if provided
+      let completionsList = [...sessionCompletions];
+      if (justCompletedTaskData) {
+        completionsList.push(justCompletedTaskData);
+      }
+    
       setSessionSummary({
         isSaveAndExit: false,
         day: currentSession.day,
         period: currentSession.period,
-        completions: sessionCompletions,
+        completions: completionsList,
         partialTask: currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions ? {
           ...currentTask,
           partialTime: currentTaskTimeSpent
