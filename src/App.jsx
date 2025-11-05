@@ -1281,13 +1281,16 @@ const fetchCanvasTasks = async () => {
     if (newCanvasWindow) {
       setCanvasWindow(newCanvasWindow);
       
-      // Resize and position PlanAssist on LEFT half
+      // NOTE: Modern browsers block resizing/moving the main window for security.
+      // We attempt it here, but it will likely be blocked.
+      // Users should manually resize their browser window to the left half of the screen.
       setTimeout(() => {
         try {
           window.resizeTo(halfWidth, screenHeight);
           window.moveTo(0, 0);
         } catch (e) {
-          console.log('Window resize blocked:', e);
+          // Silently fail - this is expected in modern browsers
+          console.log('Browser blocked window resize (expected behavior)');
         }
         
         // Focus Canvas window after positioning
@@ -1557,6 +1560,12 @@ const fetchCanvasTasks = async () => {
     calculateHubStats();
   }, [completionHistory]);
 
+  // Scroll to top when navigating to Hub
+  useEffect(() => {
+    if (currentPage === 'hub') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [currentPage]);
 
   const switchWorkspaceTab = async (tab) => {
     if (workspaceTab === 'notes' && tab !== 'notes') {
@@ -1812,7 +1821,7 @@ const fetchCanvasTasks = async () => {
         setCurrentTaskIndex(prev => prev + 1);
         setTaskStartTime(sessionTime);
       } else {
-        await endSession(true);
+        await endSession(true, task.id);
       }
     } catch (error) {
       console.error('Failed to complete task:', error);
@@ -1822,7 +1831,7 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  const endSession = async (natural = false) => {
+  const endSession = async (natural = false, justCompletedTaskId = null) => {
     if (!natural) {
       setEndingSession(true);
     }
@@ -1832,7 +1841,11 @@ const fetchCanvasTasks = async () => {
       const currentTaskTimeSpent = currentTask ? Math.round((taskStartTime - sessionTime) / 60) : 0;
     
       // ✅ Save partial time if any time spent on current task (non-blocking)
-      if (currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+      // BUT: Don't save if this task was just completed OR is in session completions
+      const wasJustCompleted = currentTask && (currentTask.id === justCompletedTaskId);
+      const isInCompletions = currentTask && sessionCompletions.find(c => c.task.id === currentTask.id);
+      
+      if (currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions) {
         const previousAccumulatedTime = currentTask.accumulatedTime || 0;
         const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
       
@@ -1863,7 +1876,7 @@ const fetchCanvasTasks = async () => {
     
       // Determine missed tasks
       let missedTaskStartIndex = currentTaskIndex;
-      if (currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id)) {
+      if (currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions) {
         missedTaskStartIndex = currentTaskIndex + 1;
       }
     
@@ -1874,7 +1887,7 @@ const fetchCanvasTasks = async () => {
         day: currentSession.day,
         period: currentSession.period,
         completions: sessionCompletions,
-        partialTask: currentTask && currentTaskTimeSpent > 0 && !sessionCompletions.find(c => c.task.id === currentTask.id) ? {
+        partialTask: currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions ? {
           ...currentTask,
           partialTime: currentTaskTimeSpent
         } : null,
@@ -3438,12 +3451,12 @@ const fetchCanvasTasks = async () => {
                 {/* Info Banner */}
                 <div className="bg-blue-50 border-b border-blue-200 p-3 flex items-center justify-between">
                   <div className="flex items-center gap-2 text-blue-700">
-                    <Info className="w-5 h-5" />
-                    <span className="text-sm font-medium">Canvas page opened in separate window (right side of screen)</span>
+                    <Info className="w-5 h-5 flex-shrink-0" />
+                    <span className="text-sm font-medium">Canvas page opened on right side • Manually resize this window to the left half for split-screen view</span>
                   </div>
                   <button
                     onClick={() => workspaceTask.url && openSplitScreen(workspaceTask.url)}
-                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2"
+                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2 flex-shrink-0"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
