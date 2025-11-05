@@ -1875,8 +1875,15 @@ const fetchCanvasTasks = async () => {
       }
     
       // Determine missed tasks
+      // Start from current task index, but skip if current task was completed or partially worked on
       let missedTaskStartIndex = currentTaskIndex;
-      if (currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions) {
+      
+      // If current task was just completed OR is in completions, skip it
+      if (wasJustCompleted || isInCompletions) {
+        missedTaskStartIndex = currentTaskIndex + 1;
+      } 
+      // If current task has partial time but wasn't completed, it stays in the list (shown as partial)
+      else if (currentTask && currentTaskTimeSpent > 0) {
         missedTaskStartIndex = currentTaskIndex + 1;
       }
     
