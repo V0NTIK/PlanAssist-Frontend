@@ -72,7 +72,8 @@ const PlanAssist = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawColor, setDrawColor] = useState('#000000');
   const [drawWidth, setDrawWidth] = useState(3);
-  const [whiteboardRef, setWhiteboardRef] = useState(null);
+  const whiteboardRef = React.useRef(null);
+  const [whiteboardInitialized, setWhiteboardInitialized] = useState(false);
   
   // White noise state
   const [whiteNoiseAudio, setWhiteNoiseAudio] = useState(null);
@@ -1384,28 +1385,43 @@ const fetchCanvasTasks = async () => {
   // WORKSPACE TOOL FUNCTIONS - Whiteboard, White Noise, Pomodoro
   // ============================================================================
 
-  // Whiteboard functions
-  const initWhiteboard = (canvas) => {
-    if (!canvas) return;
-    setWhiteboardRef(canvas);
-    const ctx = canvas.getContext('2d');
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    
-    // Set canvas size to match display size
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
-    
-    // Attach touch listeners with {passive: false} to allow preventDefault if needed
-    canvas.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-    }, { passive: false });
-    
-    canvas.addEventListener('touchmove', (e) => {
-      e.preventDefault();
-    }, { passive: false });
-  };
+  // Initialize whiteboard once when tab is opened
+  useEffect(() => {
+    if (workspaceTab === 'whiteboard' && whiteboardRef.current && !whiteboardInitialized) {
+      const canvas = whiteboardRef.current;
+      const ctx = canvas.getContext('2d');
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      // Set canvas size to match display size
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width;
+      canvas.height = rect.height;
+      
+      // Attach touch listeners with {passive: false}
+      const preventDefaultTouch = (e) => e.preventDefault();
+      
+      canvas.addEventListener('touchstart', preventDefaultTouch, { passive: false });
+      canvas.addEventListener('touchmove', preventDefaultTouch, { passive: false });
+      
+      setWhiteboardInitialized(true);
+      
+      // Cleanup
+      return () => {
+        canvas.removeEventListener('touchstart', preventDefaultTouch);
+        canvas.removeEventListener('touchmove', preventDefaultTouch);
+      };
+    }
+  }, [workspaceTab, whiteboardInitialized]);
+
+  // Reset initialization when leaving whiteboard tab
+  useEffect(() => {
+    if (workspaceTab !== 'whiteboard') {
+      setWhiteboardInitialized(false);
+    }
+  }, [workspaceTab]);
+
+  // Whiteboard drawing functions
 
   const getCoordinates = (e, canvas) => {
     const rect = canvas.getBoundingClientRect();
@@ -1423,20 +1439,20 @@ const fetchCanvasTasks = async () => {
   };
 
   const startDrawing = (e) => {
-    if (!whiteboardRef) return;
-    // Don't preventDefault - causes passive listener error
+    const canvas = whiteboardRef.current;
+    if (!canvas) return;
     setIsDrawing(true);
-    const ctx = whiteboardRef.getContext('2d');
-    const coords = getCoordinates(e, whiteboardRef);
+    const ctx = canvas.getContext('2d');
+    const coords = getCoordinates(e, canvas);
     ctx.beginPath();
     ctx.moveTo(coords.x, coords.y);
   };
 
   const draw = (e) => {
-    if (!isDrawing || !whiteboardRef) return;
-    // Don't preventDefault - causes passive listener error
-    const ctx = whiteboardRef.getContext('2d');
-    const coords = getCoordinates(e, whiteboardRef);
+    const canvas = whiteboardRef.current;
+    if (!isDrawing || !canvas) return;
+    const ctx = canvas.getContext('2d');
+    const coords = getCoordinates(e, canvas);
     ctx.strokeStyle = drawColor;
     ctx.lineWidth = drawWidth;
     ctx.lineTo(coords.x, coords.y);
@@ -1444,19 +1460,20 @@ const fetchCanvasTasks = async () => {
   };
 
   const stopDrawing = (e) => {
-    if (!whiteboardRef) return;
-    // Don't need preventDefault here
+    const canvas = whiteboardRef.current;
+    if (!canvas) return;
     if (isDrawing) {
-      const ctx = whiteboardRef.getContext('2d');
+      const ctx = canvas.getContext('2d');
       ctx.closePath();
     }
     setIsDrawing(false);
   };
 
   const clearWhiteboard = () => {
-    if (!whiteboardRef) return;
-    const ctx = whiteboardRef.getContext('2d');
-    ctx.clearRect(0, 0, whiteboardRef.width, whiteboardRef.height);
+    const canvas = whiteboardRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
   };
 
   // White noise functions
@@ -3732,7 +3749,7 @@ const fetchCanvasTasks = async () => {
                         </button>
                       </div>
                       <canvas
-                        ref={initWhiteboard}
+                        ref={whiteboardRef}
                         onMouseDown={startDrawing}
                         onMouseMove={draw}
                         onMouseUp={stopDrawing}
