@@ -1161,16 +1161,30 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  const closeSidebarWithoutSaving = () => {
+  const closeSidebarWithoutSaving = async () => {
     if (newTasks.length > 0) {
       const confirmClose = window.confirm(
-        `You have ${newTasks.length} new task(s) that haven't been added to your list. If you close this sidebar without adding them, they will be lost. Are you sure?`
+        `You have ${newTasks.length} new task(s) that haven't been prioritized. Close sidebar to automatically add them to the bottom of your list?`
       );
       if (!confirmClose) return;
+      
+      // Auto-add all new tasks to the bottom of the list
+      const updatedTasks = [...tasks, ...newTasks];
+      setTasks(updatedTasks);
+      
+      // Clear new flags for these tasks
+      try {
+        await apiCall('/tasks/clear-new-flags', 'POST', { 
+          taskIds: newTasks.map(t => t.id) 
+        });
+      } catch (error) {
+        console.error('Failed to clear new flags:', error);
+      }
+      
+      setHasUnsavedChanges(true);
     }
     setNewTasksSidebarOpen(false);
     setNewTasks([]);
-    setHasUnsavedChanges(false);
   };
 
   const handleSaveAndAdjustPlan = async () => {
@@ -1377,29 +1391,53 @@ const fetchCanvasTasks = async () => {
     const ctx = canvas.getContext('2d');
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    
+    // Set canvas size to match display size
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+  };
+
+  const getCoordinates = (e, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    // Handle both mouse and touch events
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
   };
 
   const startDrawing = (e) => {
     if (!whiteboardRef) return;
+    e.preventDefault(); // Prevent scrolling on touch
     setIsDrawing(true);
-    const rect = whiteboardRef.getBoundingClientRect();
     const ctx = whiteboardRef.getContext('2d');
+    const coords = getCoordinates(e, whiteboardRef);
     ctx.beginPath();
-    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.moveTo(coords.x, coords.y);
   };
 
   const draw = (e) => {
     if (!isDrawing || !whiteboardRef) return;
-    const rect = whiteboardRef.getBoundingClientRect();
+    e.preventDefault(); // Prevent scrolling on touch
     const ctx = whiteboardRef.getContext('2d');
+    const coords = getCoordinates(e, whiteboardRef);
     ctx.strokeStyle = drawColor;
     ctx.lineWidth = drawWidth;
-    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.lineTo(coords.x, coords.y);
     ctx.stroke();
   };
 
-  const stopDrawing = () => {
-    if (isDrawing && whiteboardRef) {
+  const stopDrawing = (e) => {
+    if (!whiteboardRef) return;
+    if (e) e.preventDefault();
+    if (isDrawing) {
       const ctx = whiteboardRef.getContext('2d');
       ctx.closePath();
     }
@@ -1425,33 +1463,128 @@ const fetchCanvasTasks = async () => {
   };
 
   const playWhiteNoise = (type) => {
-    // URLs for white noise sounds (using free resources)
-    const sounds = {
-      rain: 'https://cdn.pixabay.com/download/audio/2022/05/13/audio_257112e3ff.mp3',
-      ocean: 'https://cdn.pixabay.com/download/audio/2022/06/07/audio_b9bd4170f4.mp3',
-      forest: 'https://cdn.pixabay.com/download/audio/2022/03/10/audio_c610217c5c.mp3',
-      cafe: 'https://cdn.pixabay.com/download/audio/2021/08/09/audio_12b0c7443c.mp3',
-      whitenoise: 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_0929153a3c.mp3'
-    };
-
+    // Stop any existing audio
     if (whiteNoiseAudio) {
       whiteNoiseAudio.pause();
     }
 
-    const audio = new Audio(sounds[type] || sounds.rain);
-    audio.loop = true;
-    audio.volume = whiteNoiseVolume;
-    audio.play().catch(err => console.error('White noise play error:', err));
+    // Use Web Audio API to generate sounds (no external URLs needed!)
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     
-    setWhiteNoiseAudio(audio);
+    let oscillator, gainNode, filter;
+    
+    switch(type) {
+      case 'whitenoise':
+        // Pure white noise using buffer
+        const bufferSize = 2 * audioContext.sampleRate;
+        const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
+        }
+        const whiteNoise = audioContext.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+        whiteNoise.loop = true;
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = whiteNoiseVolume * 0.3;
+        whiteNoise.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        whiteNoise.start(0);
+        
+        // Store context and nodes for cleanup
+        const whiteNoiseObj = {
+          pause: () => {
+            audioContext.close();
+          },
+          volume: whiteNoiseVolume,
+          context: audioContext,
+          gainNode: gainNode
+        };
+        setWhiteNoiseAudio(whiteNoiseObj);
+        break;
+        
+      case 'rain':
+        // Pink noise (softer than white) simulating rain
+        const rainBufferSize = 2 * audioContext.sampleRate;
+        const rainBuffer = audioContext.createBuffer(1, rainBufferSize, audioContext.sampleRate);
+        const rainOutput = rainBuffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < rainBufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.0555179;
+          b1 = 0.99332 * b1 + white * 0.0750759;
+          b2 = 0.96900 * b2 + white * 0.1538520;
+          b3 = 0.86650 * b3 + white * 0.3104856;
+          b4 = 0.55000 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.0168980;
+          rainOutput[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+          b6 = white * 0.115926;
+        }
+        const rainNoise = audioContext.createBufferSource();
+        rainNoise.buffer = rainBuffer;
+        rainNoise.loop = true;
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = whiteNoiseVolume * 0.4;
+        rainNoise.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        rainNoise.start(0);
+        
+        setWhiteNoiseAudio({
+          pause: () => audioContext.close(),
+          volume: whiteNoiseVolume,
+          context: audioContext,
+          gainNode: gainNode
+        });
+        break;
+        
+      case 'ocean':
+      case 'forest':
+      case 'cafe':
+        // Brown noise (deep, ocean-like rumble)
+        const brownBufferSize = 2 * audioContext.sampleRate;
+        const brownBuffer = audioContext.createBuffer(1, brownBufferSize, audioContext.sampleRate);
+        const brownOutput = brownBuffer.getChannelData(0);
+        let lastOut = 0;
+        for (let i = 0; i < brownBufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          brownOutput[i] = (lastOut + (0.02 * white)) / 1.02;
+          lastOut = brownOutput[i];
+          brownOutput[i] *= 3.5;
+        }
+        const brownNoise = audioContext.createBufferSource();
+        brownNoise.buffer = brownBuffer;
+        brownNoise.loop = true;
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = whiteNoiseVolume * 0.5;
+        
+        // Add some filtering for ocean/forest/cafe feel
+        filter = audioContext.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = type === 'ocean' ? 400 : type === 'forest' ? 800 : 1200;
+        
+        brownNoise.connect(filter);
+        filter.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        brownNoise.start(0);
+        
+        setWhiteNoiseAudio({
+          pause: () => audioContext.close(),
+          volume: whiteNoiseVolume,
+          context: audioContext,
+          gainNode: gainNode
+        });
+        break;
+    }
+    
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
 
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
-    if (whiteNoiseAudio) {
-      whiteNoiseAudio.volume = volume;
+    if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
+      // Adjust gain node volume
+      whiteNoiseAudio.gainNode.gain.value = volume * 0.4;
     }
   };
 
@@ -3594,14 +3727,15 @@ const fetchCanvasTasks = async () => {
                       </div>
                       <canvas
                         ref={initWhiteboard}
-                        width={600}
-                        height={400}
                         onMouseDown={startDrawing}
                         onMouseMove={draw}
                         onMouseUp={stopDrawing}
                         onMouseLeave={stopDrawing}
-                        className="flex-1 border-2 border-gray-300 rounded-lg cursor-crosshair bg-white"
-                        style={{ touchAction: 'none' }}
+                        onTouchStart={startDrawing}
+                        onTouchMove={draw}
+                        onTouchEnd={stopDrawing}
+                        className="flex-1 w-full border-2 border-gray-300 rounded-lg cursor-crosshair bg-white"
+                        style={{ touchAction: 'none', minHeight: '400px' }}
                       />
                       <p className="text-xs text-gray-500 mt-2 text-center">Draw directly on the canvas • Great for diagrams, math problems, and brainstorming</p>
                     </div>
