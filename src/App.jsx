@@ -1396,6 +1396,15 @@ const fetchCanvasTasks = async () => {
     const rect = canvas.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
+    
+    // Attach touch listeners with {passive: false} to allow preventDefault if needed
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+    }, { passive: false });
+    
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+    }, { passive: false });
   };
 
   const getCoordinates = (e, canvas) => {
@@ -1415,7 +1424,7 @@ const fetchCanvasTasks = async () => {
 
   const startDrawing = (e) => {
     if (!whiteboardRef) return;
-    e.preventDefault(); // Prevent scrolling on touch
+    // Don't preventDefault - causes passive listener error
     setIsDrawing(true);
     const ctx = whiteboardRef.getContext('2d');
     const coords = getCoordinates(e, whiteboardRef);
@@ -1425,7 +1434,7 @@ const fetchCanvasTasks = async () => {
 
   const draw = (e) => {
     if (!isDrawing || !whiteboardRef) return;
-    e.preventDefault(); // Prevent scrolling on touch
+    // Don't preventDefault - causes passive listener error
     const ctx = whiteboardRef.getContext('2d');
     const coords = getCoordinates(e, whiteboardRef);
     ctx.strokeStyle = drawColor;
@@ -1436,7 +1445,7 @@ const fetchCanvasTasks = async () => {
 
   const stopDrawing = (e) => {
     if (!whiteboardRef) return;
-    if (e) e.preventDefault();
+    // Don't need preventDefault here
     if (isDrawing) {
       const ctx = whiteboardRef.getContext('2d');
       ctx.closePath();
@@ -1453,10 +1462,11 @@ const fetchCanvasTasks = async () => {
   // White noise functions
   const toggleWhiteNoise = () => {
     if (isWhiteNoisePlaying) {
-      if (whiteNoiseAudio) {
-        whiteNoiseAudio.pause();
-        setIsWhiteNoisePlaying(false);
+      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
+        whiteNoiseAudio.context.close();
       }
+      setWhiteNoiseAudio(null);
+      setIsWhiteNoisePlaying(false);
     } else {
       playWhiteNoise(whiteNoiseType);
     }
@@ -1464,8 +1474,8 @@ const fetchCanvasTasks = async () => {
 
   const playWhiteNoise = (type) => {
     // Stop any existing audio
-    if (whiteNoiseAudio) {
-      whiteNoiseAudio.pause();
+    if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
+      whiteNoiseAudio.context.close();
     }
 
     // Use Web Audio API to generate sounds (no external URLs needed!)
@@ -1491,25 +1501,20 @@ const fetchCanvasTasks = async () => {
         gainNode.connect(audioContext.destination);
         whiteNoise.start(0);
         
-        // Store context and nodes for cleanup
-        const whiteNoiseObj = {
-          pause: () => {
-            audioContext.close();
-          },
-          volume: whiteNoiseVolume,
+        setWhiteNoiseAudio({
           context: audioContext,
           gainNode: gainNode
-        };
-        setWhiteNoiseAudio(whiteNoiseObj);
+        });
         break;
         
       case 'rain':
-        // Pink noise (softer than white) simulating rain
-        const rainBufferSize = 2 * audioContext.sampleRate;
-        const rainBuffer = audioContext.createBuffer(1, rainBufferSize, audioContext.sampleRate);
-        const rainOutput = rainBuffer.getChannelData(0);
+      case 'pink':
+        // Pink noise (softer, more balanced than white)
+        const pinkBufferSize = 2 * audioContext.sampleRate;
+        const pinkBuffer = audioContext.createBuffer(1, pinkBufferSize, audioContext.sampleRate);
+        const pinkOutput = pinkBuffer.getChannelData(0);
         let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-        for (let i = 0; i < rainBufferSize; i++) {
+        for (let i = 0; i < pinkBufferSize; i++) {
           const white = Math.random() * 2 - 1;
           b0 = 0.99886 * b0 + white * 0.0555179;
           b1 = 0.99332 * b1 + white * 0.0750759;
@@ -1517,30 +1522,27 @@ const fetchCanvasTasks = async () => {
           b3 = 0.86650 * b3 + white * 0.3104856;
           b4 = 0.55000 * b4 + white * 0.5329522;
           b5 = -0.7616 * b5 - white * 0.0168980;
-          rainOutput[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+          pinkOutput[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
           b6 = white * 0.115926;
         }
-        const rainNoise = audioContext.createBufferSource();
-        rainNoise.buffer = rainBuffer;
-        rainNoise.loop = true;
+        const pinkNoise = audioContext.createBufferSource();
+        pinkNoise.buffer = pinkBuffer;
+        pinkNoise.loop = true;
         gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.4;
-        rainNoise.connect(gainNode);
+        gainNode.gain.value = whiteNoiseVolume * 0.35;
+        pinkNoise.connect(gainNode);
         gainNode.connect(audioContext.destination);
-        rainNoise.start(0);
+        pinkNoise.start(0);
         
         setWhiteNoiseAudio({
-          pause: () => audioContext.close(),
-          volume: whiteNoiseVolume,
           context: audioContext,
           gainNode: gainNode
         });
         break;
         
       case 'ocean':
-      case 'forest':
-      case 'cafe':
-        // Brown noise (deep, ocean-like rumble)
+      case 'brown':
+        // Brown noise (deep, bass-heavy rumble)
         const brownBufferSize = 2 * audioContext.sampleRate;
         const brownBuffer = audioContext.createBuffer(1, brownBufferSize, audioContext.sampleRate);
         const brownOutput = brownBuffer.getChannelData(0);
@@ -1555,21 +1557,25 @@ const fetchCanvasTasks = async () => {
         brownNoise.buffer = brownBuffer;
         brownNoise.loop = true;
         gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.5;
+        gainNode.gain.value = whiteNoiseVolume * 0.4;
         
-        // Add some filtering for ocean/forest/cafe feel
-        filter = audioContext.createBiquadFilter();
-        filter.type = 'lowpass';
-        filter.frequency.value = type === 'ocean' ? 400 : type === 'forest' ? 800 : 1200;
+        // Add extra low-pass filtering for ocean (deeper)
+        if (type === 'ocean') {
+          filter = audioContext.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = 300; // Very low for deep ocean rumble
+          filter.Q.value = 0.5;
+          
+          brownNoise.connect(filter);
+          filter.connect(gainNode);
+        } else {
+          brownNoise.connect(gainNode);
+        }
         
-        brownNoise.connect(filter);
-        filter.connect(gainNode);
         gainNode.connect(audioContext.destination);
         brownNoise.start(0);
         
         setWhiteNoiseAudio({
-          pause: () => audioContext.close(),
-          volume: whiteNoiseVolume,
           context: audioContext,
           gainNode: gainNode
         });
@@ -1591,8 +1597,8 @@ const fetchCanvasTasks = async () => {
   // Cleanup white noise on unmount
   useEffect(() => {
     return () => {
-      if (whiteNoiseAudio) {
-        whiteNoiseAudio.pause();
+      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
+        whiteNoiseAudio.context.close();
       }
     };
   }, [whiteNoiseAudio]);
@@ -3746,7 +3752,7 @@ const fetchCanvasTasks = async () => {
                         height="100%"
                         width="100%"
                         frameBorder="0"
-                        allow="fullscreen"
+                        sandbox="allow-scripts allow-same-origin"
                         className="rounded-lg"
                         title="TI-84 Calculator"
                       />
@@ -3762,10 +3768,10 @@ const fetchCanvasTasks = async () => {
                         {/* Sound Selection */}
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'rain', label: '🌧️ Rain', desc: 'Gentle rainfall' },
-                            { id: 'ocean', label: '🌊 Ocean', desc: 'Calming waves' },
-                            { id: 'forest', label: '🌲 Forest', desc: 'Nature sounds' },
-                            { id: 'cafe', label: '☕ Café', desc: 'Coffee shop ambiance' },
+                            { id: 'rain', label: '🌧️ Soft Rain', desc: 'Gentle pink noise' },
+                            { id: 'ocean', label: '🌊 Deep Rumble', desc: 'Low frequency hum' },
+                            { id: 'brown', label: '🎵 Brown Noise', desc: 'Deep, smooth tone' },
+                            { id: 'pink', label: '💗 Pink Noise', desc: 'Balanced, calming' },
                             { id: 'whitenoise', label: '📻 White Noise', desc: 'Pure static' }
                           ].map(sound => (
                             <button
