@@ -48,7 +48,6 @@ const PlanAssist = () => {
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
-  const [priorityLocked, setPriorityLocked] = useState(false);
   const [draggedTask, setDraggedTask] = useState(null);
   const [dragOverTask, setDragOverTask] = useState(null);
   const [newTasks, setNewTasks] = useState([]);
@@ -68,6 +67,24 @@ const PlanAssist = () => {
   const [workspaceTab, setWorkspaceTab] = useState('notes');
   const [savingNotes, setSavingNotes] = useState(false);
   const [canvasWindow, setCanvasWindow] = useState(null);
+  
+  // Whiteboard state
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawColor, setDrawColor] = useState('#000000');
+  const [drawWidth, setDrawWidth] = useState(3);
+  const [whiteboardRef, setWhiteboardRef] = useState(null);
+  
+  // White noise state
+  const [whiteNoiseAudio, setWhiteNoiseAudio] = useState(null);
+  const [whiteNoiseType, setWhiteNoiseType] = useState('rain');
+  const [whiteNoiseVolume, setWhiteNoiseVolume] = useState(0.5);
+  const [isWhiteNoisePlaying, setIsWhiteNoisePlaying] = useState(false);
+  
+  // Pomodoro timer state
+  const [pomodoroTime, setPomodoroTime] = useState(25 * 60); // 25 minutes in seconds
+  const [pomodoroMode, setPomodoroMode] = useState('work'); // 'work', 'shortBreak', 'longBreak'
+  const [isPomodoroRunning, setIsPomodoroRunning] = useState(false);
+  const [pomodoroSessions, setPomodoroSessions] = useState(0);
   
   // Notes popup state (for quick notes from task list)
   const [showNotesPopup, setShowNotesPopup] = useState(null);
@@ -277,12 +294,6 @@ const PlanAssist = () => {
         setNewTasks(loadedNewTasks);
         generateSessions(loadedTasks, setupData.schedule || {});
       }
-
-      // Fetch priority lock status
-      const priorityLockData = await fetch(`${API_URL}/user/priority-lock`, {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      }).then(r => r.json());
-      setPriorityLocked(priorityLockData.locked || false);
 
       const historyData = await fetch(`${API_URL}/learning`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -613,7 +624,7 @@ const PlanAssist = () => {
       // Generate sessions with the newly loaded tasks
       generateSessions(updatedTasks, accountSetup.schedule);
       
-      if (updatedNewTasks.length > 0 && priorityLocked) {
+      if (updatedNewTasks.length > 0) {
         alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
       } else {
         alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
@@ -688,7 +699,7 @@ const fetchCanvasTasks = async () => {
     // Generate sessions
     generateSessions(updatedTasks, accountSetup.schedule);
     
-    if (updatedNewTasks.length > 0 && priorityLocked) {
+    if (updatedNewTasks.length > 0) {
       setNewTasksSidebarOpen(true);
       setHasUnsavedChanges(true);
       alert(`Loaded ${formattedTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar. Drag them to your list or click "Add All".`);
@@ -1035,6 +1046,10 @@ const fetchCanvasTasks = async () => {
         // Reload tasks from server to get the new segments
         await loadTasks();
         
+        // Open the new tasks sidebar to let user prioritize segments
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true);
+        
         setShowSplitTask(null);
         setSplitSegments([{ name: 'Part 1' }]);
       }
@@ -1044,25 +1059,7 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  // Priority lock and drag-and-drop functions
-  const togglePriorityLock = async () => {
-    try {
-      const newLockedState = !priorityLocked;
-      await apiCall('/user/priority-lock', 'PATCH', { locked: newLockedState });
-      setPriorityLocked(newLockedState);
-      
-      if (!newLockedState) {
-        // If unlocking, merge new tasks into main list and regenerate
-        setTasks([...tasks, ...newTasks]);
-        setNewTasks([]);
-        setHasUnsavedChanges(true);
-      }
-    } catch (error) {
-      console.error('Failed to toggle priority lock:', error);
-      alert('Failed to toggle priority lock');
-    }
-  };
-
+  // Drag-and-drop functions
   const handleDragStart = (e, task) => {
     setDraggedTask(task);
     e.dataTransfer.effectAllowed = 'move';
@@ -1368,6 +1365,170 @@ const fetchCanvasTasks = async () => {
 
     return () => clearTimeout(timer);
   }, [popupNotes, showNotesPopup]);
+
+  // ============================================================================
+  // WORKSPACE TOOL FUNCTIONS - Whiteboard, White Noise, Pomodoro
+  // ============================================================================
+
+  // Whiteboard functions
+  const initWhiteboard = (canvas) => {
+    if (!canvas) return;
+    setWhiteboardRef(canvas);
+    const ctx = canvas.getContext('2d');
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  };
+
+  const startDrawing = (e) => {
+    if (!whiteboardRef) return;
+    setIsDrawing(true);
+    const rect = whiteboardRef.getBoundingClientRect();
+    const ctx = whiteboardRef.getContext('2d');
+    ctx.beginPath();
+    ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top);
+  };
+
+  const draw = (e) => {
+    if (!isDrawing || !whiteboardRef) return;
+    const rect = whiteboardRef.getBoundingClientRect();
+    const ctx = whiteboardRef.getContext('2d');
+    ctx.strokeStyle = drawColor;
+    ctx.lineWidth = drawWidth;
+    ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top);
+    ctx.stroke();
+  };
+
+  const stopDrawing = () => {
+    if (isDrawing && whiteboardRef) {
+      const ctx = whiteboardRef.getContext('2d');
+      ctx.closePath();
+    }
+    setIsDrawing(false);
+  };
+
+  const clearWhiteboard = () => {
+    if (!whiteboardRef) return;
+    const ctx = whiteboardRef.getContext('2d');
+    ctx.clearRect(0, 0, whiteboardRef.width, whiteboardRef.height);
+  };
+
+  // White noise functions
+  const toggleWhiteNoise = () => {
+    if (isWhiteNoisePlaying) {
+      if (whiteNoiseAudio) {
+        whiteNoiseAudio.pause();
+        setIsWhiteNoisePlaying(false);
+      }
+    } else {
+      playWhiteNoise(whiteNoiseType);
+    }
+  };
+
+  const playWhiteNoise = (type) => {
+    // URLs for white noise sounds (using free resources)
+    const sounds = {
+      rain: 'https://cdn.pixabay.com/download/audio/2022/05/13/audio_257112e3ff.mp3',
+      ocean: 'https://cdn.pixabay.com/download/audio/2022/06/07/audio_b9bd4170f4.mp3',
+      forest: 'https://cdn.pixabay.com/download/audio/2022/03/10/audio_c610217c5c.mp3',
+      cafe: 'https://cdn.pixabay.com/download/audio/2021/08/09/audio_12b0c7443c.mp3',
+      whitenoise: 'https://cdn.pixabay.com/download/audio/2022/03/24/audio_0929153a3c.mp3'
+    };
+
+    if (whiteNoiseAudio) {
+      whiteNoiseAudio.pause();
+    }
+
+    const audio = new Audio(sounds[type] || sounds.rain);
+    audio.loop = true;
+    audio.volume = whiteNoiseVolume;
+    audio.play().catch(err => console.error('White noise play error:', err));
+    
+    setWhiteNoiseAudio(audio);
+    setIsWhiteNoisePlaying(true);
+    setWhiteNoiseType(type);
+  };
+
+  const changeWhiteNoiseVolume = (volume) => {
+    setWhiteNoiseVolume(volume);
+    if (whiteNoiseAudio) {
+      whiteNoiseAudio.volume = volume;
+    }
+  };
+
+  // Cleanup white noise on unmount
+  useEffect(() => {
+    return () => {
+      if (whiteNoiseAudio) {
+        whiteNoiseAudio.pause();
+      }
+    };
+  }, [whiteNoiseAudio]);
+
+  // Pomodoro functions
+  const startPomodoro = () => {
+    setIsPomodoroRunning(true);
+  };
+
+  const pausePomodoro = () => {
+    setIsPomodoroRunning(false);
+  };
+
+  const resetPomodoro = () => {
+    setIsPomodoroRunning(false);
+    if (pomodoroMode === 'work') {
+      setPomodoroTime(25 * 60);
+    } else if (pomodoroMode === 'shortBreak') {
+      setPomodoroTime(5 * 60);
+    } else {
+      setPomodoroTime(15 * 60);
+    }
+  };
+
+  const switchPomodoroMode = (mode) => {
+    setPomodoroMode(mode);
+    setIsPomodoroRunning(false);
+    if (mode === 'work') {
+      setPomodoroTime(25 * 60);
+    } else if (mode === 'shortBreak') {
+      setPomodoroTime(5 * 60);
+    } else {
+      setPomodoroTime(15 * 60);
+    }
+  };
+
+  // Pomodoro timer countdown
+  useEffect(() => {
+    let interval = null;
+    if (isPomodoroRunning && pomodoroTime > 0) {
+      interval = setInterval(() => {
+        setPomodoroTime(time => time - 1);
+      }, 1000);
+    } else if (pomodoroTime === 0) {
+      setIsPomodoroRunning(false);
+      // Play notification sound or show alert
+      alert(`${pomodoroMode === 'work' ? 'Work session' : 'Break'} complete!`);
+      
+      // Auto-switch mode
+      if (pomodoroMode === 'work') {
+        setPomodoroSessions(prev => prev + 1);
+        if (pomodoroSessions + 1 >= 4) {
+          switchPomodoroMode('longBreak');
+          setPomodoroSessions(0);
+        } else {
+          switchPomodoroMode('shortBreak');
+        }
+      } else {
+        switchPomodoroMode('work');
+      }
+    }
+    return () => clearInterval(interval);
+  }, [isPomodoroRunning, pomodoroTime, pomodoroMode, pomodoroSessions]);
+
+  const formatPomodoroTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   // Handle Escape key to close notes popup
   useEffect(() => {
@@ -2245,13 +2406,13 @@ const fetchCanvasTasks = async () => {
                 <div className="bg-white rounded-xl shadow-md p-6">
                   <div className="flex items-center gap-2 mb-4">
                     <Clock className="w-5 h-5 text-blue-600" />
-                    <h2 className="text-xl font-bold text-gray-900">Pending</h2>
+                    <h2 className="text-xl font-bold text-gray-900">In Progress</h2>
                   </div>
                   <div className="text-center py-6">
                     <div className="text-5xl font-bold text-gray-900 mb-2">
-                      {tasks.filter(t => !t.completed).length}
+                      {tasks.filter(t => !t.completed && t.accumulatedTime > 0).length}
                     </div>
-                    <p className="text-gray-600">tasks to complete</p>
+                    <p className="text-gray-600">tasks with partial time</p>
                   </div>
                   <button 
                     onClick={() => setCurrentPage('tasks')} 
@@ -2291,19 +2452,6 @@ const fetchCanvasTasks = async () => {
                       </div>
                       <div className="flex gap-2 items-center">
                         <button 
-                          onClick={togglePriorityLock}
-                          className={`px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all ${priorityLocked ? 'bg-yellow-100 text-yellow-700 border-2 border-yellow-400' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}
-                          title={priorityLocked ? 'Priority Lock ON - New tasks go to sidebar' : 'Priority Lock OFF - Tasks sorted by deadline'}
-                        >
-                          {priorityLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
-                          <span className="hidden sm:inline">{priorityLocked ? 'Locked' : 'Unlocked'}</span>
-                        </button>
-                        <input type="file" accept=".ics" onChange={handleICSUpload} className="hidden" id="ics-upload" />
-                        <label htmlFor="ics-upload" className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 font-medium flex items-center gap-2 cursor-pointer transition-all">
-                          <Upload className="w-4 h-4" />
-                          <span className="hidden sm:inline">Upload ICS</span>
-                        </label>
-                        <button 
                           onClick={fetchCanvasTasks} 
                           disabled={isLoadingTasks} 
                           className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
@@ -2322,15 +2470,6 @@ const fetchCanvasTasks = async () => {
                         </button>
                       </div>
                     </div>
-
-                    {/* Tip Banner */}
-                    {accountSetup.canvasUrl && (
-                      <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm">
-                        <p className="text-blue-800">
-                          <strong>Tip:</strong> Sync from URL preserves completed tasks and split tasks. Only new tasks will be added.
-                        </p>
-                      </div>
-                    )}
 
                     {/* Unsaved Changes Warning */}
                     {hasUnsavedChanges && (
@@ -2351,20 +2490,19 @@ const fetchCanvasTasks = async () => {
                     {/* Task List */}
                     <div className="space-y-4">
                       {(() => {
-                        if (priorityLocked) {
-                          const incompleteTasks = tasks.filter(t => !t.completed);
-                          
-                          if (incompleteTasks.length === 0) {
-                            return (
-                              <div className="text-center py-12">
-                                <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                                <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                                <p className="text-gray-600">No pending tasks</p>
-                              </div>
-                            );
-                          }
-                          
-                          return incompleteTasks.map((task, index) => {
+                        const incompleteTasks = tasks.filter(t => !t.completed);
+                        
+                        if (incompleteTasks.length === 0) {
+                          return (
+                            <div className="text-center py-12">
+                              <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                              <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
+                              <p className="text-gray-600">No pending tasks</p>
+                            </div>
+                          );
+                        }
+                        
+                        return incompleteTasks.map((task, index) => {
                             const taskTime = task.userEstimate || task.estimatedTime;
                             const className = extractClassName(task);
                             const classColor = getClassColor(task);
@@ -2501,147 +2639,6 @@ const fetchCanvasTasks = async () => {
                               </div>
                             );
                           });
-                        } else {
-                          // Unlocked mode - group by day
-                          const groupedTasks = groupTasksByDay(tasks.filter(t => !t.completed));
-                          const sortedDays = Object.keys(groupedTasks).sort((a, b) => {
-                            const dateA = new Date(groupedTasks[a][0].dueDate);
-                            const dateB = new Date(groupedTasks[b][0].dueDate);
-                            return dateA - dateB;
-                          });
-                          
-                          if (sortedDays.length === 0) {
-                            return (
-                              <div className="text-center py-12">
-                                <Check className="w-16 h-16 text-green-500 mx-auto mb-4" />
-                                <h3 className="text-xl font-bold text-gray-900 mb-2">All Caught Up!</h3>
-                                <p className="text-gray-600">No pending tasks</p>
-                              </div>
-                            );
-                          }
-                          
-                          return sortedDays.map(day => (
-                            <div key={day} className="space-y-3">
-                              <h3 className="text-lg font-bold text-gray-900 sticky top-0 bg-white py-2 border-b-2 border-gray-200">
-                                {day}
-                              </h3>
-                              {groupedTasks[day].map((task) => {
-                                const taskTime = task.userEstimate || task.estimatedTime;
-                                const className = extractClassName(task);
-                                const classColor = getClassColor(task);
-                                
-                                return (
-                                  <div 
-                                    key={task.id}
-                                    className="border-2 rounded-lg p-4 bg-white hover:shadow-lg transition-all"
-                                    style={{ 
-                                      borderColor: classColor,
-                                      borderLeftWidth: '6px'
-                                    }}
-                                  >
-                                    <div className="flex items-center gap-4">
-                                      {/* Checkbox */}
-                                      <input
-                                        type="checkbox"
-                                        checked={task.completed || false}
-                                        onChange={() => toggleTaskCompletion(task.id)}
-                                        className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                      />
-                                      
-                                      <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                          <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task)}</h3>
-                                          <span 
-                                            className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
-                                            style={{ backgroundColor: classColor }}
-                                          >
-                                            {className}
-                                          </span>
-                                        </div>
-                                        {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
-                                          <div className="text-sm text-gray-600 flex items-center gap-2">
-                                            <Brain className="w-4 h-4" />
-                                            {editingTimeTaskId === task.id ? (
-                                              <div className="flex items-center gap-2">
-                                                <input
-                                                  type="text"
-                                                  value={tempTimeValue}
-                                                  onChange={handleTimeInputChange}
-                                                  className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                                                  autoFocus
-                                                  onKeyDown={(e) => {
-                                                    if (e.key === 'Enter') {
-                                                      handleSaveTimeEstimate(task.id);
-                                                    } else if (e.key === 'Escape') {
-                                                      handleCancelEditTime();
-                                                    }
-                                                  }}
-                                                />
-                                                <span>min</span>
-                                                <button
-                                                  onClick={() => handleSaveTimeEstimate(task.id)}
-                                                  className="text-green-600 hover:text-green-700"
-                                                >
-                                                  <Check className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                  onClick={handleCancelEditTime}
-                                                  className="text-red-600 hover:text-red-700"
-                                                >
-                                                  <X className="w-4 h-4" />
-                                                </button>
-                                              </div>
-                                            ) : (
-                                              <div className="flex items-center gap-2">
-                                                <span>{taskTime} min</span>
-                                                <button
-                                                  onClick={() => handleStartEditTime(task.id, taskTime)}
-                                                  className="text-purple-600 hover:text-purple-700"
-                                                  title="Edit time estimate"
-                                                >
-                                                  <Edit2 className="w-4 h-4" />
-                                                </button>
-                                              </div>
-                                            )}
-                                          </div>
-                                        )}
-                                      </div>
-                                      
-                                      <div className="flex gap-2 flex-shrink-0">
-                                        <button 
-                                          onClick={() => setShowTaskDescription(task)}
-                                          className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium"
-                                        >
-                                          Details
-                                        </button>
-                                        <button 
-                                          onClick={() => openNotesPopup(task)}
-                                          className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 text-sm font-medium relative"
-                                        >
-                                          <span className="flex items-center gap-1">
-                                            <FileText className="w-4 h-4" />
-                                            Notes
-                                          </span>
-                                          {tasksWithNotes.has(task.id) && (
-                                            <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" title="Has notes" />
-                                          )}
-                                        </button>
-                                        {!className.toLowerCase().includes('homeroom') && (
-                                          <button 
-                                            onClick={() => setShowSplitTask(task.id)}
-                                            className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
-                                          >
-                                            Split
-                                          </button>
-                                        )}
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          ));
-                        }
                       })()}
                     </div>
                   </div>
@@ -2650,7 +2647,7 @@ const fetchCanvasTasks = async () => {
             </div>
 
             {/* New Tasks Sidebar */}
-            {newTasksSidebarOpen && priorityLocked && (
+            {newTasksSidebarOpen && (
               <div className="fixed right-0 top-[80px] w-96 h-[calc(100vh-80px)] bg-gradient-to-br from-yellow-50 to-orange-50 border-l-4 border-yellow-400 shadow-2xl overflow-y-auto z-50">
                 <div className="p-6">
                   {/* Sidebar Header */}
@@ -3480,26 +3477,56 @@ const fetchCanvasTasks = async () => {
                 </div>
                 
                 {/* Tab selector */}
-                <div className="flex border-b border-gray-200">
+                <div className="flex border-b border-gray-200 overflow-x-auto">
                   <button
                     onClick={() => switchWorkspaceTab('notes')}
-                    className={`flex-1 py-3 px-4 font-semibold ${
+                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
                       workspaceTab === 'notes'
                         ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    Notes
+                    📝 Notes
+                  </button>
+                  <button
+                    onClick={() => switchWorkspaceTab('whiteboard')}
+                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
+                      workspaceTab === 'whiteboard'
+                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    🎨 Whiteboard
                   </button>
                   <button
                     onClick={() => switchWorkspaceTab('calculator')}
-                    className={`flex-1 py-3 px-4 font-semibold ${
+                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
                       workspaceTab === 'calculator'
                         ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    Calculator
+                    🔢 Calculator
+                  </button>
+                  <button
+                    onClick={() => switchWorkspaceTab('whitenoise')}
+                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
+                      workspaceTab === 'whitenoise'
+                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    🎵 Focus Sounds
+                  </button>
+                  <button
+                    onClick={() => switchWorkspaceTab('pomodoro')}
+                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
+                      workspaceTab === 'pomodoro'
+                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                        : 'text-gray-600 hover:bg-gray-50'
+                    }`}
+                  >
+                    ⏱️ Pomodoro
                   </button>
                 </div>
                   
@@ -3534,7 +3561,51 @@ const fetchCanvasTasks = async () => {
                         className="flex-1 w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       />
                     </div>
-                  ) : (
+                  ) : workspaceTab === 'whiteboard' ? (
+                    <div className="h-full flex flex-col p-4">
+                      <div className="flex items-center gap-3 mb-3 pb-3 border-b">
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm font-medium text-gray-700">Color:</label>
+                          <input
+                            type="color"
+                            value={drawColor}
+                            onChange={(e) => setDrawColor(e.target.value)}
+                            className="w-10 h-8 rounded cursor-pointer border border-gray-300"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <label className="text-sm font-medium text-gray-700">Size:</label>
+                          <input
+                            type="range"
+                            min="1"
+                            max="20"
+                            value={drawWidth}
+                            onChange={(e) => setDrawWidth(parseInt(e.target.value))}
+                            className="w-24"
+                          />
+                          <span className="text-sm text-gray-600 w-6">{drawWidth}</span>
+                        </div>
+                        <button
+                          onClick={clearWhiteboard}
+                          className="ml-auto bg-red-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-red-700"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                      <canvas
+                        ref={initWhiteboard}
+                        width={600}
+                        height={400}
+                        onMouseDown={startDrawing}
+                        onMouseMove={draw}
+                        onMouseUp={stopDrawing}
+                        onMouseLeave={stopDrawing}
+                        className="flex-1 border-2 border-gray-300 rounded-lg cursor-crosshair bg-white"
+                        style={{ touchAction: 'none' }}
+                      />
+                      <p className="text-xs text-gray-500 mt-2 text-center">Draw directly on the canvas • Great for diagrams, math problems, and brainstorming</p>
+                    </div>
+                  ) : workspaceTab === 'calculator' ? (
                     <div className="h-full flex flex-col items-center justify-center p-4">
                       <iframe
                         src="https://ti84calc.com/ti84calc"
@@ -3546,7 +3617,162 @@ const fetchCanvasTasks = async () => {
                         title="TI-84 Calculator"
                       />
                     </div>
-                  )}
+                  ) : workspaceTab === 'whitenoise' ? (
+                    <div className="h-full flex flex-col p-6 items-center justify-center">
+                      <div className="max-w-md w-full space-y-6">
+                        <div className="text-center mb-6">
+                          <h3 className="text-2xl font-bold text-gray-900 mb-2">Focus Sounds</h3>
+                          <p className="text-sm text-gray-600">Play ambient sounds to help you concentrate</p>
+                        </div>
+
+                        {/* Sound Selection */}
+                        <div className="grid grid-cols-2 gap-3">
+                          {[
+                            { id: 'rain', label: '🌧️ Rain', desc: 'Gentle rainfall' },
+                            { id: 'ocean', label: '🌊 Ocean', desc: 'Calming waves' },
+                            { id: 'forest', label: '🌲 Forest', desc: 'Nature sounds' },
+                            { id: 'cafe', label: '☕ Café', desc: 'Coffee shop ambiance' },
+                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Pure static' }
+                          ].map(sound => (
+                            <button
+                              key={sound.id}
+                              onClick={() => {
+                                if (isWhiteNoisePlaying && whiteNoiseType === sound.id) {
+                                  toggleWhiteNoise();
+                                } else {
+                                  playWhiteNoise(sound.id);
+                                }
+                              }}
+                              className={`p-4 rounded-lg border-2 text-left transition-all ${
+                                whiteNoiseType === sound.id && isWhiteNoisePlaying
+                                  ? 'bg-purple-50 border-purple-600 shadow-md'
+                                  : 'bg-white border-gray-200 hover:border-purple-300 hover:shadow'
+                              }`}
+                            >
+                              <div className="font-semibold text-gray-900">{sound.label}</div>
+                              <div className="text-xs text-gray-600 mt-1">{sound.desc}</div>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Controls */}
+                        <div className="space-y-4 pt-4 border-t">
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={toggleWhiteNoise}
+                              className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
+                                isWhiteNoisePlaying
+                                  ? 'bg-red-600 hover:bg-red-700 text-white'
+                                  : 'bg-purple-600 hover:bg-purple-700 text-white'
+                              }`}
+                            >
+                              {isWhiteNoisePlaying ? '⏸ Pause' : '▶ Play'}
+                            </button>
+                          </div>
+
+                          {isWhiteNoisePlaying && (
+                            <div>
+                              <label className="block text-sm font-medium text-gray-700 mb-2">
+                                Volume: {Math.round(whiteNoiseVolume * 100)}%
+                              </label>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step="0.1"
+                                value={whiteNoiseVolume}
+                                onChange={(e) => changeWhiteNoiseVolume(parseFloat(e.target.value))}
+                                className="w-full"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : workspaceTab === 'pomodoro' ? (
+                    <div className="h-full flex flex-col p-6 items-center justify-center">
+                      <div className="max-w-md w-full space-y-6">
+                        <div className="text-center mb-6">
+                          <h3 className="text-2xl font-bold text-gray-900 mb-2">Pomodoro Timer</h3>
+                          <p className="text-sm text-gray-600">Focus for 25 minutes, then take a break</p>
+                        </div>
+
+                        {/* Mode Selector */}
+                        <div className="flex gap-2 justify-center">
+                          <button
+                            onClick={() => switchPomodoroMode('work')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                              pomodoroMode === 'work'
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            Work (25m)
+                          </button>
+                          <button
+                            onClick={() => switchPomodoroMode('shortBreak')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                              pomodoroMode === 'shortBreak'
+                                ? 'bg-green-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            Short Break (5m)
+                          </button>
+                          <button
+                            onClick={() => switchPomodoroMode('longBreak')}
+                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
+                              pomodoroMode === 'longBreak'
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                            }`}
+                          >
+                            Long Break (15m)
+                          </button>
+                        </div>
+
+                        {/* Timer Display */}
+                        <div className="text-center">
+                          <div className={`text-7xl font-bold mb-4 ${
+                            pomodoroMode === 'work' ? 'text-purple-600' :
+                            pomodoroMode === 'shortBreak' ? 'text-green-600' :
+                            'text-blue-600'
+                          }`}>
+                            {formatPomodoroTime(pomodoroTime)}
+                          </div>
+                          <div className="text-sm text-gray-600 mb-6">
+                            Sessions completed today: {pomodoroSessions}
+                          </div>
+                        </div>
+
+                        {/* Controls */}
+                        <div className="flex gap-3">
+                          <button
+                            onClick={isPomodoroRunning ? pausePomodoro : startPomodoro}
+                            className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all ${
+                              isPomodoroRunning
+                                ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
+                                : pomodoroMode === 'work' ? 'bg-purple-600 hover:bg-purple-700 text-white' :
+                                  pomodoroMode === 'shortBreak' ? 'bg-green-600 hover:bg-green-700 text-white' :
+                                  'bg-blue-600 hover:bg-blue-700 text-white'
+                            }`}
+                          >
+                            {isPomodoroRunning ? '⏸ Pause' : '▶ Start'}
+                          </button>
+                          <button
+                            onClick={resetPomodoro}
+                            className="px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-semibold text-lg transition-all"
+                          >
+                            🔄 Reset
+                          </button>
+                        </div>
+
+                        <div className="text-xs text-gray-500 text-center pt-4 border-t">
+                          💡 Tip: After 4 work sessions, take a long break to recharge
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
