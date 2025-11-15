@@ -3373,7 +3373,19 @@ const fetchCanvasTasks = async () => {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
-                  <input type="text" value={accountSetup.grade} onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))} placeholder="e.g., 10" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
+                  <select 
+                    value={accountSetup.grade} 
+                    onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))} 
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="">Select your grade...</option>
+                    <option value="7">7</option>
+                    <option value="8">8</option>
+                    <option value="9">9</option>
+                    <option value="10">10</option>
+                    <option value="11">11</option>
+                    <option value="12">12</option>
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Canvas Calendar ICS URL</label>
