@@ -101,7 +101,7 @@ const PlanAssist = () => {
   
   // Canvas proxy state
   const [canvasConnected, setCanvasConnected] = useState(false);
-  const CANVAS_PROXY_URL = 'https://canvas-proxy-planassist.workers.dev';
+  const CANVAS_PROXY_URL = 'https://canvas-proxy-planassist.ocwyman.workers.dev';
   const [hubStats, setHubStats] = useState({
     tasksCompletedToday: 0,
     tasksCompletedWeek: 0,
