@@ -1884,6 +1884,14 @@ const fetchCanvasTasks = async () => {
     }
   }, [isAuthenticated, user]);
 
+  // Check for existing Canvas connection on mount
+  useEffect(() => {
+    const connected = localStorage.getItem('canvas_connected');
+    if (connected === 'true') {
+      setCanvasConnected(true);
+    }
+  }, []);
+
   useEffect(() => {
     calculateHubStats();
   }, [completionHistory]);
@@ -3404,6 +3412,70 @@ const fetchCanvasTasks = async () => {
                   <p className="text-xs text-gray-500 mt-1">Find this in Canvas: Calendar → Calendar Feed → Copy the URL</p>
                   <p className="text-xs text-blue-600 mt-1">💡 The URL should contain "/feeds/calendars/"</p>
                 </div>
+                
+                {/* Canvas Workspace Connection */}
+                <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-200 rounded-lg p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <BookOpen className="w-5 h-5 text-blue-600" />
+                        <h3 className="font-semibold text-gray-900">Canvas Workspace Embedding</h3>
+                      </div>
+                      <p className="text-sm text-gray-600 mb-3">
+                        {canvasConnected 
+                          ? "✅ Connected - Canvas pages will load inside workspace during sessions"
+                          : "Connect to Canvas to enable embedded viewing of assignments in the workspace"
+                        }
+                      </p>
+                      {canvasConnected ? (
+                        <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg">
+                          <Check className="w-4 h-4" />
+                          <span>You can now use embedded Canvas in workspace</span>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-gray-500">
+                            📝 Note: You'll need to log in to Canvas in a separate window. This only needs to be done once.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => {
+                        if (canvasConnected) {
+                          // Disconnect
+                          setCanvasConnected(false);
+                          localStorage.removeItem('canvas_connected');
+                        } else {
+                          // Open Canvas for login
+                          const loginWindow = window.open(
+                            'https://canvas.oneschoolglobal.com',
+                            'canvas-login',
+                            'width=1000,height=700,menubar=no,toolbar=no,location=no'
+                          );
+                          
+                          // Check when window closes
+                          const checkWindow = setInterval(() => {
+                            if (loginWindow.closed) {
+                              clearInterval(checkWindow);
+                              // Assume user logged in
+                              setCanvasConnected(true);
+                              localStorage.setItem('canvas_connected', 'true');
+                            }
+                          }, 500);
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-lg font-medium whitespace-nowrap ${
+                        canvasConnected
+                          ? 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          : 'bg-blue-600 text-white hover:bg-blue-700'
+                      }`}
+                    >
+                      {canvasConnected ? 'Disconnect' : 'Connect Canvas'}
+                    </button>
+                  </div>
+                </div>
+                
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Present Periods (Time Zone)</label>
                   <select value={accountSetup.presentPeriods} onChange={(e) => setAccountSetup(prev => ({ ...prev, presentPeriods: e.target.value }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
@@ -3636,27 +3708,69 @@ const fetchCanvasTasks = async () => {
               
             {/* Content */}
             <div className="flex-1 flex overflow-hidden">
-              {/* Main Content: Notes/Calculator (Full Width) */}
+              {/* Main Content: Notes/Calculator OR Canvas Iframe */}
               <div className="flex-1 flex flex-col">
-                {/* Info Banner */}
-                <div className="bg-blue-50 border-b border-blue-200 p-3 flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-blue-700">
-                    <Info className="w-5 h-5 flex-shrink-0" />
-                    <span className="text-sm font-medium">Canvas page opened on right side • Manually resize this window to the left half for split-screen view</span>
+                {/* Info Banner - only show if not using embedded Canvas */}
+                {!canvasConnected && (
+                  <div className="bg-blue-50 border-b border-blue-200 p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-blue-700">
+                      <Info className="w-5 h-5 flex-shrink-0" />
+                      <span className="text-sm font-medium">Canvas page opened on right side • Manually resize this window to the left half for split-screen view</span>
+                    </div>
+                    <button
+                      onClick={() => workspaceTask.url && openSplitScreen(workspaceTask.url)}
+                      className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2 flex-shrink-0"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                      </svg>
+                      Reopen Canvas
+                    </button>
                   </div>
-                  <button
-                    onClick={() => workspaceTask.url && openSplitScreen(workspaceTask.url)}
-                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2 flex-shrink-0"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                    </svg>
-                    Reopen Canvas
-                  </button>
-                </div>
+                )}
+                
+                {/* Canvas Connected - Show View Toggle */}
+                {canvasConnected && (
+                  <div className="bg-gradient-to-r from-green-50 to-blue-50 border-b border-green-200 p-3 flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-green-700">
+                      <Check className="w-5 h-5 flex-shrink-0" />
+                      <span className="text-sm font-medium">Canvas embedding enabled - Toggle between embedded view and split-screen</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setWorkspaceTab(workspaceTab === 'canvas' ? 'notes' : 'canvas')}
+                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 font-medium text-sm flex items-center gap-2 flex-shrink-0"
+                      >
+                        <BookOpen className="w-4 h-4" />
+                        {workspaceTab === 'canvas' ? 'Show Tools' : 'Show Canvas'}
+                      </button>
+                      <button
+                        onClick={() => workspaceTask.url && openSplitScreen(workspaceTask.url)}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 font-medium text-sm flex items-center gap-2 flex-shrink-0"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                        </svg>
+                        Split-Screen Instead
+                      </button>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Tab selector */}
                 <div className="flex border-b border-gray-200 overflow-x-auto">
+                  {canvasConnected && (
+                    <button
+                      onClick={() => switchWorkspaceTab('canvas')}
+                      className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
+                        workspaceTab === 'canvas'
+                          ? 'bg-green-50 text-green-600 border-b-2 border-green-600'
+                          : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      🎓 Canvas Assignment
+                    </button>
+                  )}
                   <button
                     onClick={() => switchWorkspaceTab('notes')}
                     className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
@@ -3711,7 +3825,29 @@ const fetchCanvasTasks = async () => {
                   
                 {/* Tab content */}
                 <div className="flex-1 overflow-hidden">
-                  {workspaceTab === 'notes' ? (
+                  {workspaceTab === 'canvas' ? (
+                    <div className="h-full w-full bg-white">
+                      {workspaceTask.url ? (
+                        <iframe
+                          src={workspaceTask.url.replace(
+                            'https://canvas.oneschoolglobal.com',
+                            CANVAS_PROXY_URL
+                          )}
+                          className="w-full h-full border-0"
+                          title="Canvas Assignment"
+                          allow="fullscreen"
+                          sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+                        />
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-gray-500">
+                          <div className="text-center">
+                            <AlertCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                            <p>No Canvas URL available for this task</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : workspaceTab === 'notes' ? (
                     <div className="h-full flex flex-col p-4">
                       <div className="flex items-center justify-between mb-3">
                         <h3 className="font-semibold text-gray-700">Your Notes</h3>
