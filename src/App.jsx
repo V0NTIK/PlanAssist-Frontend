@@ -1881,14 +1881,6 @@ const fetchCanvasTasks = async () => {
     }
   }, [isAuthenticated, user]);
 
-  // Check for existing Canvas connection on mount
-  useEffect(() => {
-    const connected = localStorage.getItem('canvas_connected');
-    if (connected === 'true') {
-      setCanvasConnected(true);
-    }
-  }, []);
-
   useEffect(() => {
     calculateHubStats();
   }, [completionHistory]);
