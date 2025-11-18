@@ -64,7 +64,7 @@ const PlanAssist = () => {
   const [showWorkspace, setShowWorkspace] = useState(false);
   const [workspaceTask, setWorkspaceTask] = useState(null);
   const [workspaceNotes, setWorkspaceNotes] = useState('');
-  const [workspaceTab, setWorkspaceTab] = useState('notes');
+  const [workspaceTab, setWorkspaceTab] = useState('canvas');
   const [savingNotes, setSavingNotes] = useState(false);
   const [canvasWindow, setCanvasWindow] = useState(null);
   
@@ -1248,7 +1248,7 @@ const fetchCanvasTasks = async () => {
 
   const openWorkspace = async (task) => {
     setWorkspaceTask(task);
-    setWorkspaceTab('notes');
+    setWorkspaceTab('canvas');
     await loadTaskNotes(task.id);
     setShowWorkspace(true);
     
@@ -3647,7 +3647,7 @@ const fetchCanvasTasks = async () => {
                         : 'text-gray-600 hover:bg-gray-50'
                     }`}
                   >
-                    🎓 Canvas Assignment
+                    🎓 Canvas Task
                   </button>
                   <button
                     onClick={() => switchWorkspaceTab('notes')}
@@ -3704,28 +3704,28 @@ const fetchCanvasTasks = async () => {
                 {/* Tab content */}
                 <div className="flex-1 overflow-hidden">
                   {workspaceTab === 'canvas' ? (
-                    <div className="h-full w-full bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center">
-                      <div className="text-center max-w-md px-6">
+                    <div className="h-full w-full bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center p-4">
+                      <div className="text-center max-w-md w-full">
                         {/* Canvas Logo/Icon */}
-                        <div className="mb-6">
-                          <div className="w-20 h-20 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-lg">
-                            <BookOpen className="w-10 h-10 text-white" />
+                        <div className="mb-4">
+                          <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-lg">
+                            <BookOpen className="w-8 h-8 text-white" />
                           </div>
                         </div>
                         
-                        <h2 className="text-2xl font-bold text-gray-800 mb-3">
-                          Open Canvas Assignment
+                        <h2 className="text-xl font-bold text-gray-800 mb-2">
+                          Open Canvas Task
                         </h2>
                         
-                        <p className="text-gray-600 mb-6 leading-relaxed">
-                          Canvas requires authentication and cannot be embedded. Click below to open this assignment in a split-screen view.
+                        <p className="text-sm text-gray-600 mb-4 leading-relaxed">
+                          Canvas requires authentication and cannot be embedded. Click below to open this task in a split-screen view.
                         </p>
                         
                         {/* Task Info Card */}
-                        <div className="bg-white rounded-lg p-4 mb-6 text-left shadow-sm border border-gray-200">
-                          <div className="text-sm text-gray-500 mb-1">Current Task:</div>
-                          <div className="font-semibold text-gray-800">{workspaceTask.title}</div>
-                          <div className="text-sm text-purple-600 mt-1">{workspaceTask.class}</div>
+                        <div className="bg-white rounded-lg p-3 mb-4 text-left shadow-sm border border-gray-200">
+                          <div className="text-xs text-gray-500 mb-1">Current Task:</div>
+                          <div className="font-semibold text-gray-800 text-sm">{workspaceTask.title}</div>
+                          <div className="text-xs text-purple-600 mt-1">{workspaceTask.class}</div>
                         </div>
                         
                         {workspaceTask.url ? (
@@ -3733,9 +3733,9 @@ const fetchCanvasTasks = async () => {
                             {/* Primary Split-Screen Button */}
                             <button
                               onClick={() => openSplitScreen(workspaceTask.url)}
-                              className="w-full bg-purple-600 text-white px-6 py-4 rounded-xl font-semibold hover:bg-purple-700 transition-colors flex items-center justify-center gap-3 shadow-lg hover:shadow-xl mb-3"
+                              className="w-full bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 shadow-lg hover:shadow-xl mb-2 text-sm"
                             >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12M8 12h12m-12 5h12M3 7h.01M3 12h.01M3 17h.01" />
                               </svg>
                               Open in Split-Screen
@@ -3744,7 +3744,7 @@ const fetchCanvasTasks = async () => {
                             {/* Secondary New Tab Button */}
                             <button
                               onClick={() => window.open(workspaceTask.url, '_blank')}
-                              className="w-full bg-gray-100 text-gray-700 px-6 py-3 rounded-xl font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+                              className="w-full bg-gray-100 text-gray-700 px-5 py-2.5 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2 text-sm"
                             >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
@@ -3753,15 +3753,15 @@ const fetchCanvasTasks = async () => {
                             </button>
                             
                             {/* Help Text */}
-                            <div className="mt-6 text-xs text-gray-500 bg-blue-50 rounded-lg p-3 border border-blue-100">
+                            <div className="mt-4 text-xs text-gray-500 bg-blue-50 rounded-lg p-2.5 border border-blue-100">
                               <strong className="text-blue-700">💡 Tip:</strong> Split-screen opens Canvas alongside PlanAssist. You may need to manually resize your windows to see both side-by-side.
                             </div>
                           </>
                         ) : (
-                          <div className="bg-red-50 rounded-lg p-4 border border-red-200">
-                            <AlertCircle className="w-8 h-8 mx-auto mb-2 text-red-500" />
-                            <p className="text-red-700 font-medium">No Canvas URL available</p>
-                            <p className="text-red-600 text-sm mt-1">This task doesn't have a Canvas link.</p>
+                          <div className="bg-red-50 rounded-lg p-3 border border-red-200">
+                            <AlertCircle className="w-6 h-6 mx-auto mb-2 text-red-500" />
+                            <p className="text-red-700 font-medium text-sm">No Canvas URL available</p>
+                            <p className="text-red-600 text-xs mt-1">This task doesn't have a Canvas link.</p>
                           </div>
                         )}
                       </div>
