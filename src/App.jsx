@@ -98,6 +98,10 @@ const PlanAssist = () => {
   const [completionFeed, setCompletionFeed] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
   const [userLeaderboardPosition, setUserLeaderboardPosition] = useState(null);
+  
+  // Canvas proxy state
+  const [canvasConnected, setCanvasConnected] = useState(false);
+  const CANVAS_PROXY_URL = 'https://canvas-proxy-planassist.workers.dev';
   const [hubStats, setHubStats] = useState({
     tasksCompletedToday: 0,
     tasksCompletedWeek: 0,
@@ -247,6 +251,13 @@ const PlanAssist = () => {
           schedule: setupData.schedule || {},
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
+        
+        // Update user object with grade for leaderboard to work
+        if (savedUser) {
+          const updatedUser = { ...JSON.parse(savedUser), grade: setupData.grade };
+          setUser(updatedUser);
+          localStorage.setItem('user', JSON.stringify(updatedUser));
+        }
       } else {
         // If no grade setup yet, still set the name
         setAccountSetup(prev => ({
