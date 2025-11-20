@@ -595,48 +595,16 @@ const PlanAssist = () => {
       const allTasks = [...existingCompletedTasks, ...existingSplitTasks, ...filteredNewTasks];
       const saveResult = await apiCall('/tasks', 'POST', { tasks: allTasks });
       
-      // Separate new and existing tasks based on is_new flag
-      const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
+      // CRITICAL FIX: Reload tasks from GET endpoint instead of using saveResult directly
+      // This ensures deleted tasks are properly filtered out
+      await loadTasks();
       
-      const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: new Date(t.deadline),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
+      const newTasksCount = saveResult.stats?.new || 0;
       
-      setTasks(updatedTasks);
-      setNewTasks(updatedNewTasks);
-      setHasUnsavedChanges(false);
-      
-      // Generate sessions with the newly loaded tasks
-      generateSessions(updatedTasks, accountSetup.schedule);
-      
-      if (updatedNewTasks.length > 0) {
-        alert(`Loaded ${filteredNewTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar.`);
+      if (newTasksCount > 0) {
+        alert(`Loaded ${filteredNewTasks.length} tasks. ${newTasksCount} new tasks are in the sidebar.`);
       } else {
-        alert(`Loaded ${filteredNewTasks.length} new tasks from file!`);
+        alert(`Loaded ${filteredNewTasks.length} tasks from file!`);
       }
     } catch (error) {
       alert('Failed to parse calendar file: ' + error.message);
@@ -655,7 +623,6 @@ const fetchCanvasTasks = async () => {
     // Fetch from Canvas
     const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
     
-    // ✅ FIX: Backend returns 'deadline' not 'dueDate'
     // Format tasks properly for saving to database
     const formattedTasks = data.tasks.map(t => ({
       title: t.title,
@@ -663,57 +630,28 @@ const fetchCanvasTasks = async () => {
       class: t.class,
       description: t.description,
       url: t.url,
-      deadline: t.deadline,           // Keep as deadline for backend
+      deadline: t.deadline,
       estimatedTime: t.estimatedTime
     }));
     
-    // Save to database
+    // Save to database - this updates existing tasks and creates new ones
     const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
     
-    // ✅ FIX: Map backend response correctly
-    const updatedTasks = saveResult.tasks.filter(t => !t.is_new).map(t => ({
-      id: t.id,
-      title: t.title,
-      segment: t.segment,
-      class: t.class,
-      description: t.description,
-      url: t.url,
-      dueDate: new Date(t.deadline),        // Convert deadline to dueDate for frontend
-      estimatedTime: t.estimated_time,
-      userEstimate: t.user_estimated_time,
-      accumulatedTime: t.accumulated_time || 0,
-      priorityOrder: t.priority_order,
-      completed: t.completed
-    }));
+    console.log(`✓ Sync complete: ${saveResult.stats.updated} updated, ${saveResult.stats.new} new`);
     
-    const updatedNewTasks = saveResult.tasks.filter(t => t.is_new).map(t => ({
-      id: t.id,
-      title: t.title,
-      segment: t.segment,
-      class: t.class,
-      description: t.description,
-      url: t.url,
-      dueDate: new Date(t.deadline),        // Convert deadline to dueDate for frontend
-      estimatedTime: t.estimated_time,
-      userEstimate: t.user_estimated_time,
-      accumulatedTime: t.accumulated_time || 0,
-      priorityOrder: t.priority_order,
-      completed: t.completed
-    }));
+    // CRITICAL FIX: Don't use saveResult.tasks directly as it includes deleted tasks
+    // Instead, reload from GET endpoint which properly filters deleted=false
+    await loadTasks();
     
-    setTasks(updatedTasks);
-    setNewTasks(updatedNewTasks);
-    setHasUnsavedChanges(false);
+    // Check how many new tasks we got
+    const newTasksCount = saveResult.stats.new || 0;
     
-    // Generate sessions
-    generateSessions(updatedTasks, accountSetup.schedule);
-    
-    if (updatedNewTasks.length > 0) {
+    if (newTasksCount > 0) {
       setNewTasksSidebarOpen(true);
       setHasUnsavedChanges(true);
-      alert(`Loaded ${formattedTasks.length} tasks. ${updatedNewTasks.length} new tasks are in the sidebar. Drag them to your list or click "Add All".`);
+      alert(`Sync complete! ${saveResult.stats.updated} tasks updated, ${newTasksCount} new tasks in sidebar.`);
     } else {
-      alert(`Loaded ${formattedTasks.length} new tasks from Canvas!`);
+      alert(`Sync complete! ${saveResult.stats.updated} tasks updated from Canvas.`);
     }
   } catch (error) {
     console.error('Failed to fetch Canvas calendar:', error);
@@ -963,11 +901,14 @@ const fetchCanvasTasks = async () => {
 
     try {
       if (newCompletedStatus) {
-        // Complete the task
+        // Complete the task - this marks it as deleted in backend
         await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
+        // Reload tasks from server to get proper filtered list (without deleted tasks)
+        await loadTasks();
       } else {
         // Uncomplete the task
         await apiCall(`/tasks/${taskId}/uncomplete`, 'PATCH');
+        await loadTasks();
       }
       // Successfully saved to backend
       console.log('Task completion toggled successfully');
