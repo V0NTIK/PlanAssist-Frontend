@@ -1196,6 +1196,21 @@ const fetchCanvasTasks = async () => {
     setNewTasks([]);
   };
 
+  const handleIgnoreTask = async (taskId) => {
+    try {
+      // Call the ignore endpoint to mark task as deleted
+      await apiCall(`/tasks/${taskId}/ignore`, 'POST');
+      
+      // Remove from newTasks array in UI
+      setNewTasks(prevTasks => prevTasks.filter(t => t.id !== taskId));
+      
+      console.log(`✓ Task ${taskId} ignored successfully`);
+    } catch (error) {
+      console.error('Failed to ignore task:', error);
+      alert('Failed to ignore task: ' + error.message);
+    }
+  };
+
   const handleSaveAndAdjustPlan = async () => {
     try {
       // Convert tasks from frontend format (dueDate) to backend format (deadline)
@@ -2858,10 +2873,10 @@ const fetchCanvasTasks = async () => {
                           draggable={true}
                           onDragStart={(e) => handleDragStart(e, task)}
                           onDragEnd={handleDragEnd}
-                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 cursor-move hover:shadow-md transition-all hover:scale-105"
+                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 hover:shadow-md transition-all"
                         >
                           <div className="flex items-start gap-2 mb-2">
-                            <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5" />
+                            <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5 cursor-move" />
                             <div className="flex-1 min-w-0">
                               <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{cleanTaskTitle(task)}</h4>
                               <div className="flex items-center gap-2 flex-wrap">
@@ -2882,8 +2897,18 @@ const fetchCanvasTasks = async () => {
                               </div>
                             </div>
                           </div>
-                          <div className="text-xs text-gray-500 italic pl-7">
-                            Drag to priority list →
+                          <div className="flex items-center justify-between pl-7 gap-2">
+                            <span className="text-xs text-gray-500 italic">
+                              Drag to priority list →
+                            </span>
+                            <button
+                              onClick={() => handleIgnoreTask(task.id)}
+                              className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 font-medium flex items-center gap-1"
+                              title="Ignore this task - it will be removed and won't be re-imported"
+                            >
+                              <X className="w-3 h-3" />
+                              Ignore
+                            </button>
                           </div>
                         </div>
                       );
