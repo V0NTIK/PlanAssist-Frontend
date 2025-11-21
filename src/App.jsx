@@ -2663,7 +2663,14 @@ const fetchCanvasTasks = async () => {
                                   
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                      <h3 className="font-semibold text-gray-900 text-lg">{cleanTaskTitle(task)}</h3>
+                                      <a 
+                                        href={task.url} 
+                                        target="_blank" 
+                                        rel="noopener noreferrer"
+                                        className="font-semibold text-gray-900 text-lg hover:text-purple-600 hover:underline transition-colors"
+                                      >
+                                        {cleanTaskTitle(task)}
+                                      </a>
                                       <span 
                                         className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
                                         style={{ backgroundColor: classColor }}
@@ -2675,7 +2682,7 @@ const fetchCanvasTasks = async () => {
                                     <div className="flex items-center gap-3 text-sm text-gray-600">
                                       <span className="flex items-center gap-1">
                                         <Calendar className="w-4 h-4" />
-                                        {dayName}
+                                        {dayName} at {dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
                                       </span>
                                       {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
                                         <span className="flex items-center gap-2">
@@ -2819,7 +2826,14 @@ const fetchCanvasTasks = async () => {
                           <div className="flex items-start gap-2 mb-2">
                             <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5 cursor-move" />
                             <div className="flex-1 min-w-0">
-                              <h4 className="font-semibold text-gray-900 text-sm mb-1 break-words">{cleanTaskTitle(task)}</h4>
+                              <a 
+                                href={task.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="font-semibold text-gray-900 text-sm mb-1 break-words hover:text-purple-600 hover:underline transition-colors block"
+                              >
+                                {cleanTaskTitle(task)}
+                              </a>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span 
                                   className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
@@ -2829,7 +2843,7 @@ const fetchCanvasTasks = async () => {
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
                                   <Calendar className="w-3 h-3" />
-                                  {dayName}
+                                  {dayName} at {dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
                                   <Brain className="w-3 h-3" />
