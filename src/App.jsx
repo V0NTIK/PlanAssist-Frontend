@@ -276,9 +276,12 @@ const PlanAssist = () => {
           class: t.class,
           description: t.description,
           url: t.url,
-          // Parse deadline string as local datetime (not UTC)
-          // Format from backend: "2025-11-22 23:59:00"
-          dueDate: new Date(t.deadline.replace(' ', 'T')),
+          // Handle two formats:
+          // 1. UTC: "2025-11-25T04:59:00Z" - JavaScript will convert to local
+          // 2. Local: "2025-11-24 23:59:00" - Convert space to T for ISO format
+          dueDate: t.deadline.includes('Z') 
+            ? new Date(t.deadline)  // Already ISO format with Z
+            : new Date(t.deadline.replace(' ', 'T')),  // Convert to ISO format
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
@@ -293,8 +296,9 @@ const PlanAssist = () => {
           class: t.class,
           description: t.description,
           url: t.url,
-          // Parse deadline string as local datetime (not UTC)
-          dueDate: new Date(t.deadline.replace(' ', 'T')),
+          dueDate: t.deadline.includes('Z') 
+            ? new Date(t.deadline)
+            : new Date(t.deadline.replace(' ', 'T')),
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
@@ -361,7 +365,9 @@ const PlanAssist = () => {
         class: t.class,
         description: t.description,
         url: t.url,
-        dueDate: new Date(t.deadline.replace(' ', 'T')),
+        dueDate: t.deadline.includes('Z') 
+          ? new Date(t.deadline)
+          : new Date(t.deadline.replace(' ', 'T')),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimated_time,
         accumulatedTime: t.accumulated_time || 0,
@@ -376,7 +382,9 @@ const PlanAssist = () => {
         class: t.class,
         description: t.description,
         url: t.url,
-        dueDate: new Date(t.deadline.replace(' ', 'T')),
+        dueDate: t.deadline.includes('Z') 
+          ? new Date(t.deadline)
+          : new Date(t.deadline.replace(' ', 'T')),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimated_time,
         accumulatedTime: t.accumulated_time || 0,
