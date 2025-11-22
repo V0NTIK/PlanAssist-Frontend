@@ -276,7 +276,9 @@ const PlanAssist = () => {
           class: t.class,
           description: t.description,
           url: t.url,
-          dueDate: new Date(t.deadline),
+          // Parse deadline string as local datetime (not UTC)
+          // Format from backend: "2025-11-22 23:59:00"
+          dueDate: new Date(t.deadline.replace(' ', 'T')),
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
@@ -291,7 +293,8 @@ const PlanAssist = () => {
           class: t.class,
           description: t.description,
           url: t.url,
-          dueDate: new Date(t.deadline),
+          // Parse deadline string as local datetime (not UTC)
+          dueDate: new Date(t.deadline.replace(' ', 'T')),
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
@@ -358,7 +361,7 @@ const PlanAssist = () => {
         class: t.class,
         description: t.description,
         url: t.url,
-        dueDate: new Date(t.deadline),
+        dueDate: new Date(t.deadline.replace(' ', 'T')),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimated_time,
         accumulatedTime: t.accumulated_time || 0,
@@ -373,7 +376,7 @@ const PlanAssist = () => {
         class: t.class,
         description: t.description,
         url: t.url,
-        dueDate: new Date(t.deadline),
+        dueDate: new Date(t.deadline.replace(' ', 'T')),
         estimatedTime: t.estimated_time,
         userEstimate: t.user_estimated_time,
         accumulatedTime: t.accumulated_time || 0,
