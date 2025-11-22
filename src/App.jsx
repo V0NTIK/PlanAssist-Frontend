@@ -639,7 +639,7 @@ const fetchCanvasTasks = async () => {
     // Save to database - this updates existing tasks and creates new ones
     const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
     
-    console.log(`✓ Sync complete: ${saveResult.stats.updated} updated, ${saveResult.stats.new} new`);
+    console.log(`✓ Sync complete: ${saveResult.stats.updated} updated, ${saveResult.stats.new} new, ${saveResult.stats.cleaned || 0} cleaned`);
     
     // CRITICAL FIX: Don't use saveResult.tasks directly as it includes deleted tasks
     // Instead, reload from GET endpoint which properly filters deleted=false
@@ -647,14 +647,24 @@ const fetchCanvasTasks = async () => {
     
     // Check how many new tasks we got
     const newTasksCount = saveResult.stats.new || 0;
+    const cleanedCount = saveResult.stats.cleaned || 0;
+    
+    // Build notification message
+    let message = `Sync complete! ${saveResult.stats.updated} tasks updated`;
+    if (newTasksCount > 0) {
+      message += `, ${newTasksCount} new tasks in sidebar`;
+    }
+    if (cleanedCount > 0) {
+      message += `, ${cleanedCount} past-due tasks removed`;
+    }
+    message += '.';
     
     if (newTasksCount > 0) {
       setNewTasksSidebarOpen(true);
       setHasUnsavedChanges(true);
-      alert(`Sync complete! ${saveResult.stats.updated} tasks updated, ${newTasksCount} new tasks in sidebar.`);
-    } else {
-      alert(`Sync complete! ${saveResult.stats.updated} tasks updated from Canvas.`);
     }
+    
+    alert(message);
   } catch (error) {
     console.error('Failed to fetch Canvas calendar:', error);
     
