@@ -1240,10 +1240,21 @@ const fetchCanvasTasks = async () => {
           deadlineTime = `${utcHours}:${utcMinutes}:${utcSeconds}`;
         }
         
+        // Only send fields the backend expects
         return {
-          ...task,
+          id: task.id,
+          title: task.title,
+          segment: task.segment,
+          class: task.class,
+          description: task.description,
+          url: task.url,
           deadlineDate,
-          deadlineTime
+          deadlineTime,
+          estimatedTime: task.estimatedTime,
+          userEstimate: task.userEstimate,
+          accumulatedTime: task.accumulatedTime,
+          priorityOrder: task.priorityOrder,
+          completed: task.completed
         };
       });
       
