@@ -417,6 +417,15 @@ const PlanAssist = () => {
   const loadTasks = async () => {
     try {
       const tasksData = await apiCall('/tasks', 'GET');
+      
+      // DEBUG: Log first task to see what format we're getting
+      if (tasksData.length > 0) {
+        console.log('Sample task from API:', tasksData[0]);
+        console.log('deadline_date:', tasksData[0].deadline_date);
+        console.log('deadline_time:', tasksData[0].deadline_time);
+        console.log('deadline (old):', tasksData[0].deadline);
+      }
+      
       const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
         // Convert deadline_date and deadline_time to local Date object
         let dueDate;
@@ -427,13 +436,17 @@ const PlanAssist = () => {
           if (t.deadline_time !== null && t.deadline_time !== undefined) {
             // Has specific time - convert from UTC to local
             const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            console.log(`Creating Date from UTC: ${utcDatetime}`);
             dueDate = new Date(utcDatetime);
             hasSpecificTime = true;
           } else {
             // Date-only task - use 23:59:00 in local timezone
-            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+            const localDatetime = `${t.deadline_date}T23:59:00`;
+            console.log(`Creating Date from local: ${localDatetime}`);
+            dueDate = new Date(localDatetime);
             hasSpecificTime = false;
           }
+          console.log(`Result: ${dueDate}, isValid: ${!isNaN(dueDate.getTime())}`);
         }
         // Fallback for old format (single deadline column)
         else if (t.deadline) {
@@ -1302,8 +1315,14 @@ const fetchCanvasTasks = async () => {
       const tasksForBackend = tasks.map(task => {
         // Validate dueDate exists and is valid
         if (!task.dueDate || isNaN(task.dueDate.getTime())) {
-          console.error('Invalid dueDate for task:', task);
-          throw new Error(`Task "${task.title}" has an invalid date`);
+          console.error('Invalid dueDate for task:', {
+            id: task.id,
+            title: task.title,
+            dueDate: task.dueDate,
+            dueDateType: typeof task.dueDate,
+            rawTask: task
+          });
+          throw new Error(`Task "${task.title}" (ID: ${task.id}) has an invalid date. Please reload the page and try again.`);
         }
         
         // Extract date and time from the Date object
@@ -1311,6 +1330,12 @@ const fetchCanvasTasks = async () => {
         const month = String(task.dueDate.getMonth() + 1).padStart(2, '0');
         const day = String(task.dueDate.getDate()).padStart(2, '0');
         const deadlineDate = `${year}-${month}-${day}`;
+        
+        // Validate the resulting date string
+        if (deadlineDate.includes('NaN')) {
+          console.error('NaN in deadlineDate for task:', task);
+          throw new Error(`Task "${task.title}" produced invalid date: ${deadlineDate}. Please reload the page.`);
+        }
         
         let deadlineTime = null;
         // If the task has a specific time (not just date-only), extract it
@@ -1320,6 +1345,11 @@ const fetchCanvasTasks = async () => {
           const utcMinutes = String(task.dueDate.getUTCMinutes()).padStart(2, '0');
           const utcSeconds = String(task.dueDate.getUTCSeconds()).padStart(2, '0');
           deadlineTime = `${utcHours}:${utcMinutes}:${utcSeconds}`;
+          
+          if (deadlineTime.includes('NaN')) {
+            console.error('NaN in deadlineTime for task:', task);
+            throw new Error(`Task "${task.title}" produced invalid time: ${deadlineTime}. Please reload the page.`);
+          }
         }
         
         // Only send fields the backend expects
