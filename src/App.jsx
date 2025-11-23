@@ -272,13 +272,32 @@ const PlanAssist = () => {
         const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
           // Convert deadline_date and deadline_time to local Date object
           let dueDate;
-          if (t.deadline_time !== null) {
-            // Has specific time - convert from UTC to local
-            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
-            dueDate = new Date(utcDatetime);
-          } else {
-            // Date-only task - use 23:59:00 in local timezone
-            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+          let hasSpecificTime = false;
+          
+          // Handle new format (deadline_date + deadline_time)
+          if (t.deadline_date) {
+            if (t.deadline_time !== null && t.deadline_time !== undefined) {
+              // Has specific time - convert from UTC to local
+              const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+              dueDate = new Date(utcDatetime);
+              hasSpecificTime = true;
+            } else {
+              // Date-only task - use 23:59:00 in local timezone
+              dueDate = new Date(`${t.deadline_date}T23:59:00`);
+              hasSpecificTime = false;
+            }
+          }
+          // Fallback for old format (single deadline column) - should not happen after migration
+          else if (t.deadline) {
+            console.warn('Task using old deadline format:', t.id, t.title);
+            dueDate = new Date(t.deadline);
+            hasSpecificTime = true;
+          }
+          // No deadline at all - use today as fallback
+          else {
+            console.error('Task missing deadline:', t.id, t.title);
+            dueDate = new Date();
+            hasSpecificTime = false;
           }
           
           return {
@@ -289,7 +308,7 @@ const PlanAssist = () => {
             description: t.description,
             url: t.url,
             dueDate: dueDate,
-            hasSpecificTime: t.deadline_time !== null,
+            hasSpecificTime: hasSpecificTime,
             estimatedTime: t.estimated_time,
             userEstimate: t.user_estimated_time,
             accumulatedTime: t.accumulated_time || 0,
@@ -301,13 +320,32 @@ const PlanAssist = () => {
         const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => {
           // Convert deadline_date and deadline_time to local Date object
           let dueDate;
-          if (t.deadline_time !== null) {
-            // Has specific time - convert from UTC to local
-            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
-            dueDate = new Date(utcDatetime);
-          } else {
-            // Date-only task - use 23:59:00 in local timezone
-            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+          let hasSpecificTime = false;
+          
+          // Handle new format (deadline_date + deadline_time)
+          if (t.deadline_date) {
+            if (t.deadline_time !== null && t.deadline_time !== undefined) {
+              // Has specific time - convert from UTC to local
+              const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+              dueDate = new Date(utcDatetime);
+              hasSpecificTime = true;
+            } else {
+              // Date-only task - use 23:59:00 in local timezone
+              dueDate = new Date(`${t.deadline_date}T23:59:00`);
+              hasSpecificTime = false;
+            }
+          }
+          // Fallback for old format (single deadline column)
+          else if (t.deadline) {
+            console.warn('Task using old deadline format:', t.id, t.title);
+            dueDate = new Date(t.deadline);
+            hasSpecificTime = true;
+          }
+          // No deadline at all - use today as fallback
+          else {
+            console.error('Task missing deadline:', t.id, t.title);
+            dueDate = new Date();
+            hasSpecificTime = false;
           }
           
           return {
@@ -318,7 +356,7 @@ const PlanAssist = () => {
             description: t.description,
             url: t.url,
             dueDate: dueDate,
-            hasSpecificTime: t.deadline_time !== null,
+            hasSpecificTime: hasSpecificTime,
             estimatedTime: t.estimated_time,
             userEstimate: t.user_estimated_time,
             accumulatedTime: t.accumulated_time || 0,
@@ -382,13 +420,32 @@ const PlanAssist = () => {
       const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
         // Convert deadline_date and deadline_time to local Date object
         let dueDate;
-        if (t.deadline_time !== null) {
-          // Has specific time - convert from UTC to local
-          const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
-          dueDate = new Date(utcDatetime);
-        } else {
-          // Date-only task - use 23:59:00 in local timezone
-          dueDate = new Date(`${t.deadline_date}T23:59:00`);
+        let hasSpecificTime = false;
+        
+        // Handle new format (deadline_date + deadline_time)
+        if (t.deadline_date) {
+          if (t.deadline_time !== null && t.deadline_time !== undefined) {
+            // Has specific time - convert from UTC to local
+            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            dueDate = new Date(utcDatetime);
+            hasSpecificTime = true;
+          } else {
+            // Date-only task - use 23:59:00 in local timezone
+            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+            hasSpecificTime = false;
+          }
+        }
+        // Fallback for old format (single deadline column)
+        else if (t.deadline) {
+          console.warn('Task using old deadline format:', t.id, t.title);
+          dueDate = new Date(t.deadline);
+          hasSpecificTime = true;
+        }
+        // No deadline at all - use today as fallback
+        else {
+          console.error('Task missing deadline:', t.id, t.title);
+          dueDate = new Date();
+          hasSpecificTime = false;
         }
         
         return {
@@ -399,7 +456,7 @@ const PlanAssist = () => {
           description: t.description,
           url: t.url,
           dueDate: dueDate,
-          hasSpecificTime: t.deadline_time !== null,
+          hasSpecificTime: hasSpecificTime,
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
@@ -411,13 +468,32 @@ const PlanAssist = () => {
       const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => {
         // Convert deadline_date and deadline_time to local Date object
         let dueDate;
-        if (t.deadline_time !== null) {
-          // Has specific time - convert from UTC to local
-          const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
-          dueDate = new Date(utcDatetime);
-        } else {
-          // Date-only task - use 23:59:00 in local timezone
-          dueDate = new Date(`${t.deadline_date}T23:59:00`);
+        let hasSpecificTime = false;
+        
+        // Handle new format (deadline_date + deadline_time)
+        if (t.deadline_date) {
+          if (t.deadline_time !== null && t.deadline_time !== undefined) {
+            // Has specific time - convert from UTC to local
+            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            dueDate = new Date(utcDatetime);
+            hasSpecificTime = true;
+          } else {
+            // Date-only task - use 23:59:00 in local timezone
+            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+            hasSpecificTime = false;
+          }
+        }
+        // Fallback for old format (single deadline column)
+        else if (t.deadline) {
+          console.warn('Task using old deadline format:', t.id, t.title);
+          dueDate = new Date(t.deadline);
+          hasSpecificTime = true;
+        }
+        // No deadline at all - use today as fallback
+        else {
+          console.error('Task missing deadline:', t.id, t.title);
+          dueDate = new Date();
+          hasSpecificTime = false;
         }
         
         return {
@@ -428,7 +504,7 @@ const PlanAssist = () => {
           description: t.description,
           url: t.url,
           dueDate: dueDate,
-          hasSpecificTime: t.deadline_time !== null,
+          hasSpecificTime: hasSpecificTime,
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
@@ -1224,6 +1300,12 @@ const fetchCanvasTasks = async () => {
     try {
       // Convert tasks from frontend format (dueDate) to backend format (deadlineDate, deadlineTime)
       const tasksForBackend = tasks.map(task => {
+        // Validate dueDate exists and is valid
+        if (!task.dueDate || isNaN(task.dueDate.getTime())) {
+          console.error('Invalid dueDate for task:', task);
+          throw new Error(`Task "${task.title}" has an invalid date`);
+        }
+        
         // Extract date and time from the Date object
         const year = task.dueDate.getFullYear();
         const month = String(task.dueDate.getMonth() + 1).padStart(2, '0');
