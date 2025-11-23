@@ -276,14 +276,21 @@ const PlanAssist = () => {
           
           // Handle new format (deadline_date + deadline_time)
           if (t.deadline_date) {
+            // PostgreSQL DATE columns come back as ISO timestamps
+            let dateString = t.deadline_date;
+            if (typeof dateString !== 'string') {
+              dateString = new Date(dateString).toISOString();
+            }
+            const datePart = dateString.split('T')[0]; // "2025-11-24"
+            
             if (t.deadline_time !== null && t.deadline_time !== undefined) {
               // Has specific time - convert from UTC to local
-              const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+              const utcDatetime = `${datePart}T${t.deadline_time}Z`;
               dueDate = new Date(utcDatetime);
               hasSpecificTime = true;
             } else {
               // Date-only task - use 23:59:00 in local timezone
-              dueDate = new Date(`${t.deadline_date}T23:59:00`);
+              dueDate = new Date(`${datePart}T23:59:00`);
               hasSpecificTime = false;
             }
           }
@@ -324,14 +331,21 @@ const PlanAssist = () => {
           
           // Handle new format (deadline_date + deadline_time)
           if (t.deadline_date) {
+            // PostgreSQL DATE columns come back as ISO timestamps
+            let dateString = t.deadline_date;
+            if (typeof dateString !== 'string') {
+              dateString = new Date(dateString).toISOString();
+            }
+            const datePart = dateString.split('T')[0]; // "2025-11-24"
+            
             if (t.deadline_time !== null && t.deadline_time !== undefined) {
               // Has specific time - convert from UTC to local
-              const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+              const utcDatetime = `${datePart}T${t.deadline_time}Z`;
               dueDate = new Date(utcDatetime);
               hasSpecificTime = true;
             } else {
               // Date-only task - use 23:59:00 in local timezone
-              dueDate = new Date(`${t.deadline_date}T23:59:00`);
+              dueDate = new Date(`${datePart}T23:59:00`);
               hasSpecificTime = false;
             }
           }
@@ -433,15 +447,23 @@ const PlanAssist = () => {
         
         // Handle new format (deadline_date + deadline_time)
         if (t.deadline_date) {
+          // PostgreSQL DATE columns come back as ISO timestamps like "2025-11-24T00:00:00.000Z"
+          // Extract just the date part
+          let dateString = t.deadline_date;
+          if (typeof dateString !== 'string') {
+            dateString = new Date(dateString).toISOString();
+          }
+          const datePart = dateString.split('T')[0]; // "2025-11-24"
+          
           if (t.deadline_time !== null && t.deadline_time !== undefined) {
             // Has specific time - convert from UTC to local
-            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            const utcDatetime = `${datePart}T${t.deadline_time}Z`;
             console.log(`Creating Date from UTC: ${utcDatetime}`);
             dueDate = new Date(utcDatetime);
             hasSpecificTime = true;
           } else {
             // Date-only task - use 23:59:00 in local timezone
-            const localDatetime = `${t.deadline_date}T23:59:00`;
+            const localDatetime = `${datePart}T23:59:00`;
             console.log(`Creating Date from local: ${localDatetime}`);
             dueDate = new Date(localDatetime);
             hasSpecificTime = false;
@@ -485,14 +507,21 @@ const PlanAssist = () => {
         
         // Handle new format (deadline_date + deadline_time)
         if (t.deadline_date) {
+          // PostgreSQL DATE columns come back as ISO timestamps
+          let dateString = t.deadline_date;
+          if (typeof dateString !== 'string') {
+            dateString = new Date(dateString).toISOString();
+          }
+          const datePart = dateString.split('T')[0]; // "2025-11-24"
+          
           if (t.deadline_time !== null && t.deadline_time !== undefined) {
             // Has specific time - convert from UTC to local
-            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            const utcDatetime = `${datePart}T${t.deadline_time}Z`;
             dueDate = new Date(utcDatetime);
             hasSpecificTime = true;
           } else {
             // Date-only task - use 23:59:00 in local timezone
-            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+            dueDate = new Date(`${datePart}T23:59:00`);
             hasSpecificTime = false;
           }
         }
