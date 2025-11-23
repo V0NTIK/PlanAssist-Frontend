@@ -269,42 +269,63 @@ const PlanAssist = () => {
       }).then(r => r.json());
 
       if (tasksData.length > 0) {
-        const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
-          id: t.id,
-          title: t.title,
-          segment: t.segment,
-          class: t.class,
-          description: t.description,
-          url: t.url,
-          // Handle two formats:
-          // 1. UTC: "2025-11-25T04:59:00Z" - JavaScript will convert to local
-          // 2. Local: "2025-11-24 23:59:00" - Convert space to T for ISO format
-          dueDate: t.deadline.includes('Z') 
-            ? new Date(t.deadline)  // Already ISO format with Z
-            : new Date(t.deadline.replace(' ', 'T')),  // Convert to ISO format
-          estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimated_time,
-          accumulatedTime: t.accumulated_time || 0,
-          priorityOrder: t.priority_order,
-          completed: t.completed
-        }));
+        const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
+          // Convert deadline_date and deadline_time to local Date object
+          let dueDate;
+          if (t.deadline_time !== null) {
+            // Has specific time - convert from UTC to local
+            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            dueDate = new Date(utcDatetime);
+          } else {
+            // Date-only task - use 23:59:00 in local timezone
+            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+          }
+          
+          return {
+            id: t.id,
+            title: t.title,
+            segment: t.segment,
+            class: t.class,
+            description: t.description,
+            url: t.url,
+            dueDate: dueDate,
+            hasSpecificTime: t.deadline_time !== null,
+            estimatedTime: t.estimated_time,
+            userEstimate: t.user_estimated_time,
+            accumulatedTime: t.accumulated_time || 0,
+            priorityOrder: t.priority_order,
+            completed: t.completed
+          };
+        });
         
-        const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
-          id: t.id,
-          title: t.title,
-          segment: t.segment,
-          class: t.class,
-          description: t.description,
-          url: t.url,
-          dueDate: t.deadline.includes('Z') 
-            ? new Date(t.deadline)
-            : new Date(t.deadline.replace(' ', 'T')),
-          estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimated_time,
-          accumulatedTime: t.accumulated_time || 0,
-          priorityOrder: t.priority_order,
-          completed: t.completed
-        }));
+        const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => {
+          // Convert deadline_date and deadline_time to local Date object
+          let dueDate;
+          if (t.deadline_time !== null) {
+            // Has specific time - convert from UTC to local
+            const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+            dueDate = new Date(utcDatetime);
+          } else {
+            // Date-only task - use 23:59:00 in local timezone
+            dueDate = new Date(`${t.deadline_date}T23:59:00`);
+          }
+          
+          return {
+            id: t.id,
+            title: t.title,
+            segment: t.segment,
+            class: t.class,
+            description: t.description,
+            url: t.url,
+            dueDate: dueDate,
+            hasSpecificTime: t.deadline_time !== null,
+            estimatedTime: t.estimated_time,
+            userEstimate: t.user_estimated_time,
+            accumulatedTime: t.accumulated_time || 0,
+            priorityOrder: t.priority_order,
+            completed: t.completed
+          };
+        });
         
         setTasks(loadedTasks);
         setNewTasks(loadedNewTasks);
@@ -358,39 +379,63 @@ const PlanAssist = () => {
   const loadTasks = async () => {
     try {
       const tasksData = await apiCall('/tasks', 'GET');
-      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: t.deadline.includes('Z') 
-          ? new Date(t.deadline)
-          : new Date(t.deadline.replace(' ', 'T')),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
+      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
+        // Convert deadline_date and deadline_time to local Date object
+        let dueDate;
+        if (t.deadline_time !== null) {
+          // Has specific time - convert from UTC to local
+          const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+          dueDate = new Date(utcDatetime);
+        } else {
+          // Date-only task - use 23:59:00 in local timezone
+          dueDate = new Date(`${t.deadline_date}T23:59:00`);
+        }
+        
+        return {
+          id: t.id,
+          title: t.title,
+          segment: t.segment,
+          class: t.class,
+          description: t.description,
+          url: t.url,
+          dueDate: dueDate,
+          hasSpecificTime: t.deadline_time !== null,
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
+          priorityOrder: t.priority_order,
+          completed: t.completed
+        };
+      });
       
-      const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => ({
-        id: t.id,
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        dueDate: t.deadline.includes('Z') 
-          ? new Date(t.deadline)
-          : new Date(t.deadline.replace(' ', 'T')),
-        estimatedTime: t.estimated_time,
-        userEstimate: t.user_estimated_time,
-        accumulatedTime: t.accumulated_time || 0,
-        priorityOrder: t.priority_order,
-        completed: t.completed
-      }));
+      const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => {
+        // Convert deadline_date and deadline_time to local Date object
+        let dueDate;
+        if (t.deadline_time !== null) {
+          // Has specific time - convert from UTC to local
+          const utcDatetime = `${t.deadline_date}T${t.deadline_time}Z`;
+          dueDate = new Date(utcDatetime);
+        } else {
+          // Date-only task - use 23:59:00 in local timezone
+          dueDate = new Date(`${t.deadline_date}T23:59:00`);
+        }
+        
+        return {
+          id: t.id,
+          title: t.title,
+          segment: t.segment,
+          class: t.class,
+          description: t.description,
+          url: t.url,
+          dueDate: dueDate,
+          hasSpecificTime: t.deadline_time !== null,
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
+          priorityOrder: t.priority_order,
+          completed: t.completed
+        };
+      });
       
       setTasks(loadedTasks);
       setNewTasks(loadedNewTasks);
@@ -641,7 +686,8 @@ const fetchCanvasTasks = async () => {
       class: t.class,
       description: t.description,
       url: t.url,
-      deadline: t.deadline,
+      deadline_date: t.deadlineDate,
+      deadline_time: t.deadlineTime,
       estimatedTime: t.estimatedTime
     }));
     
@@ -1175,11 +1221,30 @@ const fetchCanvasTasks = async () => {
 
   const handleSaveAndAdjustPlan = async () => {
     try {
-      // Convert tasks from frontend format (dueDate) to backend format (deadline)
-      const tasksForBackend = tasks.map(task => ({
-        ...task,
-        deadline: task.dueDate // Backend expects 'deadline', frontend uses 'dueDate'
-      }));
+      // Convert tasks from frontend format (dueDate) to backend format (deadlineDate, deadlineTime)
+      const tasksForBackend = tasks.map(task => {
+        // Extract date and time from the Date object
+        const year = task.dueDate.getFullYear();
+        const month = String(task.dueDate.getMonth() + 1).padStart(2, '0');
+        const day = String(task.dueDate.getDate()).padStart(2, '0');
+        const deadlineDate = `${year}-${month}-${day}`;
+        
+        let deadlineTime = null;
+        // If the task has a specific time (not just date-only), extract it
+        if (task.hasSpecificTime) {
+          // Convert local time to UTC for storage
+          const utcHours = String(task.dueDate.getUTCHours()).padStart(2, '0');
+          const utcMinutes = String(task.dueDate.getUTCMinutes()).padStart(2, '0');
+          const utcSeconds = String(task.dueDate.getUTCSeconds()).padStart(2, '0');
+          deadlineTime = `${utcHours}:${utcMinutes}:${utcSeconds}`;
+        }
+        
+        return {
+          ...task,
+          deadlineDate,
+          deadlineTime
+        };
+      });
       
       // Save all tasks with their current priority order to backend
       await apiCall('/tasks', 'POST', { tasks: tasksForBackend });
@@ -2703,7 +2768,11 @@ const fetchCanvasTasks = async () => {
                                     <div className="flex items-center gap-3 text-sm text-gray-600">
                                       <span className="flex items-center gap-1">
                                         <Calendar className="w-4 h-4" />
-                                        {dayName} at {dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                        {dayName} at {task.hasSpecificTime ? (
+                                          <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                        ) : (
+                                          <span title="Due by end of day" className="text-gray-500">11:59 PM</span>
+                                        )}
                                       </span>
                                       {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
                                         <span className="flex items-center gap-2">
@@ -2864,7 +2933,11 @@ const fetchCanvasTasks = async () => {
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
                                   <Calendar className="w-3 h-3" />
-                                  {dayName} at {dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                                  {dayName} at {task.hasSpecificTime ? (
+                                    <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                  ) : (
+                                    <span title="Due by end of day" className="text-gray-500">11:59 PM</span>
+                                  )}
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
                                   <Brain className="w-3 h-3" />
