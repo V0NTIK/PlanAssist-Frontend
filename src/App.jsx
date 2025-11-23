@@ -680,14 +680,15 @@ const fetchCanvasTasks = async () => {
     const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
     
     // Format tasks properly for saving to database
+    // Backend expects camelCase: deadlineDate and deadlineTime
     const formattedTasks = data.tasks.map(t => ({
       title: t.title,
       segment: t.segment,
       class: t.class,
       description: t.description,
       url: t.url,
-      deadline_date: t.deadlineDate,
-      deadline_time: t.deadlineTime,
+      deadlineDate: t.deadlineDate,
+      deadlineTime: t.deadlineTime,
       estimatedTime: t.estimatedTime
     }));
     
