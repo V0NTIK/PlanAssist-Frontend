@@ -2921,10 +2921,12 @@ const fetchCanvasTasks = async () => {
                                     <div className="flex items-center gap-3 text-sm text-gray-600">
                                       <span className="flex items-center gap-1">
                                         <Calendar className="w-4 h-4" />
-                                        {dayName} at {task.hasSpecificTime ? (
-                                          <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                        {task.hasSpecificTime ? (
+                                          <>
+                                            {dayName} at <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                          </>
                                         ) : (
-                                          <span title="Due by end of day" className="text-gray-500">11:59 PM</span>
+                                          <span title="Due date (no specific time)">{dayName}</span>
                                         )}
                                       </span>
                                       {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
@@ -3086,10 +3088,12 @@ const fetchCanvasTasks = async () => {
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
                                   <Calendar className="w-3 h-3" />
-                                  {dayName} at {task.hasSpecificTime ? (
-                                    <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                  {task.hasSpecificTime ? (
+                                    <>
+                                      {dayName} at <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                    </>
                                   ) : (
-                                    <span title="Due by end of day" className="text-gray-500">11:59 PM</span>
+                                    <span title="Due date (no specific time)">{dayName}</span>
                                   )}
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
