@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown } from 'lucide-react';
 
-const API_URL = 'https://planassist.onrender.com/api';
+const API_URL = 'https://planassist-api.onrender.com/api';
 
 const PlanAssist = () => {
   // Auth state
