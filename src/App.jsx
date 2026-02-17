@@ -794,12 +794,11 @@ const fetchCanvasTasks = async () => {
   }
   setIsLoadingTasks(true);
   try {
-    // NOTE: This endpoint will need to be completely rewritten to use Canvas API
-    // For now, keeping the ICS endpoint structure but will be replaced
-    const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
+    // Fetch from Canvas API (replaces ICS calendar fetch)
+    const data = await apiCall('/canvas/sync', 'POST', {});
     
     // Format tasks properly for saving to database
-    // Backend expects camelCase: deadlineDate and deadlineTime
+    // Backend expects camelCase fields
     const formattedTasks = data.tasks.map(t => ({
       title: t.title,
       segment: t.segment,
@@ -808,7 +807,21 @@ const fetchCanvasTasks = async () => {
       url: t.url,
       deadlineDate: t.deadlineDate,
       deadlineTime: t.deadlineTime,
-      estimatedTime: t.estimatedTime
+      estimatedTime: t.estimatedTime,
+      // New Canvas API fields
+      courseId: t.courseId,
+      assignmentId: t.assignmentId,
+      pointsPossible: t.pointsPossible,
+      assignmentGroupId: t.assignmentGroupId,
+      currentScore: t.currentScore,
+      currentGrade: t.currentGrade,
+      gradingType: t.gradingType,
+      unlockAt: t.unlockAt,
+      lockAt: t.lockAt,
+      submittedAt: t.submittedAt,
+      isMissing: t.isMissing,
+      isLate: t.isLate,
+      completed: t.completed
     }));
     
     // Save to database - this updates existing tasks and creates new ones
