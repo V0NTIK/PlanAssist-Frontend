@@ -22,7 +22,7 @@ const PlanAssist = () => {
   const [accountSetup, setAccountSetup] = useState({
     name: '',
     grade: '',
-    canvasUrl: '',
+    canvasApiToken: '',
     presentPeriods: '2-6',
     schedule: {},
     classColors: {}
@@ -243,7 +243,7 @@ const PlanAssist = () => {
         setAccountSetup({
           name: userName || '',
           grade: setupData.grade || '',
-          canvasUrl: setupData.canvasUrl || '',
+          canvasApiToken: setupData.canvasApiToken || '',
           presentPeriods: setupData.presentPeriods || '2-6',
           schedule: setupData.schedule || {},
           classColors: savedColors ? JSON.parse(savedColors) : {}
@@ -635,7 +635,7 @@ const PlanAssist = () => {
     try {
       await apiCall('/account/setup', 'POST', {
         grade: accountSetup.grade,
-        canvasUrl: accountSetup.canvasUrl,
+        canvasApiToken: accountSetup.canvasApiToken,
         presentPeriods: accountSetup.presentPeriods,
         schedule: accountSetup.schedule
       });
@@ -646,8 +646,8 @@ const PlanAssist = () => {
       setUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
-      // Fetch tasks and generate sessions if Canvas URL is provided
-      if (accountSetup.canvasUrl) {
+      // Fetch tasks and generate sessions if Canvas API Token is provided
+      if (accountSetup.canvasApiToken) {
         await fetchCanvasTasks();
         // Generate sessions after tasks are loaded
         // Note: fetchCanvasTasks updates the tasks state, but we need to use the result
@@ -788,13 +788,14 @@ const PlanAssist = () => {
   };
 
 const fetchCanvasTasks = async () => {
-  if (!accountSetup.canvasUrl) {
-    alert('Please enter your Canvas Calendar URL first');
+  if (!accountSetup.canvasApiToken) {
+    alert('Please enter your Canvas API Token first');
     return;
   }
   setIsLoadingTasks(true);
   try {
-    // Fetch from Canvas
+    // NOTE: This endpoint will need to be completely rewritten to use Canvas API
+    // For now, keeping the ICS endpoint structure but will be replaced
     const data = await apiCall('/calendar/fetch', 'POST', { canvasUrl: accountSetup.canvasUrl });
     
     // Format tasks properly for saving to database
@@ -3627,10 +3628,34 @@ const fetchCanvasTasks = async () => {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Canvas Calendar ICS URL</label>
-                  <input type="url" value={accountSetup.canvasUrl} onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasUrl: e.target.value }))} placeholder="https://canvas.oneschoolglobal.com/feeds/calendars/user_..." className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500" />
-                  <p className="text-xs text-gray-500 mt-1">Find this in Canvas: Calendar → Calendar Feed → Copy the URL</p>
-                  <p className="text-xs text-blue-600 mt-1">💡 The URL should contain "/feeds/calendars/"</p>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Canvas API Token</label>
+                  <input 
+                    type="password" 
+                    value={accountSetup.canvasApiToken} 
+                    onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasApiToken: e.target.value }))} 
+                    placeholder="Paste your Canvas API token here..." 
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 font-mono text-sm" 
+                  />
+                  <div className="mt-2 text-xs space-y-1">
+                    <p className="text-gray-600">
+                      <strong>How to get your Canvas API token:</strong>
+                    </p>
+                    <ol className="list-decimal ml-5 space-y-1 text-gray-600">
+                      <li>Go to Canvas → Account (top left) → Settings</li>
+                      <li>Scroll to "Approved Integrations"</li>
+                      <li>Click "+ New Access Token"</li>
+                      <li>Set Purpose: "PlanAssist Integration"</li>
+                      <li>Leave Expires field blank (or set far future date)</li>
+                      <li>Click "Generate Token"</li>
+                      <li>Copy the token and paste it above</li>
+                    </ol>
+                    <p className="text-blue-600 font-medium mt-2">
+                      🔒 Your token is encrypted and stored securely
+                    </p>
+                    <p className="text-amber-600">
+                      ⚠️ Never share your API token with anyone else
+                    </p>
+                  </div>
                 </div>
                 
                 <div>
