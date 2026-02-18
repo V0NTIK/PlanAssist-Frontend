@@ -1011,17 +1011,47 @@ const fetchCanvasTasks = async () => {
         const sessionTasks = [];
         let totalTime = 0;
         
-        while (taskIndex < incompleteTasks.length && totalTime < 60) {
+        // Add tasks that fit completely
+        while (taskIndex < incompleteTasks.length) {
           const task = incompleteTasks[taskIndex];
           const taskTime = task.userEstimate || task.estimatedTime;
           
           if (totalTime + taskTime <= 60) {
-            sessionTasks.push(task);
+            // Task fits completely - tag it as "Get it Done"
+            sessionTasks.push({
+              ...task,
+              sessionTag: 'Get it Done'
+            });
             totalTime += taskTime;
             taskIndex++;
           } else {
             break;
           }
+        }
+        
+        // ISSUE 4 FIX: Always add next task even if it doesn't fit
+        if (taskIndex < incompleteTasks.length && totalTime < 60) {
+          const nextTask = incompleteTasks[taskIndex];
+          const nextTaskTime = nextTask.userEstimate || nextTask.estimatedTime;
+          
+          // Determine the appropriate tag
+          let tag;
+          if (nextTask.accumulated_time && nextTask.accumulated_time > 0) {
+            // Has partial time from previous session
+            tag = 'Wrap it Up';
+          } else {
+            // Will push session over 60 minutes
+            tag = 'Make a Start';
+          }
+          
+          sessionTasks.push({
+            ...nextTask,
+            sessionTag: tag
+          });
+          totalTime += nextTaskTime; // Add to total even though it goes over
+          taskIndex++;
+          
+          console.log(`Added overflow task "${nextTask.title}" with tag "${tag}"`);
         }
         
         if (sessionTasks.length > 0) {
@@ -3362,19 +3392,36 @@ const fetchCanvasTasks = async () => {
                         )}
                       </div>
                       <div className="space-y-2">
-                        {session.tasks.map((task, idx) => (
-                          <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                            <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
-                              {idx + 1}
-                            </span>
-                            <div className="flex-1">
-                              <p className="font-medium text-gray-900">{cleanTaskTitle(task)}</p>
-                              <p className="text-sm text-gray-600">
-                                {task.userEstimate || task.estimatedTime} min
-                              </p>
+                        {session.tasks.map((task, idx) => {
+                          // Determine tag color based on sessionTag
+                          const tagColors = {
+                            'Get it Done': 'bg-green-100 text-green-800 border-green-300',
+                            'Make a Start': 'bg-blue-100 text-blue-800 border-blue-300',
+                            'Wrap it Up': 'bg-amber-100 text-amber-800 border-amber-300'
+                          };
+                          const tagColor = tagColors[task.sessionTag] || 'bg-gray-100 text-gray-800 border-gray-300';
+                          
+                          return (
+                            <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                              <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                                {idx + 1}
+                              </span>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <p className="font-medium text-gray-900">{cleanTaskTitle(task)}</p>
+                                  {task.sessionTag && (
+                                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border ${tagColor}`}>
+                                      {task.sessionTag}
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-sm text-gray-600">
+                                  {task.userEstimate || task.estimatedTime} min
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   );
