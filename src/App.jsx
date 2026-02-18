@@ -2011,7 +2011,7 @@ const fetchCanvasTasks = async () => {
       const data = await apiCall('/completion-feed', 'GET');
       setCompletionFeed(data || []);
     } catch (error) {
-      console.error('Failed to load completion feed:', error);
+      // Silently ignore - backend may be cold-starting on Render free tier
     }
   };
 
@@ -2026,7 +2026,7 @@ const fetchCanvasTasks = async () => {
       const position = await apiCall(`/leaderboard/position/${user.grade}`, 'GET');
       setUserLeaderboardPosition(position);
     } catch (error) {
-      console.error('Failed to load leaderboard:', error);
+      // Silently ignore - backend may be cold-starting on Render free tier
     }
   };
 
@@ -2138,16 +2138,24 @@ const fetchCanvasTasks = async () => {
   useEffect(() => {
     if (isAuthenticated && user) {
       loadCourses();
-      loadCompletionFeed();
-      loadLeaderboard();
       
-      // Refresh feed and leaderboard every 30 seconds
+      // Delay initial feed/leaderboard load by 2s to let the server warm up
+      // (Render free tier spins down after inactivity)
+      const initialDelay = setTimeout(() => {
+        loadCompletionFeed();
+        loadLeaderboard();
+      }, 2000);
+      
+      // Refresh feed and leaderboard every 2 minutes (not 30s - reduces cold-start hammering)
       const interval = setInterval(() => {
         loadCompletionFeed();
         loadLeaderboard();
-      }, 30000);
+      }, 120000);
       
-      return () => clearInterval(interval);
+      return () => {
+        clearTimeout(initialDelay);
+        clearInterval(interval);
+      };
     }
   }, [isAuthenticated, user]);
 
