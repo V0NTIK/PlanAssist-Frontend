@@ -94,7 +94,7 @@ const PlanAssist = () => {
   const [popupNotesLastSaved, setPopupNotesLastSaved] = useState(null);
   const [tasksWithNotes, setTasksWithNotes] = useState(new Set());
 
-  // Courses / marks state
+  // Marks / courses state
   const [courses, setCourses] = useState([]);
   const [courseAverages, setCourseAverages] = useState({});
 
@@ -813,19 +813,23 @@ const fetchCanvasTasks = async () => {
       deadlineTime: t.deadlineTime,
       estimatedTime: t.estimatedTime,
       // New Canvas API fields
-      courseId: t.courseId,
-      assignmentId: t.assignmentId,
-      pointsPossible: t.pointsPossible,
-      assignmentGroupId: t.assignmentGroupId,
-      currentScore: t.currentScore,
-      currentGrade: t.currentGrade,
-      gradingType: t.gradingType,
-      unlockAt: t.unlockAt,
-      lockAt: t.lockAt,
-      submittedAt: t.submittedAt,
-      isMissing: t.isMissing,
-      isLate: t.isLate,
-      completed: t.completed
+      courseId: t.courseId ?? null,
+      assignmentId: t.assignmentId ?? null,
+      pointsPossible: t.pointsPossible ?? null,
+      assignmentGroupId: t.assignmentGroupId ?? null,
+      currentScore: t.currentScore ?? null,
+      currentGrade: t.currentGrade ?? null,
+      gradingType: t.gradingType ?? 'points',
+      unlockAt: t.unlockAt ?? null,
+      lockAt: t.lockAt ?? null,
+      submittedAt: t.submittedAt ?? null,
+      isMissing: t.isMissing ?? false,
+      isLate: t.isLate ?? false,
+      completed: t.completed ?? false,
+      // Module fields
+      moduleId: t.moduleId ?? null,
+      moduleName: t.moduleName ?? null,
+      modulePosition: t.modulePosition ?? null,
     }));
     
     // Save to database - this updates existing tasks and creates new ones
@@ -836,6 +840,7 @@ const fetchCanvasTasks = async () => {
     // CRITICAL FIX: Don't use saveResult.tasks directly as it includes deleted tasks
     // Instead, reload from GET endpoint which properly filters deleted=false
     await loadTasks();
+    await loadCourses(); // Refresh course grades after sync
     
     // Check how many new tasks we got
     const newTasksCount = saveResult.stats.new || 0;
@@ -1985,7 +1990,7 @@ const fetchCanvasTasks = async () => {
       const data = await apiCall('/courses', 'GET');
       const courseList = data || [];
       setCourses(courseList);
-      // Fetch averages for each course
+      // Fetch class averages for each course in parallel
       const averages = {};
       await Promise.all(courseList.map(async (course) => {
         try {
@@ -2150,10 +2155,13 @@ const fetchCanvasTasks = async () => {
     calculateHubStats();
   }, [completionHistory]);
 
-  // Scroll to top when navigating to Hub
+  // Scroll to top when navigating to Hub; reload courses when navigating to Marks
   useEffect(() => {
     if (currentPage === 'hub') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    if (currentPage === 'marks') {
+      loadCourses();
     }
   }, [currentPage]);
 
@@ -3693,130 +3701,167 @@ const fetchCanvasTasks = async () => {
         )}
         {currentPage === 'marks' && (
           <div className="max-w-6xl mx-auto p-6">
-            <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6">
-              <h1 className="text-3xl font-bold mb-2">📊 Your Marks</h1>
-              <p className="text-blue-100">Track your progress across all courses</p>
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
+              <div className="flex items-center gap-3 mb-2">
+                <BarChart3 className="w-8 h-8" />
+                <h1 className="text-3xl font-bold">Your Marks</h1>
+              </div>
+              <p className="text-blue-100">Track your progress and see how you stack up</p>
+              {courses.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-4">
+                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
+                    <div className="text-2xl font-bold">
+                      {courses.filter(c => c.current_score).length > 0
+                        ? (courses.filter(c => c.current_score).reduce((sum, c) => sum + parseFloat(c.current_score), 0) / courses.filter(c => c.current_score).length).toFixed(1) + '%'
+                        : 'N/A'}
+                    </div>
+                    <div className="text-xs text-blue-100">Overall Average</div>
+                  </div>
+                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
+                    <div className="text-2xl font-bold">{courses.length}</div>
+                    <div className="text-xs text-blue-100">Active Courses</div>
+                  </div>
+                </div>
+              )}
             </div>
 
+            {/* No courses yet */}
             {courses.length === 0 ? (
               <div className="bg-white rounded-xl shadow-md p-12 text-center">
-                <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Grades Yet</h3>
-                <p className="text-gray-600 mb-4">Your course grades will appear here once they're available in Canvas</p>
-                <p className="text-sm text-gray-500">Make sure you've completed a Canvas sync in Settings</p>
+                <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-gray-900 mb-2">No Courses Yet</h3>
+                <p className="text-gray-500 mb-1">Your courses will appear here after your first Canvas sync.</p>
+                <p className="text-sm text-gray-400">Go to Settings → Sync Canvas to get started.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {courses.map((course, index) => {
-                  const avgData = courseAverages[course.course_id];
-                  const classAverage = avgData?.averageScore ?? null;
-                  const studentCount = avgData?.studentCount ?? 0;
-                  const userScore = course.current_score || 0;
-                  const difference = classAverage !== null ? userScore - classAverage : null;
+              <>
+                {/* Grade cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {courses.map((course, index) => {
+                    const avgData = courseAverages[course.course_id];
+                    const classAverage = avgData?.averageScore ?? null;
+                    const studentCount = avgData?.studentCount ?? 0;
+                    const hasScore = course.current_score != null && parseFloat(course.current_score) > 0;
+                    const userScore = hasScore ? parseFloat(course.current_score) : null;
+                    const difference = (userScore !== null && classAverage !== null && studentCount > 1)
+                      ? userScore - classAverage
+                      : null;
 
-                  return (
-                    <div
-                      key={course.id}
-                      className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow"
-                    >
-                      {/* Course Header */}
-                      <div className="flex items-start justify-between mb-4">
-                        <div className="flex-1 mr-4">
-                          <h3 className="text-lg font-bold text-gray-900">{course.name}</h3>
-                          {course.course_code && (
-                            <p className="text-sm text-gray-500">{course.course_code}</p>
-                          )}
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <div className="text-3xl font-bold text-purple-600">
-                            {course.current_grade || 'N/A'}
+                    // Performance tier
+                    let perfColor = 'text-gray-500';
+                    let perfBg = 'bg-gray-50';
+                    let perfBorder = 'border-gray-200';
+                    let PerfIcon = Target;
+                    let perfLabel = 'No Score Yet';
+                    if (userScore !== null) {
+                      if (userScore >= 90) { perfColor = 'text-emerald-600'; perfBg = 'bg-emerald-50'; perfBorder = 'border-emerald-200'; PerfIcon = Award; perfLabel = 'Excellent'; }
+                      else if (userScore >= 80) { perfColor = 'text-blue-600'; perfBg = 'bg-blue-50'; perfBorder = 'border-blue-200'; PerfIcon = TrendingUp; perfLabel = 'Great'; }
+                      else if (userScore >= 70) { perfColor = 'text-purple-600'; perfBg = 'bg-purple-50'; perfBorder = 'border-purple-200'; PerfIcon = Target; perfLabel = 'On Track'; }
+                      else if (userScore >= 60) { perfColor = 'text-amber-600'; perfBg = 'bg-amber-50'; perfBorder = 'border-amber-200'; PerfIcon = AlertCircle; perfLabel = 'Needs Work'; }
+                      else { perfColor = 'text-red-600'; perfBg = 'bg-red-50'; perfBorder = 'border-red-200'; PerfIcon = TrendingDown; perfLabel = 'At Risk'; }
+                    }
+
+                    return (
+                      <div key={course.id} className={`bg-white rounded-xl shadow-md border-2 ${perfBorder} overflow-hidden hover:shadow-lg transition-all duration-200`}
+                        style={{ animationDelay: `${index * 80}ms` }}>
+                        {/* Card header */}
+                        <div className={`${perfBg} px-6 py-4 flex items-start justify-between`}>
+                          <div className="flex-1 mr-4">
+                            <h3 className="font-bold text-gray-900 text-base leading-tight">{course.name}</h3>
+                            {course.course_code && <p className="text-xs text-gray-500 mt-0.5">{course.course_code}</p>}
                           </div>
-                          <div className="text-sm text-gray-500">
-                            {userScore > 0 ? `${userScore.toFixed(1)}%` : 'No score'}
+                          <div className="text-right flex-shrink-0">
+                            <div className={`text-4xl font-black ${perfColor}`}>
+                              {course.current_grade || (hasScore ? `${userScore.toFixed(0)}%` : '—')}
+                            </div>
+                            {hasScore && course.current_grade && (
+                              <div className="text-sm text-gray-500 font-semibold">{userScore.toFixed(1)}%</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="px-6 py-4 space-y-4">
+                          {/* Score bar */}
+                          {hasScore && (
+                            <div>
+                              {/* Your score bar */}
+                              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                <span className="font-semibold text-gray-700">Your Score</span>
+                                {difference !== null && (
+                                  <span className={`font-bold ${difference >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                    {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs class
+                                  </span>
+                                )}
+                              </div>
+                              <div className="relative h-7 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold`}
+                                  style={{
+                                    width: `${Math.min(userScore, 100)}%`,
+                                    background: userScore >= 80 ? 'linear-gradient(90deg, #7c3aed, #3b82f6)' : userScore >= 60 ? 'linear-gradient(90deg, #f59e0b, #ef4444)' : 'linear-gradient(90deg, #ef4444, #dc2626)',
+                                    transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 200}ms both`
+                                  }}
+                                >
+                                  {userScore >= 20 && `${userScore.toFixed(0)}%`}
+                                </div>
+                              </div>
+
+                              {/* Class average bar */}
+                              {classAverage !== null && studentCount > 1 && (
+                                <div className="mt-1.5">
+                                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                    <span>Class Average ({studentCount} students)</span>
+                                    <span>{classAverage.toFixed(1)}%</span>
+                                  </div>
+                                  <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-gray-300 rounded-full"
+                                      style={{
+                                        width: `${Math.min(classAverage, 100)}%`,
+                                        transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 400}ms both`
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Performance badge + final grade */}
+                          <div className="flex items-center justify-between">
+                            <div className={`flex items-center gap-1.5 ${perfColor} text-sm font-semibold`}>
+                              <PerfIcon className="w-4 h-4" />
+                              <span>{perfLabel}</span>
+                            </div>
+                            {course.final_grade && course.final_grade !== course.current_grade && (
+                              <div className="text-xs text-gray-400">
+                                Final: <span className="font-semibold text-gray-600">{course.final_grade}</span>
+                                {course.final_score && ` (${parseFloat(course.final_score).toFixed(1)}%)`}
+                              </div>
+                            )}
+                            {!hasScore && (
+                              <span className="text-xs text-gray-400 italic">Sync Canvas to see your grade</span>
+                            )}
                           </div>
                         </div>
                       </div>
-
-                      {/* Score Bar */}
-                      {userScore > 0 && (
-                        <div className="mb-4">
-                          <div className="flex justify-between text-xs text-gray-600 mb-1">
-                            <span>Your Score</span>
-                            {difference !== null && (
-                              <span className={difference >= 0 ? 'text-green-600 font-semibold' : 'text-amber-600 font-semibold'}>
-                                {difference >= 0 ? '+' : ''}{difference.toFixed(1)}% vs class avg
-                                {studentCount > 1 && <span className="text-gray-400 font-normal"> ({studentCount} students)</span>}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* User Score Bar */}
-                          <div className="relative h-8 bg-gray-100 rounded-lg overflow-hidden mb-1">
-                            <div
-                              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg flex items-center justify-end pr-2"
-                              style={{ width: `${Math.min(userScore, 100)}%`, transition: 'width 1s ease-out' }}
-                            >
-                              <span className="text-white text-xs font-bold">You</span>
-                            </div>
-                          </div>
-
-                          {/* Class Average Bar (only if we have enough students) */}
-                          {classAverage !== null && studentCount > 1 && (
-                            <div className="relative h-6 bg-gray-100 rounded-lg overflow-hidden">
-                              <div
-                                className="h-full bg-gray-400 rounded-lg flex items-center justify-end pr-2"
-                                style={{ width: `${Math.min(classAverage, 100)}%`, transition: 'width 1s ease-out' }}
-                              >
-                                <span className="text-white text-xs">Avg: {classAverage.toFixed(1)}%</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Performance Indicator */}
-                      {userScore > 0 && (
-                        <div className="flex items-center gap-2">
-                          {difference === null ? (
-                            <>
-                              <Target className="w-4 h-4 text-blue-600" />
-                              <span className="text-sm text-blue-600 font-semibold">Only you enrolled</span>
-                            </>
-                          ) : difference >= 5 ? (
-                            <>
-                              <TrendingUp className="w-4 h-4 text-green-600" />
-                              <span className="text-sm text-green-600 font-semibold">Above Average!</span>
-                            </>
-                          ) : difference >= 0 ? (
-                            <>
-                              <Target className="w-4 h-4 text-blue-600" />
-                              <span className="text-sm text-blue-600 font-semibold">On Track</span>
-                            </>
-                          ) : difference >= -5 ? (
-                            <>
-                              <AlertCircle className="w-4 h-4 text-amber-600" />
-                              <span className="text-sm text-amber-600 font-semibold">Room to Improve</span>
-                            </>
-                          ) : (
-                            <>
-                              <TrendingDown className="w-4 h-4 text-red-600" />
-                              <span className="text-sm text-red-600 font-semibold">Needs Attention</span>
-                            </>
-                          )}
-                        </div>
-                      )}
-
-                      {userScore === 0 && (
-                        <div className="flex items-center gap-2">
-                          <AlertCircle className="w-4 h-4 text-gray-400" />
-                          <span className="text-sm text-gray-400">No score recorded yet</span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
+
+            {/* CSS animation */}
+            <style>{`
+              @keyframes markBarSlide {
+                from { width: 0%; opacity: 0.3; }
+                to { opacity: 1; }
+              }
+            `}</style>
           </div>
         )}
         {currentPage === 'settings' && (
