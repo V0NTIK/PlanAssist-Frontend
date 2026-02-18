@@ -94,6 +94,10 @@ const PlanAssist = () => {
   const [popupNotesLastSaved, setPopupNotesLastSaved] = useState(null);
   const [tasksWithNotes, setTasksWithNotes] = useState(new Set());
 
+  // Courses / marks state
+  const [courses, setCourses] = useState([]);
+  const [courseAverages, setCourseAverages] = useState({});
+
   // Hub features state
   const [completionFeed, setCompletionFeed] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -1976,6 +1980,27 @@ const fetchCanvasTasks = async () => {
   // HUB FEATURES - Load completion feed, leaderboard, and stats
   // ============================================================================
 
+  const loadCourses = async () => {
+    try {
+      const data = await apiCall('/courses', 'GET');
+      const courseList = data || [];
+      setCourses(courseList);
+      // Fetch averages for each course
+      const averages = {};
+      await Promise.all(courseList.map(async (course) => {
+        try {
+          const avg = await apiCall(`/courses/${course.course_id}/average`, 'GET');
+          averages[course.course_id] = avg;
+        } catch (e) {
+          averages[course.course_id] = { averageScore: null, studentCount: 0 };
+        }
+      }));
+      setCourseAverages(averages);
+    } catch (error) {
+      console.error('Failed to load courses:', error);
+    }
+  };
+
   const loadCompletionFeed = async () => {
     try {
       const data = await apiCall('/completion-feed', 'GET');
@@ -2107,6 +2132,7 @@ const fetchCanvasTasks = async () => {
   // Load Hub data when authenticated or when completion history changes
   useEffect(() => {
     if (isAuthenticated && user) {
+      loadCourses();
       loadCompletionFeed();
       loadLeaderboard();
       
@@ -2573,6 +2599,10 @@ const fetchCanvasTasks = async () => {
             <button onClick={() => currentPage !== 'session-active' && setCurrentPage('sessions')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
+            </button>
+            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('marks')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <BarChart3 className="w-5 h-5" />
+              <span className="font-medium">Marks</span>
             </button>
             <button onClick={() => setCurrentPage('settings')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Settings className="w-5 h-5" />
@@ -3660,6 +3690,134 @@ const fetchCanvasTasks = async () => {
               </div>
             </div>
           )
+        )}
+        {currentPage === 'marks' && (
+          <div className="max-w-6xl mx-auto p-6">
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6">
+              <h1 className="text-3xl font-bold mb-2">📊 Your Marks</h1>
+              <p className="text-blue-100">Track your progress across all courses</p>
+            </div>
+
+            {courses.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-md p-12 text-center">
+                <BarChart3 className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-gray-900 mb-2">No Grades Yet</h3>
+                <p className="text-gray-600 mb-4">Your course grades will appear here once they're available in Canvas</p>
+                <p className="text-sm text-gray-500">Make sure you've completed a Canvas sync in Settings</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {courses.map((course, index) => {
+                  const avgData = courseAverages[course.course_id];
+                  const classAverage = avgData?.averageScore ?? null;
+                  const studentCount = avgData?.studentCount ?? 0;
+                  const userScore = course.current_score || 0;
+                  const difference = classAverage !== null ? userScore - classAverage : null;
+
+                  return (
+                    <div
+                      key={course.id}
+                      className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-shadow"
+                    >
+                      {/* Course Header */}
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex-1 mr-4">
+                          <h3 className="text-lg font-bold text-gray-900">{course.name}</h3>
+                          {course.course_code && (
+                            <p className="text-sm text-gray-500">{course.course_code}</p>
+                          )}
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <div className="text-3xl font-bold text-purple-600">
+                            {course.current_grade || 'N/A'}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {userScore > 0 ? `${userScore.toFixed(1)}%` : 'No score'}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Score Bar */}
+                      {userScore > 0 && (
+                        <div className="mb-4">
+                          <div className="flex justify-between text-xs text-gray-600 mb-1">
+                            <span>Your Score</span>
+                            {difference !== null && (
+                              <span className={difference >= 0 ? 'text-green-600 font-semibold' : 'text-amber-600 font-semibold'}>
+                                {difference >= 0 ? '+' : ''}{difference.toFixed(1)}% vs class avg
+                                {studentCount > 1 && <span className="text-gray-400 font-normal"> ({studentCount} students)</span>}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* User Score Bar */}
+                          <div className="relative h-8 bg-gray-100 rounded-lg overflow-hidden mb-1">
+                            <div
+                              className="h-full bg-gradient-to-r from-purple-500 to-blue-500 rounded-lg flex items-center justify-end pr-2"
+                              style={{ width: `${Math.min(userScore, 100)}%`, transition: 'width 1s ease-out' }}
+                            >
+                              <span className="text-white text-xs font-bold">You</span>
+                            </div>
+                          </div>
+
+                          {/* Class Average Bar (only if we have enough students) */}
+                          {classAverage !== null && studentCount > 1 && (
+                            <div className="relative h-6 bg-gray-100 rounded-lg overflow-hidden">
+                              <div
+                                className="h-full bg-gray-400 rounded-lg flex items-center justify-end pr-2"
+                                style={{ width: `${Math.min(classAverage, 100)}%`, transition: 'width 1s ease-out' }}
+                              >
+                                <span className="text-white text-xs">Avg: {classAverage.toFixed(1)}%</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Performance Indicator */}
+                      {userScore > 0 && (
+                        <div className="flex items-center gap-2">
+                          {difference === null ? (
+                            <>
+                              <Target className="w-4 h-4 text-blue-600" />
+                              <span className="text-sm text-blue-600 font-semibold">Only you enrolled</span>
+                            </>
+                          ) : difference >= 5 ? (
+                            <>
+                              <TrendingUp className="w-4 h-4 text-green-600" />
+                              <span className="text-sm text-green-600 font-semibold">Above Average!</span>
+                            </>
+                          ) : difference >= 0 ? (
+                            <>
+                              <Target className="w-4 h-4 text-blue-600" />
+                              <span className="text-sm text-blue-600 font-semibold">On Track</span>
+                            </>
+                          ) : difference >= -5 ? (
+                            <>
+                              <AlertCircle className="w-4 h-4 text-amber-600" />
+                              <span className="text-sm text-amber-600 font-semibold">Room to Improve</span>
+                            </>
+                          ) : (
+                            <>
+                              <TrendingDown className="w-4 h-4 text-red-600" />
+                              <span className="text-sm text-red-600 font-semibold">Needs Attention</span>
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {userScore === 0 && (
+                        <div className="flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 text-gray-400" />
+                          <span className="text-sm text-gray-400">No score recorded yet</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         )}
         {currentPage === 'settings' && (
           <div className="max-w-4xl mx-auto p-6">
