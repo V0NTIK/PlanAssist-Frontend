@@ -45,6 +45,10 @@ const PlanAssist = () => {
   const [showSplitTask, setShowSplitTask] = useState(null);
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
   const [completedSessionIds, setCompletedSessionIds] = useState([]);
+  const [deletedSessionIds, setDeletedSessionIds] = useState([]);
+  const [addedSessions, setAddedSessions] = useState([]); // [{id, day, period}] manually added
+  const [showAddSessionModal, setShowAddSessionModal] = useState(false);
+  const [addSessionForm, setAddSessionForm] = useState({ day: 'Monday', period: '2' });
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
@@ -385,7 +389,7 @@ const PlanAssist = () => {
         
         setTasks(loadedTasks);
         setNewTasks(loadedNewTasks);
-        generateSessions(loadedTasks, setupData.schedule || {});
+        generateSessions(loadedTasks, setupData.schedule || {}, deletedSessionIds, addedSessions);
       }
 
       const historyData = await fetch(`${API_URL}/learning`, {
@@ -561,7 +565,7 @@ const PlanAssist = () => {
       
       setTasks(loadedTasks);
       setNewTasks(loadedNewTasks);
-      generateSessions(loadedTasks, accountSetup.schedule);
+      generateSessions(loadedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
@@ -944,7 +948,27 @@ const fetchCanvasTasks = async () => {
     return 20;
   };
 
-  const generateSessions = (taskList, scheduleData) => {
+  const deleteSession = (sessionId) => {
+    const newDeleted = [...deletedSessionIds, sessionId];
+    setDeletedSessionIds(newDeleted);
+    generateSessions(tasks, accountSetup.schedule, newDeleted, addedSessions);
+  };
+
+  const addSession = () => {
+    const { day, period } = addSessionForm;
+    const id = `${day}-${period}-extra`;
+    // Don't add duplicates
+    if (addedSessions.some(s => s.id === id)) {
+      setShowAddSessionModal(false);
+      return;
+    }
+    const newAdded = [...addedSessions, { id, day, period }];
+    setAddedSessions(newAdded);
+    setShowAddSessionModal(false);
+    generateSessions(tasks, accountSetup.schedule, deletedSessionIds, newAdded);
+  };
+
+  const generateSessions = (taskList, scheduleData, deletedIds = [], extraSessions = []) => {
   console.log('generateSessions called with:', { taskList, scheduleData }); // Debug log
   
   if (!scheduleData || Object.keys(scheduleData).length === 0) {
@@ -1010,6 +1034,11 @@ const fetchCanvasTasks = async () => {
       
       if (completedSessionIds.includes(sessionId)) {
         console.log(`Session ${sessionId} already completed, skipping`);
+        continue;
+      }
+      
+      if (deletedIds.includes(sessionId)) {
+        console.log(`Session ${sessionId} deleted by user, skipping`);
         continue;
       }
       
@@ -1082,6 +1111,50 @@ const fetchCanvasTasks = async () => {
     }
   }
   
+  // Inject manually added sessions (extra study slots)
+  for (const extra of extraSessions) {
+    const extraId = `${extra.day}-${extra.period}-extra`;
+    if (completedSessionIds.includes(extraId) || deletedIds.includes(extraId)) continue;
+    
+    // Give extra sessions tasks just like a normal study period
+    const sessionTasks = [];
+    let totalTime = 0;
+    let localTaskIndex = taskIndex; // Don't advance global taskIndex for extra sessions
+    
+    while (localTaskIndex < incompleteTasks.length) {
+      const task = incompleteTasks[localTaskIndex];
+      const taskTime = task.userEstimate || task.estimatedTime;
+      if (totalTime + taskTime <= 60) {
+        sessionTasks.push({ ...task, sessionTag: 'Get it Done' });
+        totalTime += taskTime;
+        localTaskIndex++;
+      } else break;
+    }
+    if (localTaskIndex < incompleteTasks.length && totalTime < 60) {
+      const next = incompleteTasks[localTaskIndex];
+      sessionTasks.push({ ...next, sessionTag: next.accumulated_time > 0 ? 'Wrap it Up' : 'Make a Start' });
+      totalTime += next.userEstimate || next.estimatedTime;
+    }
+    
+    if (sessionTasks.length > 0) {
+      newSessions.push({
+        id: extraId,
+        day: extra.day,
+        period: parseInt(extra.period),
+        tasks: sessionTasks,
+        totalTime,
+        isExtra: true
+      });
+    }
+  }
+  
+  // Sort all sessions: Monday→Friday, then by period
+  const dayOrder = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 };
+  newSessions.sort((a, b) => {
+    const dayDiff = (dayOrder[a.day] ?? 5) - (dayOrder[b.day] ?? 5);
+    return dayDiff !== 0 ? dayDiff : a.period - b.period;
+  });
+
   console.log('Total sessions created:', newSessions.length);
   setSessions(newSessions);
 };
@@ -1103,7 +1176,7 @@ const fetchCanvasTasks = async () => {
       const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
       setTasks(updatedTasks);
       setShowCompleteConfirm(null);
-      generateSessions(updatedTasks, accountSetup.schedule);
+      generateSessions(updatedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
     } catch (error) {
       console.error('Failed to complete task:', error);
       alert('Failed to complete task');
@@ -1116,7 +1189,7 @@ const fetchCanvasTasks = async () => {
       const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
       setTasks(updatedTasks);
       setShowCompleteConfirm(null);
-      generateSessions(updatedTasks, accountSetup.schedule);
+      generateSessions(updatedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
     } catch (error) {
       console.error('Failed to complete task:', error);
       alert('Failed to complete task');
@@ -1136,7 +1209,7 @@ const fetchCanvasTasks = async () => {
     const newCompletedStatus = !task.completed;
     const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: newCompletedStatus } : t);
     setTasks(updatedTasks);
-    generateSessions(updatedTasks, accountSetup.schedule);
+    generateSessions(updatedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
 
     try {
       if (newCompletedStatus) {
@@ -1161,12 +1234,12 @@ const fetchCanvasTasks = async () => {
         alert('This task needs to be saved first. Click "Save and Adjust Plan" to save your changes, then you can mark it complete.');
         // Revert the change
         setTasks(tasks);
-        generateSessions(tasks, accountSetup.schedule);
+        generateSessions(tasks, accountSetup.schedule, deletedSessionIds, addedSessions);
       } else {
         alert('Failed to update task: ' + error.message);
         // Revert on error
         setTasks(tasks);
-        generateSessions(tasks, accountSetup.schedule);
+        generateSessions(tasks, accountSetup.schedule, deletedSessionIds, addedSessions);
       }
     }
   };
@@ -3405,65 +3478,81 @@ const fetchCanvasTasks = async () => {
         {currentPage === 'sessions' && (
           <div className="max-w-5xl mx-auto p-6">
             <div className="bg-white rounded-xl shadow-md p-6">
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Study Sessions</h2>
-                <p className="text-gray-600">Your scheduled study periods</p>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-1">Study Sessions</h2>
+                  <p className="text-gray-600">Your scheduled study periods</p>
+                </div>
+                <button
+                  onClick={() => setShowAddSessionModal(true)}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-purple-700 flex items-center gap-2"
+                >
+                  <span className="text-lg font-bold">+</span> Add Session
+                </button>
               </div>
               <div className="space-y-4">
                 {sessions.map(session => {
-                  // Check if this session has a saved state
                   const hasSavedState = savedSessionState && savedSessionState.sessionId === session.id;
-                  
                   return (
-                    <div key={session.id} className="border-2 border-gray-200 rounded-lg p-6 hover:border-purple-300 transition-colors">
+                    <div key={session.id} className={`border-2 rounded-lg p-6 hover:border-purple-300 transition-colors ${session.isExtra ? 'border-purple-200 bg-purple-50' : 'border-gray-200'}`}>
                       <div className="flex items-center justify-between mb-4">
                         <div>
-                          <h3 className="text-lg font-bold text-gray-900">
-                            {session.day} - Period {session.period}
-                          </h3>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-lg font-bold text-gray-900">
+                              {session.day} - Period {session.period}
+                            </h3>
+                            {session.isExtra && (
+                              <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-700 border border-purple-300">
+                                Added
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-gray-600">
-                            {session.tasks.length} tasks - {session.totalTime} minutes
+                            {session.tasks.length} tasks · {session.totalTime} min
                           </p>
                         </div>
-                        {hasSavedState ? (
-                          <button onClick={resumeSession} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2">
-                            <Play className="w-5 h-5" />
-                            Resume
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => deleteSession(session.id)}
+                            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
+                            title="Remove this session"
+                          >
+                            <X className="w-5 h-5" />
                           </button>
-                        ) : (
-                          <button onClick={() => startSession(session)} className="bg-green-500 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2">
-                            <Play className="w-5 h-5" />
-                            Start Session
-                          </button>
-                        )}
+                          {hasSavedState ? (
+                            <button onClick={resumeSession} className="bg-blue-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2">
+                              <Play className="w-4 h-4" /> Resume
+                            </button>
+                          ) : (
+                            <button onClick={() => startSession(session)} className="bg-green-500 text-white px-5 py-2 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2">
+                              <Play className="w-4 h-4" /> Start
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="space-y-2">
                         {session.tasks.map((task, idx) => {
-                          // Determine tag color based on sessionTag
                           const tagColors = {
                             'Get it Done': 'bg-green-100 text-green-800 border-green-300',
                             'Make a Start': 'bg-blue-100 text-blue-800 border-blue-300',
                             'Wrap it Up': 'bg-amber-100 text-amber-800 border-amber-300'
                           };
                           const tagColor = tagColors[task.sessionTag] || 'bg-gray-100 text-gray-800 border-gray-300';
-                          
                           return (
-                            <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                              <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold">
+                            <div key={task.id || idx} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
+                              <span className="w-6 h-6 bg-purple-500 text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">
                                 {idx + 1}
                               </span>
-                              <div className="flex-1">
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <p className="font-medium text-gray-900">{cleanTaskTitle(task)}</p>
+                                  <p className="font-medium text-gray-900 truncate">{cleanTaskTitle(task)}</p>
                                   {task.sessionTag && (
-                                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border ${tagColor}`}>
+                                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border flex-shrink-0 ${tagColor}`}>
                                       {task.sessionTag}
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-sm text-gray-600">
-                                  {task.userEstimate || task.estimatedTime} min
-                                </p>
+                                <p className="text-sm text-gray-600">{task.userEstimate || task.estimatedTime} min</p>
                               </div>
                             </div>
                           );
@@ -3477,10 +3566,64 @@ const fetchCanvasTasks = async () => {
                 <div className="text-center py-12">
                   <AlertCircle className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-xl font-bold text-gray-900 mb-2">No Sessions Scheduled</h3>
-                  <p className="text-gray-600">Add tasks and set up your schedule to generate sessions</p>
+                  <p className="text-gray-600">Add tasks and set up your schedule to generate sessions, or add a custom session above.</p>
                 </div>
               )}
             </div>
+
+            {/* Add Session Modal */}
+            {showAddSessionModal && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
+                  <div className="flex items-center justify-between mb-5">
+                    <h3 className="text-lg font-bold text-gray-900">Add Study Session</h3>
+                    <button onClick={() => setShowAddSessionModal(false)} className="text-gray-400 hover:text-gray-600">
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Day</label>
+                      <select
+                        value={addSessionForm.day}
+                        onChange={e => setAddSessionForm(f => ({ ...f, day: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(d => (
+                          <option key={d} value={d}>{d}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Period</label>
+                      <select
+                        value={addSessionForm.period}
+                        onChange={e => setAddSessionForm(f => ({ ...f, period: e.target.value }))}
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                      >
+                        {[1,2,3,4,5,6,7,8].map(p => (
+                          <option key={p} value={String(p)}>Period {p}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 mt-6">
+                    <button
+                      onClick={() => setShowAddSessionModal(false)}
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={addSession}
+                      className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700"
+                    >
+                      Add Session
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
         {currentPage === 'session-active' && currentSession && (
