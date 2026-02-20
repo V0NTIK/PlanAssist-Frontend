@@ -4464,11 +4464,11 @@ const fetchCanvasTasks = async () => {
                   ) : workspaceTab === 'calculator' ? (
                     <div className="h-full flex flex-col items-center justify-center p-4">
                       <iframe
-                        src="https://ti84calc.com/ti84calc"
+                        src="https://ti84calculator.us/"
                         height="100%"
                         width="100%"
                         frameBorder="0"
-                        sandbox="allow-scripts allow-same-origin"
+                        sandbox="allow-scripts allow-same-origin allow-forms"
                         className="rounded-lg"
                         title="TI-84 Calculator"
                       />
