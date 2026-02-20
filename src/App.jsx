@@ -1073,7 +1073,7 @@ const fetchCanvasTasks = async () => {
       if (taskIndex < incompleteTasks.length && totalTime < 60) {
         const nextTask = incompleteTasks[taskIndex];
         const nextTaskTime = nextTask.userEstimate || nextTask.estimatedTime;
-        const tag = (nextTask.accumulated_time && nextTask.accumulated_time > 0) ? 'Wrap it Up' : 'Make a Start';
+        const tag = ((nextTask.accumulatedTime && nextTask.accumulatedTime > 0) || (nextTask.accumulated_time && nextTask.accumulated_time > 0)) ? 'Wrap it Up' : 'Make a Start';
         sessionTasks.push({ ...nextTask, sessionTag: tag });
         totalTime += nextTaskTime;
         taskIndex++;
@@ -1467,9 +1467,10 @@ const fetchCanvasTasks = async () => {
       // Save all tasks with their current priority order to backend
       await apiCall('/tasks', 'POST', { tasks: tasksForBackend });
       
-      // IMPORTANT: Reload tasks from server to get new IDs
-      // The backend deletes and re-creates tasks, so we need fresh IDs
+      // Reload tasks from server to get fresh data with correct IDs and priority order
       await loadTasks();
+      // loadTasks calls generateSessions internally with the fresh task list,
+      // ensuring sessions reflect the new priority order immediately
       
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
@@ -2308,7 +2309,8 @@ const fetchCanvasTasks = async () => {
           remainingTime: sessionTime,
           currentTaskIndex: currentTaskIndex,
           taskStartTime: taskStartTime,
-          completedTaskIds: sessionCompletions.map(c => c.task.id)
+          completedTaskIds: sessionCompletions.map(c => c.task.id),
+          partialTaskTimes: partialTaskTimes
         });
         
         setSessionSummary({
@@ -2350,6 +2352,11 @@ const fetchCanvasTasks = async () => {
       }
     
       // Save session state (this is critical)
+      // Build partialTaskTimes: existing partial times + the current in-progress task's time
+      const partialTimesToSave = { ...partialTaskTimes };
+      if (newAccumulatedTime > 0) {
+        partialTimesToSave[currentTask.id] = newAccumulatedTime;
+      }
       await apiCall('/sessions/saved-state', 'POST', {
         sessionId: currentSession.id,
         day: currentSession.day,
@@ -2357,7 +2364,8 @@ const fetchCanvasTasks = async () => {
         remainingTime: sessionTime,
         currentTaskIndex: currentTaskIndex,
         taskStartTime: taskStartTime,
-        completedTaskIds: sessionCompletions.map(c => c.task.id)
+        completedTaskIds: sessionCompletions.map(c => c.task.id),
+        partialTaskTimes: partialTimesToSave
       });
     
       // Show summary
