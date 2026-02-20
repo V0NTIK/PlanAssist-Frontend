@@ -46,6 +46,7 @@ const PlanAssist = () => {
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
   const [completedSessionIds, setCompletedSessionIds] = useState([]);
   const [deletedSessionIds, setDeletedSessionIds] = useState([]);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [addedSessions, setAddedSessions] = useState([]); // [{id, day, period}] manually added
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
   const [addSessionForm, setAddSessionForm] = useState({ day: 'Monday', period: '2' });
@@ -1006,102 +1007,82 @@ const fetchCanvasTasks = async () => {
   let taskIndex = 0;
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
   const currentDayIndex = today.getDay(); // 0 = Sunday, 1 = Monday, etc.
-  
-  // Convert to our day array index (0 = Monday)
   const currentDayArrayIndex = currentDayIndex === 0 ? -1 : currentDayIndex - 1;
+  const dayOrder = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 };
   
   console.log('Today is:', days[currentDayArrayIndex] || 'Sunday', 'Day index:', currentDayArrayIndex);
   
+  // Build unified list of ALL session slots (schedule + added extras), sorted by day+period
+  // This ensures added sessions get tasks in correct priority order
+  const allSlots = [];
+  
   for (const day of days) {
     const dayIndex = days.indexOf(day);
-    
-    // Skip days that have already passed this week
-    if (currentDayArrayIndex !== -1 && dayIndex < currentDayArrayIndex) {
-      console.log(`Skipping ${day} - already passed this week`);
-      continue;
-    }
-    
-    if (!scheduleData[day]) {
-      console.log(`No schedule for ${day}`);
-      continue;
-    }
+    if (currentDayArrayIndex !== -1 && dayIndex < currentDayArrayIndex) continue;
+    if (!scheduleData[day]) continue;
     
     const periods = Object.keys(scheduleData[day]).sort((a, b) => parseInt(a) - parseInt(b));
-    console.log(`${day} has periods:`, periods);
-    
     for (const period of periods) {
-      const sessionId = `${day}-${period}`;
-      
-      if (completedSessionIds.includes(sessionId)) {
-        console.log(`Session ${sessionId} already completed, skipping`);
-        continue;
+      if (scheduleData[day][period] === 'Study') {
+        allSlots.push({ day, period, id: `${day}-${period}`, isExtra: false });
       }
+    }
+  }
+  
+  // Inject extra (manually added) sessions into the correct sorted position
+  for (const extra of extraSessions) {
+    const extraDayIndex = dayOrder[extra.day] ?? 5;
+    const currentExtraDayIndex = dayOrder[days[currentDayArrayIndex]] ?? -1;
+    if (currentDayArrayIndex !== -1 && extraDayIndex < (dayOrder[days[currentDayArrayIndex]] ?? 5)) continue;
+    allSlots.push({ day: extra.day, period: extra.period, id: extra.id, isExtra: true });
+  }
+  
+  allSlots.sort((a, b) => {
+    const dayDiff = (dayOrder[a.day] ?? 5) - (dayOrder[b.day] ?? 5);
+    return dayDiff !== 0 ? dayDiff : parseInt(a.period) - parseInt(b.period);
+  });
+  
+  for (const slot of allSlots) {
+    const { day, period, id: sessionId, isExtra } = slot;
+    
+    if (completedSessionIds.includes(sessionId)) {
+      console.log(`Session ${sessionId} already completed, skipping`);
+      continue;
+    }
+    if (deletedIds.includes(sessionId)) {
+      console.log(`Session ${sessionId} deleted by user, skipping`);
+      continue;
+    }
+    
+    console.log(`Processing slot ${sessionId} (extra: ${isExtra})`);
+    
+    {
+      const sessionTasks = [];
+      let totalTime = 0;
       
-      if (deletedIds.includes(sessionId)) {
-        console.log(`Session ${sessionId} deleted by user, skipping`);
-        continue;
-      }
-      
-      const periodType = scheduleData[day][period];
-      console.log(`${sessionId} is type: ${periodType}`);
-      
-      if (periodType === 'Study') {
-        const sessionTasks = [];
-        let totalTime = 0;
-        
-        // Add tasks that fit completely
-        while (taskIndex < incompleteTasks.length) {
-          const task = incompleteTasks[taskIndex];
-          const taskTime = task.userEstimate || task.estimatedTime;
-          
-          if (totalTime + taskTime <= 60) {
-            // Task fits completely - tag it as "Get it Done"
-            sessionTasks.push({
-              ...task,
-              sessionTag: 'Get it Done'
-            });
-            totalTime += taskTime;
-            taskIndex++;
-          } else {
-            break;
-          }
-        }
-        
-        // ISSUE 4 FIX: Always add next task even if it doesn't fit
-        if (taskIndex < incompleteTasks.length && totalTime < 60) {
-          const nextTask = incompleteTasks[taskIndex];
-          const nextTaskTime = nextTask.userEstimate || nextTask.estimatedTime;
-          
-          // Determine the appropriate tag
-          let tag;
-          if (nextTask.accumulated_time && nextTask.accumulated_time > 0) {
-            // Has partial time from previous session
-            tag = 'Wrap it Up';
-          } else {
-            // Will push session over 60 minutes
-            tag = 'Make a Start';
-          }
-          
-          sessionTasks.push({
-            ...nextTask,
-            sessionTag: tag
-          });
-          totalTime += nextTaskTime; // Add to total even though it goes over
+      while (taskIndex < incompleteTasks.length) {
+        const task = incompleteTasks[taskIndex];
+        const taskTime = task.userEstimate || task.estimatedTime;
+        if (totalTime + taskTime <= 60) {
+          sessionTasks.push({ ...task, sessionTag: 'Get it Done' });
+          totalTime += taskTime;
           taskIndex++;
-          
-          console.log(`Added overflow task "${nextTask.title}" with tag "${tag}"`);
-        }
-        
-        if (sessionTasks.length > 0) {
-          console.log(`Created session ${sessionId} with ${sessionTasks.length} tasks (${totalTime} min)`);
-          newSessions.push({ 
-            id: sessionId, 
-            day, 
-            period: parseInt(period), 
-            tasks: sessionTasks, 
-            totalTime 
-          });
-        }
+        } else break;
+      }
+      
+      if (taskIndex < incompleteTasks.length && totalTime < 60) {
+        const nextTask = incompleteTasks[taskIndex];
+        const nextTaskTime = nextTask.userEstimate || nextTask.estimatedTime;
+        const tag = (nextTask.accumulated_time && nextTask.accumulated_time > 0) ? 'Wrap it Up' : 'Make a Start';
+        sessionTasks.push({ ...nextTask, sessionTag: tag });
+        totalTime += nextTaskTime;
+        taskIndex++;
+        console.log(`Added overflow task "${nextTask.title}" with tag "${tag}"`);
+      }
+      
+      if (sessionTasks.length > 0) {
+        console.log(`Created session ${sessionId} with ${sessionTasks.length} tasks (${totalTime} min)`);
+        newSessions.push({ id: sessionId, day, period: parseInt(period), tasks: sessionTasks, totalTime, isExtra });
       }
     }
     
@@ -1111,50 +1092,6 @@ const fetchCanvasTasks = async () => {
     }
   }
   
-  // Inject manually added sessions (extra study slots)
-  for (const extra of extraSessions) {
-    const extraId = `${extra.day}-${extra.period}-extra`;
-    if (completedSessionIds.includes(extraId) || deletedIds.includes(extraId)) continue;
-    
-    // Give extra sessions tasks just like a normal study period
-    const sessionTasks = [];
-    let totalTime = 0;
-    let localTaskIndex = taskIndex; // Don't advance global taskIndex for extra sessions
-    
-    while (localTaskIndex < incompleteTasks.length) {
-      const task = incompleteTasks[localTaskIndex];
-      const taskTime = task.userEstimate || task.estimatedTime;
-      if (totalTime + taskTime <= 60) {
-        sessionTasks.push({ ...task, sessionTag: 'Get it Done' });
-        totalTime += taskTime;
-        localTaskIndex++;
-      } else break;
-    }
-    if (localTaskIndex < incompleteTasks.length && totalTime < 60) {
-      const next = incompleteTasks[localTaskIndex];
-      sessionTasks.push({ ...next, sessionTag: next.accumulated_time > 0 ? 'Wrap it Up' : 'Make a Start' });
-      totalTime += next.userEstimate || next.estimatedTime;
-    }
-    
-    if (sessionTasks.length > 0) {
-      newSessions.push({
-        id: extraId,
-        day: extra.day,
-        period: parseInt(extra.period),
-        tasks: sessionTasks,
-        totalTime,
-        isExtra: true
-      });
-    }
-  }
-  
-  // Sort all sessions: Monday→Friday, then by period
-  const dayOrder = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 };
-  newSessions.sort((a, b) => {
-    const dayDiff = (dayOrder[a.day] ?? 5) - (dayOrder[b.day] ?? 5);
-    return dayDiff !== 0 ? dayDiff : a.period - b.period;
-  });
-
   console.log('Total sessions created:', newSessions.length);
   setSessions(newSessions);
 };
@@ -1465,6 +1402,8 @@ const fetchCanvasTasks = async () => {
   };
 
   const handleSaveAndAdjustPlan = async () => {
+    if (isSavingPlan) return;
+    setIsSavingPlan(true);
     try {
       // Convert tasks from frontend format (dueDate) to backend format (deadlineDate, deadlineTime)
       const tasksForBackend = tasks.map(task => {
@@ -1538,6 +1477,8 @@ const fetchCanvasTasks = async () => {
     } catch (error) {
       console.error('Failed to save tasks:', error);
       alert('Failed to save changes: ' + error.message);
+    } finally {
+      setIsSavingPlan(false);
     }
   };
 
@@ -3001,10 +2942,20 @@ const fetchCanvasTasks = async () => {
                         </p>
                         <button 
                           onClick={handleSaveAndAdjustPlan} 
-                          className="bg-orange-600 text-white px-6 py-2 rounded-lg hover:bg-orange-700 font-semibold flex items-center gap-2 shadow-md"
+                          disabled={isSavingPlan}
+                          className={`px-6 py-2 rounded-lg font-semibold flex items-center gap-2 shadow-md transition-all ${isSavingPlan ? 'bg-orange-400 text-white cursor-not-allowed opacity-70' : 'bg-orange-600 text-white hover:bg-orange-700'}`}
                         >
-                          <Save className="w-5 h-5" />
-                          Save and Adjust Plan
+                          {isSavingPlan ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-5 h-5" />
+                              Save and Adjust Plan
+                            </>
+                          )}
                         </button>
                       </div>
                     )}
@@ -3261,7 +3212,7 @@ const fetchCanvasTasks = async () => {
                                 </span>
                                 <span className="text-xs text-gray-600 flex items-center gap-1">
                                   <Brain className="w-3 h-3" />
-                                  {task.estimatedTime} min
+                                  {task.userEstimate || task.estimatedTime} min
                                 </span>
                               </div>
                             </div>
