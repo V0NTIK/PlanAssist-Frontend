@@ -9,6 +9,7 @@ const API_URL = 'https://planassist-api.onrender.com/api';
 const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isAppLoading, setIsAppLoading] = useState(false);
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState('login');
@@ -47,6 +48,8 @@ const PlanAssist = () => {
   const [completedSessionIds, setCompletedSessionIds] = useState([]);
   const [deletedSessionIds, setDeletedSessionIds] = useState([]);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
+  const [tutorialStep, setTutorialStep] = useState(0);
   const [addedSessions, setAddedSessions] = useState([]); // [{id, day, period}] manually added
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
   const [addSessionForm, setAddSessionForm] = useState({ day: 'Monday', period: '2' });
@@ -230,10 +233,11 @@ const PlanAssist = () => {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
       setIsAuthenticated(true);
+      setIsAppLoading(true);
       if (savedColors) {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
-      loadUserData(savedToken);
+      loadUserData(savedToken).finally(() => setIsAppLoading(false));
     }
   }, []);
 
@@ -664,6 +668,11 @@ const PlanAssist = () => {
       }
       
       setCurrentPage('hub');
+      // Show tutorial for new users after setup
+      if (user?.isNewUser) {
+        setTutorialStep(0);
+        setShowTutorial(true);
+      }
     } catch (error) {
       alert('Failed to save settings: ' + error.message);
     } finally {
@@ -1192,8 +1201,8 @@ const fetchCanvasTasks = async () => {
     // Only allow numbers
     if (/^\d*$/.test(value)) {
       const numValue = parseInt(value) || 0;
-      // Limit to 60 minutes
-      if (numValue <= 60) {
+      // Limit to 300 minutes
+      if (numValue <= 300) {
         setTempTimeValue(value);
       }
     }
@@ -1202,8 +1211,8 @@ const fetchCanvasTasks = async () => {
   const handleSaveTimeEstimate = async (taskId) => {
     try {
       const newTime = parseInt(tempTimeValue) || 0;
-      if (newTime < 1 || newTime > 60) {
-        alert('Please enter a time between 1 and 60 minutes');
+      if (newTime < 1 || newTime > 300) {
+        alert('Please enter a time between 1 and 300 minutes');
         return;
       }
 
@@ -2611,8 +2620,74 @@ const fetchCanvasTasks = async () => {
     );
   }
 
+
+  const TUTORIAL_STEPS = [
+    {
+      page: 'hub',
+      title: '👋 Welcome to PlanAssist!',
+      body: 'This is your Hub — your home base. Here you can see your live activity feed, leaderboard, and stats at a glance.',
+      arrow: null,
+    },
+    {
+      page: 'tasks',
+      title: '📋 Your Task List',
+      body: 'This is where all your Canvas assignments live. Drag tasks to reorder your priorities, set manual time estimates, or split big tasks into smaller chunks. Hit Sync to pull in fresh assignments from Canvas.',
+      arrow: null,
+    },
+    {
+      page: 'sessions',
+      title: '⏱ Study Sessions',
+      body: 'PlanAssist builds study sessions from your schedule. Each session fills your free periods with tasks in priority order. Hit Start when you\'re ready to work — the timer tracks your time on each task.',
+      arrow: null,
+    },
+    {
+      page: 'marks',
+      title: '📊 Marks',
+      body: 'The Marks page shows your current grade in every course, compared against the global average of all PlanAssist users. Grades update automatically when you sync.',
+      arrow: null,
+    },
+    {
+      page: 'hub',
+      title: '🚀 You\'re all set!',
+      body: 'Start by syncing your Canvas tasks, then drag them into priority order and hit Save & Adjust Plan. Your sessions will be ready to go. Good luck!',
+      arrow: null,
+    },
+  ];
+
+  const handleTutorialNext = () => {
+    const next = tutorialStep + 1;
+    if (next >= TUTORIAL_STEPS.length) {
+      setShowTutorial(false);
+      return;
+    }
+    setTutorialStep(next);
+    const nextPage = TUTORIAL_STEPS[next].page;
+    if (nextPage !== currentPage) setCurrentPage(nextPage);
+  };
+
+  const handleTutorialPrev = () => {
+    const prev = tutorialStep - 1;
+    if (prev < 0) return;
+    setTutorialStep(prev);
+    const prevPage = TUTORIAL_STEPS[prev].page;
+    if (prevPage !== currentPage) setCurrentPage(prevPage);
+  };
+
+  // Full-page loading screen on refresh (fix 3+4)
+  if (isAppLoading) {
+    return (
+      <div className="fixed inset-0 bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center z-50">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-800">PlanAssist</h2>
+          <p className="text-gray-500 text-sm mt-1">Loading your plan...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50">
+    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
       <nav className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -2625,32 +2700,78 @@ const fetchCanvasTasks = async () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('hub')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('hub')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('tasks')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('tasks')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
               {hasUnsavedChanges && currentPage !== 'session-active' && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
             </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('sessions')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && currentPage !== 'session-active' && setCurrentPage('sessions')} disabled={currentPage === 'session-active' || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
-            <button onClick={() => currentPage !== 'session-active' && setCurrentPage('marks')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('marks')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => setCurrentPage('settings')} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && setCurrentPage('settings')} disabled={currentPage === 'session-active' || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Settings className="w-5 h-5" />
             </button>
-            <button onClick={handleLogout} disabled={currentPage === 'session-active'} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'session-active' ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            {isLoadingTasks && currentPage !== 'tasks' && (
+              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium">
+                <div className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                Syncing
+              </div>
+            )}
+            <button onClick={handleLogout} disabled={currentPage === 'session-active' || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(currentPage === 'session-active' || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
           </div>
         </div>
       </nav>
+
+      {/* Save & Adjust Plan - Full Lock Overlay */}
+      {isSavingPlan && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed" />
+      )}
+
+      {/* Tutorial Overlay */}
+      {showTutorial && (
+        <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-end justify-center pb-12 pointer-events-none">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 mx-4 max-w-md w-full pointer-events-auto border-2 border-purple-300">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-xs font-semibold text-purple-500 uppercase tracking-wider">
+                Step {tutorialStep + 1} of {TUTORIAL_STEPS.length}
+              </span>
+              <button onClick={() => setShowTutorial(false)} className="text-gray-400 hover:text-gray-600 text-sm">
+                Skip tour
+              </button>
+            </div>
+            <h3 className="text-lg font-bold text-gray-900 mb-2">{TUTORIAL_STEPS[tutorialStep].title}</h3>
+            <p className="text-gray-600 text-sm leading-relaxed mb-5">{TUTORIAL_STEPS[tutorialStep].body}</p>
+            <div className="flex items-center justify-between">
+              <div className="flex gap-1">
+                {TUTORIAL_STEPS.map((_, i) => (
+                  <div key={i} className={`w-2 h-2 rounded-full transition-colors ${i === tutorialStep ? 'bg-purple-600' : 'bg-gray-200'}`} />
+                ))}
+              </div>
+              <div className="flex gap-2">
+                {tutorialStep > 0 && (
+                  <button onClick={handleTutorialPrev} className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50">
+                    ← Back
+                  </button>
+                )}
+                <button onClick={handleTutorialNext} className="px-5 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700">
+                  {tutorialStep === TUTORIAL_STEPS.length - 1 ? 'Get Started!' : 'Next →'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="py-6">
         {currentPage === 'hub' && (
           <div className="max-w-7xl mx-auto p-6 space-y-6">
@@ -3345,7 +3466,14 @@ const fetchCanvasTasks = async () => {
                   <div className="border-t pt-4">
                     <h4 className="font-semibold text-gray-700 mb-2">Description</h4>
                     {showTaskDescription.description ? (
-                      <p className="text-gray-600 whitespace-pre-wrap">{showTaskDescription.description}</p>
+                      <div
+                        className="text-gray-600 prose prose-sm max-w-none leading-relaxed"
+                        dangerouslySetInnerHTML={{
+                          __html: showTaskDescription.description
+                            .replace(/<p>\s*<\/p>/gi, '')
+                            .replace(/\n{3,}/g, '\n\n')
+                        }}
+                      />
                     ) : (
                       <p className="text-gray-400 italic">No description available</p>
                     )}
@@ -3504,7 +3632,7 @@ const fetchCanvasTasks = async () => {
                               </span>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <p className="font-medium text-gray-900 truncate">{cleanTaskTitle(task)}</p>
+                                  <a href={task.url} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-900 truncate hover:text-purple-600 hover:underline transition-colors">{cleanTaskTitle(task)}</a>
                                   {task.sessionTag && (
                                     <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border flex-shrink-0 ${tagColor}`}>
                                       {task.sessionTag}
@@ -3560,7 +3688,7 @@ const fetchCanvasTasks = async () => {
                         onChange={e => setAddSessionForm(f => ({ ...f, period: e.target.value }))}
                         className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
                       >
-                        {[1,2,3,4,5,6,7,8].map(p => (
+                        {selectedPeriods.map(p => (
                           <option key={p} value={String(p)}>Period {p}</option>
                         ))}
                       </select>
@@ -3727,7 +3855,7 @@ const fetchCanvasTasks = async () => {
                 </div>
                 {currentSession.tasks[currentTaskIndex] && (
                   <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-6 mb-6">
-                    <h4 className="text-xl font-bold text-gray-900 mb-4">{cleanTaskTitle(currentSession.tasks[currentTaskIndex])}</h4>
+                    <a href={currentSession.tasks[currentTaskIndex].url} target="_blank" rel="noopener noreferrer" className="block text-xl font-bold text-gray-900 mb-4 hover:text-purple-600 hover:underline transition-colors">{cleanTaskTitle(currentSession.tasks[currentTaskIndex])}</a>
                     <div className="flex items-center gap-4 text-sm text-gray-600 mb-6">
                       <span className="flex items-center gap-1">
                         <Clock className="w-4 h-4" />
@@ -3794,7 +3922,7 @@ const fetchCanvasTasks = async () => {
                           {currentTaskIndex + idx + 2}
                         </span>
                         <div className="flex-1">
-                          <span className="text-gray-700">{cleanTaskTitle(task)}</span>
+                          <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-purple-600 hover:underline transition-colors">{cleanTaskTitle(task)}</a>
                           {hasPartialTime && (
                             <span className="ml-2 text-xs text-blue-600">
                               ({partialTaskTimes[taskId]} min in progress)
@@ -3849,7 +3977,14 @@ const fetchCanvasTasks = async () => {
               <>
                 {/* Grade cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {courses.map((course, index) => {
+                  {[...courses].sort((a, b) => {
+                    const aScore = a.current_score != null ? parseFloat(a.current_score) : null;
+                    const bScore = b.current_score != null ? parseFloat(b.current_score) : null;
+                    if (aScore === null && bScore === null) return 0;
+                    if (aScore === null) return 1;  // no grade → bottom
+                    if (bScore === null) return -1;
+                    return aScore - bScore; // lowest score first
+                  }).map((course, index) => {
                     const avgData = courseAverages[course.course_id];
                     const classAverage = avgData?.averageScore ?? null;
                     const studentCount = avgData?.studentCount ?? 0;
@@ -3901,7 +4036,7 @@ const fetchCanvasTasks = async () => {
                                 <span className="font-semibold text-gray-700">Your Score</span>
                                 {difference !== null && (
                                   <span className={`font-bold ${difference >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                    {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs class
+                                    {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs Average
                                   </span>
                                 )}
                               </div>
@@ -3923,7 +4058,7 @@ const fetchCanvasTasks = async () => {
                               {classAverage !== null && studentCount > 1 && (
                                 <div className="mt-1.5">
                                   <div className="flex justify-between text-xs text-gray-400 mb-1">
-                                    <span>Class Average ({studentCount} students)</span>
+                                    <span>Global Average ({studentCount} students)</span>
                                     <span>{classAverage.toFixed(1)}%</span>
                                   </div>
                                   <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
