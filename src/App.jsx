@@ -10,6 +10,8 @@ const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAppLoading, setIsAppLoading] = useState(false);
+  const [calendarTasks, setCalendarTasks] = useState([]);
+  const [calendarExpandedId, setCalendarExpandedId] = useState(null);
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState('login');
@@ -26,7 +28,10 @@ const PlanAssist = () => {
     canvasApiToken: '',
     presentPeriods: '2-6',
     schedule: {},
-    classColors: {}
+    classColors: {},
+    calendarTodayCentered: false,
+    calendarShowHomeroom: false,
+    calendarShowCompleted: true
   });
   const [tasks, setTasks] = useState([]);
   const [sessions, setSessions] = useState([]);
@@ -258,6 +263,9 @@ const PlanAssist = () => {
           grade: setupData.grade || '',
           canvasApiToken: setupData.canvasApiToken || '',
           presentPeriods: setupData.presentPeriods || '2-6',
+        calendarTodayCentered: setupData.calendarTodayCentered ?? false,
+        calendarShowHomeroom: setupData.calendarShowHomeroom ?? false,
+        calendarShowCompleted: setupData.calendarShowCompleted ?? true,
           schedule: setupData.schedule || {},
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
@@ -571,6 +579,16 @@ const PlanAssist = () => {
       setTasks(loadedTasks);
       setNewTasks(loadedNewTasks);
       generateSessions(loadedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
+
+      // Load calendar tasks (all non-deleted, including completed)
+      try {
+        const calData = await fetch(`${API_URL}/tasks/calendar`, {
+          headers: { 'Authorization': `Bearer ${authToken || token}` }
+        }).then(r => r.json());
+        setCalendarTasks(Array.isArray(calData) ? calData : []);
+      } catch (e) {
+        console.error('Failed to load calendar tasks:', e);
+      }
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
@@ -650,7 +668,10 @@ const PlanAssist = () => {
         grade: accountSetup.grade,
         canvasApiToken: accountSetup.canvasApiToken,
         presentPeriods: accountSetup.presentPeriods,
-        schedule: accountSetup.schedule
+        schedule: accountSetup.schedule,
+        calendarTodayCentered: accountSetup.calendarTodayCentered,
+        calendarShowHomeroom: accountSetup.calendarShowHomeroom,
+        calendarShowCompleted: accountSetup.calendarShowCompleted
       });
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
       
@@ -2713,6 +2734,10 @@ const fetchCanvasTasks = async () => {
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
+            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('calendar')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <Calendar className="w-5 h-5" />
+              <span className="font-medium">Calendar</span>
+            </button>
             <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('marks')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
@@ -3937,6 +3962,227 @@ const fetchCanvasTasks = async () => {
             </div>
           )
         )}
+        {currentPage === 'calendar' && (() => {
+          // ── helpers ──────────────────────────────────────────────
+          const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const today = new Date();
+          const todayIdx = today.getDay(); // 0=Sun
+
+          // Build the 7-day window
+          let dayOffsets;
+          if (accountSetup.calendarTodayCentered) {
+            dayOffsets = [-3,-2,-1,0,1,2,3];
+          } else {
+            // Always show Sun-Sat of the current week
+            dayOffsets = Array.from({length:7},(_,i) => i - todayIdx);
+          }
+
+          const days = dayOffsets.map(offset => {
+            const d = new Date(today);
+            d.setDate(today.getDate() + offset);
+            return d;
+          });
+
+          // Strip HTML helper (reuse server-side logic on frontend)
+          const stripHtml = (html) => {
+            if (!html) return '';
+            return html
+              .replace(/<br\s*\/?>/gi, ' ')
+              .replace(/<\/p>/gi, ' ')
+              .replace(/<li>/gi, '• ')
+              .replace(/<[^>]+>/g, '')
+              .replace(/&nbsp;/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/\s{2,}/g, ' ')
+              .trim();
+          };
+
+          // Parse calendar task into usable shape
+          const parseCalTask = (t) => {
+            let dueDate = null;
+            let hasTime = false;
+            if (t.deadline_date) {
+              const localStr = t.deadline_time
+                ? `${t.deadline_date}T${t.deadline_time}`
+                : `${t.deadline_date}T23:59:59`;
+              dueDate = new Date(localStr);
+              hasTime = !!t.deadline_time;
+            }
+            const isDone = t.completed || !!t.submitted_at;
+            const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
+            return { ...t, dueDate, hasTime, isDone, isHomeroom };
+          };
+
+          // Get tasks for a specific calendar day
+          const getTasksForDay = (dayDate) => {
+            const dayStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,'0')}-${String(dayDate.getDate()).padStart(2,'0')}`;
+            return calendarTasks
+              .map(parseCalTask)
+              .filter(t => {
+                if (!t.dueDate) return false;
+                const tStr = `${t.dueDate.getFullYear()}-${String(t.dueDate.getMonth()+1).padStart(2,'0')}-${String(t.dueDate.getDate()).padStart(2,'0')}`;
+                if (tStr !== dayStr) return false;
+                if (t.isHomeroom && !accountSetup.calendarShowHomeroom) return false;
+                if (t.isDone && !accountSetup.calendarShowCompleted) return false;
+                return true;
+              })
+              .sort((a,b) => {
+                // Tasks with specific time first, sorted ascending; no-time tasks last
+                if (a.hasTime && !b.hasTime) return -1;
+                if (!a.hasTime && b.hasTime) return 1;
+                if (a.hasTime && b.hasTime) return a.dueDate - b.dueDate;
+                // Both no time: sort by priority
+                const pa = a.priority_order ?? 9999;
+                const pb = b.priority_order ?? 9999;
+                return pa - pb;
+              });
+          };
+
+          // Priority lookup from main tasks list
+          const priorityMap = {};
+          tasks.forEach(t => { if (t.priorityOrder) priorityMap[t.id] = t.priorityOrder; });
+
+          // Expanded bubble state (local to this render — use a ref-based approach via useState at top level)
+          // We use calendarExpandedId state declared at top level
+
+          const isToday = (d) => d.toDateString() === today.toDateString();
+
+          return (
+            <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
+              {/* Header */}
+              <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {accountSetup.calendarTodayCentered ? 'Today-centered view' : 'Weekly view (Sun – Sat)'}
+                    {' · '}
+                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCurrentPage('settings')}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  Calendar Settings
+                </button>
+              </div>
+
+              {/* 7-day grid */}
+              <div className="flex-1 overflow-hidden px-4 py-4">
+                <div className="grid grid-cols-7 gap-2 h-full">
+                  {days.map((day, colIdx) => {
+                    const dayTasks = getTasksForDay(day);
+                    const todayCol = isToday(day);
+                    return (
+                      <div
+                        key={colIdx}
+                        className={`flex flex-col rounded-xl border-2 overflow-hidden ${todayCol ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-white'}`}
+                      >
+                        {/* Day header */}
+                        <div className={`px-2 py-2 text-center border-b ${todayCol ? 'bg-purple-600 border-purple-500' : 'bg-gray-50 border-gray-200'}`}>
+                          <p className={`text-xs font-semibold uppercase tracking-wide ${todayCol ? 'text-purple-100' : 'text-gray-500'}`}>
+                            {DAY_NAMES[day.getDay()].slice(0,3)}
+                          </p>
+                          <p className={`text-lg font-bold leading-tight ${todayCol ? 'text-white' : 'text-gray-900'}`}>
+                            {day.getDate()}
+                          </p>
+                          <p className={`text-xs ${todayCol ? 'text-purple-200' : 'text-gray-400'}`}>
+                            {day.toLocaleDateString('en-US',{month:'short'})}
+                          </p>
+                        </div>
+
+                        {/* Task bubbles */}
+                        <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
+                          {dayTasks.length === 0 && (
+                            <p className="text-xs text-gray-300 text-center mt-4">—</p>
+                          )}
+                          {dayTasks.map((task) => {
+                            const color = getClassColor(task.class || '');
+                            const priority = priorityMap[task.id];
+                            const timeStr = task.hasTime
+                              ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+                              : null;
+                            const displayTitle = task.segment
+                              ? `${(task.title||'').replace(/\s*\[[^\]]+\]\s*/,'')} – ${task.segment}`
+                              : (task.title||'').replace(/\s*\[[^\]]+\]\s*/,'');
+                            const cleanDesc = stripHtml(task.description);
+                            const isExpanded = calendarExpandedId === task.id;
+
+                            return (
+                              <div
+                                key={task.id}
+                                className={`rounded-lg text-white text-xs cursor-pointer transition-all duration-200 select-none ${isExpanded ? 'shadow-lg z-10 relative' : 'hover:brightness-110'}`}
+                                style={{ backgroundColor: color }}
+                                onClick={() => {
+                                  if (isExpanded) {
+                                    // Second click → open URL
+                                    if (task.url) window.open(task.url, '_blank', 'noopener,noreferrer');
+                                    setCalendarExpandedId(null);
+                                  } else {
+                                    setCalendarExpandedId(task.id);
+                                  }
+                                }}
+                              >
+                                {/* Collapsed view */}
+                                {!isExpanded && (
+                                  <div className="px-1.5 py-1 flex items-start gap-1">
+                                    {priority && (
+                                      <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>
+                                    )}
+                                    <span className={`truncate flex-1 ${task.isDone ? 'line-through opacity-60' : ''}`}>
+                                      {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
+                                      {displayTitle}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Expanded view */}
+                                {isExpanded && (
+                                  <div className="p-2 space-y-1.5">
+                                    <div className="flex items-start justify-between gap-1">
+                                      <div className={`font-semibold leading-tight ${task.isDone ? 'line-through opacity-70' : ''}`}>
+                                        {priority && <span className="opacity-80">#{priority} · </span>}
+                                        {timeStr && <span className="opacity-80">{timeStr} · </span>}
+                                        {displayTitle}
+                                      </div>
+                                      <button
+                                        className="opacity-70 hover:opacity-100 flex-shrink-0 ml-1"
+                                        onClick={(e) => { e.stopPropagation(); setCalendarExpandedId(null); }}
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                    {task.isDone && (
+                                      <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">
+                                        ✓ Done
+                                      </span>
+                                    )}
+                                    {cleanDesc ? (
+                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-5">{cleanDesc}</p>
+                                    ) : (
+                                      <p className="text-xs opacity-50 italic">No description</p>
+                                    )}
+                                    <p className="text-xs opacity-60 mt-1">Tap again to open in Canvas →</p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {currentPage === 'marks' && (
           <div className="max-w-6xl mx-auto p-6">
             {/* Header */}
@@ -4250,6 +4496,47 @@ const fetchCanvasTasks = async () => {
                             className="w-10 h-10 rounded cursor-pointer"
                           />
                           <span className="flex-1 font-medium text-gray-700">{className}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Calendar Settings */}
+                {!user?.isNewUser && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-3">
+                      Calendar Settings
+                    </label>
+                    <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
+                      {[
+                        {
+                          key: 'calendarTodayCentered',
+                          label: 'Today-Centered View',
+                          desc: 'When on, today always appears in the middle column of the calendar. When off, the week runs Sun → Sat.'
+                        },
+                        {
+                          key: 'calendarShowHomeroom',
+                          label: 'Show Homeroom Tasks',
+                          desc: 'When on, Homeroom tasks appear on the calendar.'
+                        },
+                        {
+                          key: 'calendarShowCompleted',
+                          label: 'Show Completed Tasks',
+                          desc: 'When on, submitted and completed tasks appear with a strikethrough. When off, they are hidden.'
+                        }
+                      ].map(({ key, label, desc }) => (
+                        <div key={key} className="flex items-start gap-3 p-4">
+                          <input
+                            type="checkbox"
+                            checked={accountSetup[key] || false}
+                            onChange={(e) => setAccountSetup(prev => ({ ...prev, [key]: e.target.checked }))}
+                            className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
+                          />
+                          <div className="flex-1">
+                            <p className="font-medium text-gray-900">{label}</p>
+                            <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                          </div>
                         </div>
                       ))}
                     </div>
