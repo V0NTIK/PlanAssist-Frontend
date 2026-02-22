@@ -264,7 +264,7 @@ const PlanAssist = () => {
           canvasApiToken: setupData.canvasApiToken || '',
           presentPeriods: setupData.presentPeriods || '2-6',
         calendarTodayCentered: setupData.calendarTodayCentered ?? false,
-        calendarShowHomeroom: setupData.calendarShowHomeroom ?? false,
+        calendarShowHomeroom: setupData.calendarShowHomeroom ?? true,
         calendarShowCompleted: setupData.calendarShowCompleted ?? true,
           schedule: setupData.schedule || {},
           classColors: savedColors ? JSON.parse(savedColors) : {}
@@ -3973,19 +3973,14 @@ const fetchCanvasTasks = async () => {
           )
         )}
         {currentPage === 'calendar' && (() => {
-          // ── helpers ──────────────────────────────────────────────
           const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
-          const todayIdx = today.getDay(); // 0=Sun
 
-          // Build the 7-day window
-          let dayOffsets;
-          if (accountSetup.calendarTodayCentered) {
-            dayOffsets = [-3,-2,-1,0,1,2,3];
-          } else {
-            // Always show Sun-Sat of the current week
-            dayOffsets = Array.from({length:7},(_,i) => i - todayIdx);
-          }
+          // Build 7-day window
+          const todayIdx = today.getDay();
+          const dayOffsets = accountSetup.calendarTodayCentered
+            ? [-3,-2,-1,0,1,2,3]
+            : Array.from({length:7}, (_,i) => i - todayIdx);
 
           const days = dayOffsets.map(offset => {
             const d = new Date(today);
@@ -3993,81 +3988,62 @@ const fetchCanvasTasks = async () => {
             return d;
           });
 
-          // Helper: determine readable text color (black or white) from hex background
-          const getTextColor = (hexColor) => {
+          const isToday = (d) => d.toDateString() === today.toDateString();
+
+          // Build dayStr from a Date object using LOCAL date parts
+          const toDayStr = (d) =>
+            `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+          // Get tasks for a specific day
+          const getTasksForDay = (dayDate) => {
+            const dayStr = toDayStr(dayDate);
+            return tasks.filter(t => {
+              if (!t.deadlineDateRaw) return false;
+              if (t.deadlineDateRaw !== dayStr) return false;
+              const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
+              if (isHomeroom && !accountSetup.calendarShowHomeroom) return false;
+              const isDone = t.completed || !!t.submittedAt;
+              if (isDone && !accountSetup.calendarShowCompleted) return false;
+              return true;
+            }).sort((a, b) => {
+              if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
+              if (a.dueDate) return -1;
+              if (b.dueDate) return 1;
+              return (a.priorityOrder ?? 9999) - (b.priorityOrder ?? 9999);
+            });
+          };
+
+          // Text color helper for contrast
+          const getTextColor = (hex) => {
             try {
-              const hex = hexColor.replace('#','');
-              const r = parseInt(hex.substr(0,2),16);
-              const g = parseInt(hex.substr(2,2),16);
-              const b = parseInt(hex.substr(4,2),16);
-              // Relative luminance (WCAG formula)
-              const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
-              return luminance > 0.55 ? '#1a1a1a' : '#ffffff';
+              const h = hex.replace('#','');
+              const r = parseInt(h.substr(0,2),16);
+              const g = parseInt(h.substr(2,2),16);
+              const b = parseInt(h.substr(4,2),16);
+              return (0.299*r + 0.587*g + 0.114*b)/255 > 0.55 ? '#1a1a1a' : '#ffffff';
             } catch { return '#ffffff'; }
           };
 
-          // Strip HTML helper (reuse server-side logic on frontend)
           const stripHtml = (html) => {
             if (!html) return '';
             return html
-              .replace(/<br\s*\/?>/gi, ' ')
-              .replace(/<\/p>/gi, ' ')
-              .replace(/<li>/gi, '• ')
-              .replace(/<[^>]+>/g, '')
-              .replace(/&nbsp;/g, ' ')
-              .replace(/&amp;/g, '&')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/\s{2,}/g, ' ')
-              .trim();
+              .replace(/<br\s*\/?>/gi,' ').replace(/<\/p>/gi,' ')
+              .replace(/<li>/gi,'• ').replace(/<[^>]+>/g,'')
+              .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&')
+              .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+              .replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+              .replace(/\s{2,}/g,' ').trim();
           };
 
-          // Parse calendar task into usable shape
-          const parseCalTask = (t) => {
-            const dueDate = t.dueDate || null;
-            const hasTime = t.hasSpecificTime || false;
-            // Use the stored raw date string for reliable day-matching (no timezone drift)
-            const rawDate = t.deadlineDateRaw || null;
-            const isDone = t.completed || !!t.submittedAt;
-            const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
-            return { ...t, dueDate, hasTime, isDone, isHomeroom, rawDate };
-          };
-
-          // Get tasks for a specific calendar day
-          const getTasksForDay = (dayDate) => {
-            const dayStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,'0')}-${String(dayDate.getDate()).padStart(2,'0')}`;
-            return tasks
-              .map(parseCalTask)
-              .filter(t => {
-                if (!t.rawDate) return false;
-                // Compare rawDate strings directly - avoids timezone-shifted getDate() bugs
-                if (t.rawDate !== dayStr) return false;
-                if (t.isHomeroom && !accountSetup.calendarShowHomeroom) return false;
-                if (t.isDone && !accountSetup.calendarShowCompleted) return false;
-                return true;
-              })
-              .sort((a,b) => {
-                // Tasks with specific time first, sorted ascending; no-time tasks last
-                if (a.hasTime && !b.hasTime) return -1;
-                if (!a.hasTime && b.hasTime) return 1;
-                if (a.hasTime && b.hasTime) return a.dueDate - b.dueDate;
-                // Both no time: sort by priority
-                const pa = a.priority_order ?? 9999;
-                const pb = b.priority_order ?? 9999;
-                return pa - pb;
-              });
-          };
-
-          // Priority lookup from main tasks list
+          // Priority lookup
           const priorityMap = {};
           tasks.forEach(t => { if (t.priorityOrder) priorityMap[t.id] = t.priorityOrder; });
 
-          // Expanded bubble state (local to this render — use a ref-based approach via useState at top level)
-          // We use calendarExpandedId state declared at top level
-
-          const isToday = (d) => d.toDateString() === today.toDateString();
+          // Debug: log to console so we can see what's happening
+          console.log('[Calendar] tasks.length:', tasks.length,
+            '| sample deadlineDateRaw:', tasks[0]?.deadlineDateRaw,
+            '| calendarShowHomeroom:', accountSetup.calendarShowHomeroom,
+            '| Feb24 tasks:', tasks.filter(t => t.deadlineDateRaw === '2026-02-24').length);
 
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
@@ -4123,13 +4099,13 @@ const fetchCanvasTasks = async () => {
                           {dayTasks.map((task) => {
                             const color = getClassColor(task.class || '');
                             const priority = priorityMap[task.id];
-                            const timeStr = task.hasTime
+                            const timeStr = task.hasSpecificTime && task.dueDate
                               ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
                               : null;
                             const displayTitle = task.segment
                               ? `${(task.title||'').replace(/\s*\[[^\]]+\]\s*/,'')} – ${task.segment}`
                               : (task.title||'').replace(/\s*\[[^\]]+\]\s*/,'');
-                            const cleanDesc = stripHtml(task.description);
+                            const isDone = task.completed || !!task.submittedAt;
                             const isExpanded = calendarExpandedId === task.id;
 
                             return (
@@ -4139,7 +4115,6 @@ const fetchCanvasTasks = async () => {
                                 style={{ backgroundColor: color, color: getTextColor(color) }}
                                 onClick={() => {
                                   if (isExpanded) {
-                                    // Second click → open URL
                                     if (task.url) window.open(task.url, '_blank', 'noopener,noreferrer');
                                     setCalendarExpandedId(null);
                                   } else {
@@ -4147,24 +4122,19 @@ const fetchCanvasTasks = async () => {
                                   }
                                 }}
                               >
-                                {/* Collapsed view */}
                                 {!isExpanded && (
                                   <div className="px-1.5 py-1 flex items-start gap-1">
-                                    {priority && (
-                                      <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>
-                                    )}
-                                    <span className={`truncate flex-1 ${task.isDone ? 'line-through opacity-60' : ''}`}>
+                                    {priority && <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>}
+                                    <span className={`truncate flex-1 ${isDone ? 'line-through opacity-60' : ''}`}>
                                       {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
                                       {displayTitle}
                                     </span>
                                   </div>
                                 )}
-
-                                {/* Expanded view */}
                                 {isExpanded && (
                                   <div className="p-2 space-y-1.5">
                                     <div className="flex items-start justify-between gap-1">
-                                      <div className={`font-semibold leading-tight ${task.isDone ? 'line-through opacity-70' : ''}`}>
+                                      <div className={`font-semibold leading-tight ${isDone ? 'line-through opacity-70' : ''}`}>
                                         {priority && <span className="opacity-80">#{priority} · </span>}
                                         {timeStr && <span className="opacity-80">{timeStr} · </span>}
                                         {displayTitle}
@@ -4172,17 +4142,13 @@ const fetchCanvasTasks = async () => {
                                       <button
                                         className="opacity-70 hover:opacity-100 flex-shrink-0 ml-1"
                                         onClick={(e) => { e.stopPropagation(); setCalendarExpandedId(null); }}
-                                      >
-                                        ✕
-                                      </button>
+                                      >✕</button>
                                     </div>
-                                    {task.isDone && (
-                                      <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">
-                                        ✓ Done
-                                      </span>
+                                    {isDone && (
+                                      <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">✓ Done</span>
                                     )}
-                                    {cleanDesc ? (
-                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-5">{cleanDesc}</p>
+                                    {stripHtml(task.description) ? (
+                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-5">{stripHtml(task.description)}</p>
                                     ) : (
                                       <p className="text-xs opacity-50 italic">No description</p>
                                     )}
