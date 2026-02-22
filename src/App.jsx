@@ -4069,16 +4069,18 @@ const fetchCanvasTasks = async () => {
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
-          // PRECISE DEBUG - use first non-homeroom task
-          const tNH = tasks.find(t => !(t.class||'').toLowerCase().includes('homeroom'));
-          const t0 = tNH ? parseCalTask(tNH) : null;
-          const day23 = days.find(d => d.getDate() === 23);
-          const day23Str = day23 ? `${day23.getFullYear()}-${String(day23.getMonth()+1).padStart(2,'0')}-${String(day23.getDate()).padStart(2,'0')}` : 'none';
+          // DEBUG - show task counts per visible day
+          const dayCounts = days.map(d => {
+            const s = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            const matched = tasks.map(t => ({...t, rawDate: t.deadlineDateRaw||null})).filter(t => t.rawDate === s);
+            return `${s}:${matched.length}`;
+          });
+          const allRawDates = [...new Set(tasks.map(t => t.deadlineDateRaw))].sort().join(',');
 
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
               <div style={{background:'#fef08a',border:'1px solid #ca8a04',padding:'6px',fontSize:'11px',fontFamily:'monospace',wordBreak:'break-all'}}>
-                task="{t0?.title?.slice(0,20)}" | deadlineDateRaw={tNH?.deadlineDateRaw??'MISSING'} | rawDate={t0?.rawDate??'null'} | day23Str={day23Str} | match={t0?.rawDate===day23Str?'YES':'NO'} | isDone={String(t0?.isDone)} | showCompleted={String(accountSetup.calendarShowCompleted)}
+                dayCounts=[{dayCounts.join(' ')}]<br/>allRawDates=[{allRawDates}]
               </div>
 
               {/* Header */}
