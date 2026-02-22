@@ -4013,7 +4013,9 @@ const fetchCanvasTasks = async () => {
                 const raDay = ra.dueDate ? toDayStr(ra.dueDate) : 'NO_DUEDATE';
                 console.log('[Cal Debug] Reinforcement:', {id:ra.id, completed:ra.completed, deleted:ra.deleted, dueDate:ra.dueDate, dayStr:raDay, calendarShowCompleted:accountSetup.calendarShowCompleted});
               } else {
-                console.log('[Cal Debug] Reinforcement NOT FOUND in tasks state. tasks.length=', tasks.length);
+                const taskIds = tasks.map(t => t.id).sort((a,b)=>a-b);
+                console.log('[Cal Debug] Reinforcement NOT FOUND. IDs in tasks state:', taskIds.join(','));
+                console.log('[Cal Debug] tasks.length=', tasks.length, '| newTasks.length=', newTasks.length);
               }
             }
             return tasks.filter(t => {
