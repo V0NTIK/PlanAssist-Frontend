@@ -405,12 +405,17 @@ const PlanAssist = () => {
         generateSessions(loadedTasks, setupData.schedule || {}, deletedSessionIds, addedSessions);
       }
 
-      // Load calendar tasks with authToken (available here, unlike in loadTasks)
+      // Load calendar tasks with authToken
       try {
-        const calData = await fetch(`${API_URL}/tasks/calendar`, {
-          headers: { 'Authorization': `Bearer ${authToken}` }
-        }).then(r => r.json());
-        setCalendarTasks(Array.isArray(calData) ? calData : []);
+        const calResp = await fetch(`${API_URL}/tasks/calendar`, {
+          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }
+        });
+        if (calResp.ok) {
+          const calData = await calResp.json();
+          setCalendarTasks(Array.isArray(calData) ? calData : []);
+        } else {
+          console.error('Calendar fetch failed:', calResp.status, await calResp.text());
+        }
       } catch (e) {
         console.error('Failed to load calendar tasks:', e);
       }
@@ -590,11 +595,9 @@ const PlanAssist = () => {
       setNewTasks(loadedNewTasks);
       generateSessions(loadedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
 
-      // Load calendar tasks (all non-deleted, including completed)
+      // Load calendar tasks using apiCall (token is always available here)
       try {
-        const calData = await fetch(`${API_URL}/tasks/calendar`, {
-          headers: { 'Authorization': `Bearer ${authToken || token}` }
-        }).then(r => r.json());
+        const calData = await apiCall('/tasks/calendar', 'GET');
         setCalendarTasks(Array.isArray(calData) ? calData : []);
       } catch (e) {
         console.error('Failed to load calendar tasks:', e);
@@ -3993,6 +3996,19 @@ const fetchCanvasTasks = async () => {
             return d;
           });
 
+          // Helper: determine readable text color (black or white) from hex background
+          const getTextColor = (hexColor) => {
+            try {
+              const hex = hexColor.replace('#','');
+              const r = parseInt(hex.substr(0,2),16);
+              const g = parseInt(hex.substr(2,2),16);
+              const b = parseInt(hex.substr(4,2),16);
+              // Relative luminance (WCAG formula)
+              const luminance = (0.299*r + 0.587*g + 0.114*b) / 255;
+              return luminance > 0.55 ? '#1a1a1a' : '#ffffff';
+            } catch { return '#ffffff'; }
+          };
+
           // Strip HTML helper (reuse server-side logic on frontend)
           const stripHtml = (html) => {
             if (!html) return '';
@@ -4139,8 +4155,8 @@ const fetchCanvasTasks = async () => {
                             return (
                               <div
                                 key={task.id}
-                                className={`rounded-lg text-white text-xs cursor-pointer transition-all duration-200 select-none ${isExpanded ? 'shadow-lg z-10 relative' : 'hover:brightness-110'}`}
-                                style={{ backgroundColor: color }}
+                                className={`rounded-lg text-xs cursor-pointer transition-all duration-200 select-none ${isExpanded ? 'shadow-lg z-10 relative' : 'hover:brightness-110'}`}
+                                style={{ backgroundColor: color, color: getTextColor(color) }}
                                 onClick={() => {
                                   if (isExpanded) {
                                     // Second click → open URL
