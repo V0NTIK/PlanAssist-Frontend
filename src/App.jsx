@@ -405,6 +405,16 @@ const PlanAssist = () => {
         generateSessions(loadedTasks, setupData.schedule || {}, deletedSessionIds, addedSessions);
       }
 
+      // Load calendar tasks with authToken (available here, unlike in loadTasks)
+      try {
+        const calData = await fetch(`${API_URL}/tasks/calendar`, {
+          headers: { 'Authorization': `Bearer ${authToken}` }
+        }).then(r => r.json());
+        setCalendarTasks(Array.isArray(calData) ? calData : []);
+      } catch (e) {
+        console.error('Failed to load calendar tasks:', e);
+      }
+
       const historyData = await fetch(`${API_URL}/learning`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
       }).then(r => r.json());
