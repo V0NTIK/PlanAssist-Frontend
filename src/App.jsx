@@ -341,7 +341,11 @@ const PlanAssist = () => {
             userEstimate: t.user_estimated_time,
             accumulatedTime: t.accumulated_time || 0,
             priorityOrder: t.priority_order,
-            completed: t.completed
+            completed: t.completed,
+            submittedAt: t.submitted_at || null,
+            deadlineDateRaw: t.deadline_date
+              ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+              : null
           };
         });
         
@@ -4065,15 +4069,16 @@ const fetchCanvasTasks = async () => {
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
-          // PRECISE DEBUG
-          const t0 = tasks[0] ? parseCalTask(tasks[0]) : null;
+          // PRECISE DEBUG - use first non-homeroom task
+          const tNH = tasks.find(t => !(t.class||'').toLowerCase().includes('homeroom'));
+          const t0 = tNH ? parseCalTask(tNH) : null;
           const day23 = days.find(d => d.getDate() === 23);
           const day23Str = day23 ? `${day23.getFullYear()}-${String(day23.getMonth()+1).padStart(2,'0')}-${String(day23.getDate()).padStart(2,'0')}` : 'none';
 
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
               <div style={{background:'#fef08a',border:'1px solid #ca8a04',padding:'6px',fontSize:'11px',fontFamily:'monospace',wordBreak:'break-all'}}>
-                tasks[0].deadlineDateRaw={tasks[0]?.deadlineDateRaw ?? 'MISSING'} | parsed rawDate={t0?.rawDate ?? 'null'} | day23Str={day23Str} | match={t0?.rawDate===day23Str?'YES':'NO'} | isDone={String(t0?.isDone)} | isHomeroom={String(t0?.isHomeroom)} | showCompleted={String(accountSetup.calendarShowCompleted)}
+                task="{t0?.title?.slice(0,20)}" | deadlineDateRaw={tNH?.deadlineDateRaw??'MISSING'} | rawDate={t0?.rawDate??'null'} | day23Str={day23Str} | match={t0?.rawDate===day23Str?'YES':'NO'} | isDone={String(t0?.isDone)} | showCompleted={String(accountSetup.calendarShowCompleted)}
               </div>
 
               {/* Header */}
