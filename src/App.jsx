@@ -30,7 +30,7 @@ const PlanAssist = () => {
     schedule: {},
     classColors: {},
     calendarTodayCentered: false,
-    calendarShowHomeroom: false,
+    calendarShowHomeroom: true,
     calendarShowCompleted: true
   });
   const [tasks, setTasks] = useState([]);
@@ -4069,19 +4069,8 @@ const fetchCanvasTasks = async () => {
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
-          // DEBUG - show task counts per visible day
-          const dayCounts = days.map(d => {
-            const s = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-            const matched = tasks.map(t => ({...t, rawDate: t.deadlineDateRaw||null})).filter(t => t.rawDate === s);
-            return `${s}:${matched.length}`;
-          });
-          const allRawDates = [...new Set(tasks.map(t => t.deadlineDateRaw))].sort().join(',');
-
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
-              <div style={{background:'#fef08a',border:'1px solid #ca8a04',padding:'6px',fontSize:'11px',fontFamily:'monospace',wordBreak:'break-all'}}>
-                dayCounts=[{dayCounts.join(' ')}]<br/>allRawDates=[{allRawDates}]
-              </div>
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
