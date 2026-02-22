@@ -66,6 +66,7 @@ const PlanAssist = () => {
   const [newTasks, setNewTasks] = useState([]);
   const [showTaskDescription, setShowTaskDescription] = useState(null);
   const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
+  const savedCanvasTokenRef = React.useRef(''); // tracks last-saved token to avoid unnecessary syncs
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
   const [tempTimeValue, setTempTimeValue] = useState('');
@@ -269,6 +270,7 @@ const PlanAssist = () => {
           schedule: setupData.schedule || {},
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
+        savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
         // Update user object with grade for leaderboard to work
         if (savedUser) {
@@ -697,13 +699,13 @@ const PlanAssist = () => {
       setUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
-      // Fetch tasks and generate sessions if Canvas API Token is provided
-      if (accountSetup.canvasApiToken) {
+      // Only sync if the Canvas API Token was actually changed (avoids unnecessary API usage)
+      const tokenChanged = accountSetup.canvasApiToken !== savedCanvasTokenRef.current;
+      if (accountSetup.canvasApiToken && tokenChanged) {
         await fetchCanvasTasks();
-        // Generate sessions after tasks are loaded
-        // Note: fetchCanvasTasks updates the tasks state, but we need to use the result
-        // Sessions will be generated in fetchCanvasTasks
       }
+      // Update the ref to reflect the newly saved token
+      savedCanvasTokenRef.current = accountSetup.canvasApiToken || '';
       
       setCurrentPage('hub');
       // Show tutorial for new users after setup
