@@ -4485,7 +4485,7 @@ const fetchCanvasTasks = async () => {
                 )}
 
                 {/* Calendar Settings */}
-                {!user?.isNewUser && (
+                {isAuthenticated && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-3">
                       Calendar Settings
@@ -4526,7 +4526,7 @@ const fetchCanvasTasks = async () => {
                 )}
 
                 {/* Completion Feed Preference - Only shown after initial setup */}
-                {!user?.isNewUser && (
+                {isAuthenticated && (
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-3">
                       Privacy Settings
