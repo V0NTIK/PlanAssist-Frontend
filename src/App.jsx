@@ -401,6 +401,7 @@ const PlanAssist = () => {
             accumulatedTime: t.accumulated_time || 0,
             priorityOrder: t.priority_order,
             completed: t.completed,
+            deleted: t.deleted || false,
             submittedAt: t.submitted_at || null,
             deadlineDateRaw: t.deadline_date
               ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
@@ -408,9 +409,11 @@ const PlanAssist = () => {
           };
         });
         
-        setTasks(loadedTasks);
+        // generateSessions and task list only use active (non-deleted) tasks
+        const activeTasks = loadedTasks.filter(t => !t.deleted);
+        setTasks(loadedTasks); // full set for calendar
         setNewTasks(loadedNewTasks);
-        generateSessions(loadedTasks, setupData.schedule || {}, deletedSessionIds, addedSessions);
+        generateSessions(activeTasks, setupData.schedule || {}, deletedSessionIds, addedSessions);
       }
 
 
@@ -587,6 +590,7 @@ const PlanAssist = () => {
           accumulatedTime: t.accumulated_time || 0,
           priorityOrder: t.priority_order,
           completed: t.completed,
+          deleted: t.deleted || false,
           submittedAt: t.submitted_at || null,
           deadlineDateRaw: t.deadline_date
             ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
@@ -594,9 +598,10 @@ const PlanAssist = () => {
         };
       });
       
-      setTasks(loadedTasks);
+      const activeTasks = loadedTasks.filter(t => !t.deleted);
+      setTasks(loadedTasks); // full set for calendar
       setNewTasks(loadedNewTasks);
-      generateSessions(loadedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
+      generateSessions(activeTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
 
 
     } catch (error) {
@@ -2864,14 +2869,14 @@ const fetchCanvasTasks = async () => {
               {/* Left Column - Next Task and Quick Actions */}
               <div className="lg:col-span-2 space-y-6">
                 {/* Next Up Task */}
-                {tasks.filter(t => !t.completed).length > 0 && (
+                {tasks.filter(t => !t.deleted && !t.completed).length > 0 && (
                   <div className="bg-white rounded-xl shadow-md p-6">
                     <div className="flex items-center gap-2 mb-4">
                       <TrendingUp className="w-5 h-5 text-purple-600" />
                       <h2 className="text-xl font-bold text-gray-900">Next Up</h2>
                     </div>
                     {(() => {
-                      const nextTask = tasks.filter(t => !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
+                      const nextTask = tasks.filter(t => !t.deleted && !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
                       return (
                         <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
                           <div className="flex items-start justify-between">
@@ -3037,7 +3042,7 @@ const fetchCanvasTasks = async () => {
                   </div>
                   <div className="text-center py-6">
                     <div className="text-5xl font-bold text-gray-900 mb-2">
-                      {tasks.filter(t => !t.completed && t.accumulatedTime > 0).length}
+                      {tasks.filter(t => !t.deleted && !t.completed && t.accumulatedTime > 0).length}
                     </div>
                     <p className="text-gray-600">tasks with partial time</p>
                   </div>
@@ -3127,7 +3132,7 @@ const fetchCanvasTasks = async () => {
                     {/* Task List */}
                     <div className="space-y-4">
                       {(() => {
-                        const incompleteTasks = tasks.filter(t => !t.completed);
+                        const incompleteTasks = tasks.filter(t => !t.deleted && !t.completed);
                         
                         if (incompleteTasks.length === 0) {
                           return (
@@ -4004,7 +4009,7 @@ const fetchCanvasTasks = async () => {
               if (toDayStr(t.dueDate) !== dayStr) return false;
               const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
               if (isHomeroom && !accountSetup.calendarShowHomeroom) return false;
-              const isDone = t.completed || !!t.submittedAt;
+              const isDone = t.completed || t.deleted || !!t.submittedAt;
               if (isDone && !accountSetup.calendarShowCompleted) return false;
               return true;
             }).sort((a, b) => {
