@@ -10,7 +10,7 @@ const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAppLoading, setIsAppLoading] = useState(false);
-  const [calendarTasks, setCalendarTasks] = useState([]);
+  // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
   const [token, setToken] = useState(null);
   const [user, setUser] = useState(null);
@@ -405,20 +405,7 @@ const PlanAssist = () => {
         generateSessions(loadedTasks, setupData.schedule || {}, deletedSessionIds, addedSessions);
       }
 
-      // Load calendar tasks with authToken
-      try {
-        const calResp = await fetch(`${API_URL}/tasks/calendar`, {
-          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }
-        });
-        if (calResp.ok) {
-          const calData = await calResp.json();
-          setCalendarTasks(Array.isArray(calData) ? calData : []);
-        } else {
-          console.error('Calendar fetch failed:', calResp.status, await calResp.text());
-        }
-      } catch (e) {
-        console.error('Failed to load calendar tasks:', e);
-      }
+
 
       const historyData = await fetch(`${API_URL}/learning`, {
         headers: { 'Authorization': `Bearer ${authToken}` }
@@ -595,13 +582,7 @@ const PlanAssist = () => {
       setNewTasks(loadedNewTasks);
       generateSessions(loadedTasks, accountSetup.schedule, deletedSessionIds, addedSessions);
 
-      // Load calendar tasks using apiCall (token is always available here)
-      try {
-        const calData = await apiCall('/tasks/calendar', 'GET');
-        setCalendarTasks(Array.isArray(calData) ? calData : []);
-      } catch (e) {
-        console.error('Failed to load calendar tasks:', e);
-      }
+
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
@@ -4058,7 +4039,7 @@ const fetchCanvasTasks = async () => {
           // Get tasks for a specific calendar day
           const getTasksForDay = (dayDate) => {
             const dayStr = `${dayDate.getFullYear()}-${String(dayDate.getMonth()+1).padStart(2,'0')}-${String(dayDate.getDate()).padStart(2,'0')}`;
-            return calendarTasks
+            return tasks
               .map(parseCalTask)
               .filter(t => {
                 if (!t.rawDate) return false;
