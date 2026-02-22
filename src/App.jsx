@@ -4065,8 +4065,16 @@ const fetchCanvasTasks = async () => {
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
+          // PRECISE DEBUG
+          const t0 = tasks[0] ? parseCalTask(tasks[0]) : null;
+          const day23 = days.find(d => d.getDate() === 23);
+          const day23Str = day23 ? `${day23.getFullYear()}-${String(day23.getMonth()+1).padStart(2,'0')}-${String(day23.getDate()).padStart(2,'0')}` : 'none';
+
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
+              <div style={{background:'#fef08a',border:'1px solid #ca8a04',padding:'6px',fontSize:'11px',fontFamily:'monospace',wordBreak:'break-all'}}>
+                tasks[0].deadlineDateRaw={tasks[0]?.deadlineDateRaw ?? 'MISSING'} | parsed rawDate={t0?.rawDate ?? 'null'} | day23Str={day23Str} | match={t0?.rawDate===day23Str?'YES':'NO'} | isDone={String(t0?.isDone)} | isHomeroom={String(t0?.isHomeroom)} | showCompleted={String(accountSetup.calendarShowCompleted)}
+              </div>
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
