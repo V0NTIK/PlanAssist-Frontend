@@ -342,6 +342,7 @@ const PlanAssist = () => {
             accumulatedTime: t.accumulated_time || 0,
             priorityOrder: t.priority_order,
             completed: t.completed,
+            deleted: t.deleted || false,
             submittedAt: t.submitted_at || null,
             deadlineDateRaw: t.deadline_date
               ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
@@ -531,6 +532,7 @@ const PlanAssist = () => {
           accumulatedTime: t.accumulated_time || 0,
           priorityOrder: t.priority_order,
           completed: t.completed,
+          deleted: t.deleted || false,
           submittedAt: t.submitted_at || null,
           deadlineDateRaw: t.deadline_date
             ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
@@ -4107,7 +4109,7 @@ const fetchCanvasTasks = async () => {
                             const displayTitle = task.segment
                               ? `${(task.title||'').replace(/\s*\[[^\]]+\]\s*/,'')} – ${task.segment}`
                               : (task.title||'').replace(/\s*\[[^\]]+\]\s*/,'');
-                            const isDone = task.completed || !!task.submittedAt;
+                            const isDone = task.completed || task.deleted || !!task.submittedAt;
                             const isExpanded = calendarExpandedId === task.id;
 
                             return (
