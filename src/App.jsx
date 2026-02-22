@@ -519,7 +519,11 @@ const PlanAssist = () => {
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
           priorityOrder: t.priority_order,
-          completed: t.completed
+          completed: t.completed,
+          submittedAt: t.submitted_at || null,
+          deadlineDateRaw: t.deadline_date
+            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+            : null
         };
       });
       
@@ -574,7 +578,11 @@ const PlanAssist = () => {
           userEstimate: t.user_estimated_time,
           accumulatedTime: t.accumulated_time || 0,
           priorityOrder: t.priority_order,
-          completed: t.completed
+          completed: t.completed,
+          submittedAt: t.submitted_at || null,
+          deadlineDateRaw: t.deadline_date
+            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+            : null
         };
       });
       
@@ -4010,29 +4018,12 @@ const fetchCanvasTasks = async () => {
 
           // Parse calendar task into usable shape
           const parseCalTask = (t) => {
-            let dueDate = null;
-            let hasTime = false;
-            // Extract the date string - pg DATE returns "YYYY-MM-DD" already
-            const rawDate = t.deadline_date
-              ? (typeof t.deadline_date === 'string'
-                  ? t.deadline_date.split('T')[0]
-                  : new Date(t.deadline_date).toISOString().split('T')[0])
-              : null;
-
-            if (rawDate) {
-              if (t.deadline_time) {
-                // deadline_time is stored as UTC - append Z so JS parses it correctly
-                dueDate = new Date(`${rawDate}T${t.deadline_time}Z`);
-                hasTime = true;
-              } else {
-                // No specific time - treat as end of day in UTC
-                dueDate = new Date(`${rawDate}T23:59:59Z`);
-                hasTime = false;
-              }
-            }
-            const isDone = t.completed || !!t.submitted_at;
+            const dueDate = t.dueDate || null;
+            const hasTime = t.hasSpecificTime || false;
+            // Use the stored raw date string for reliable day-matching (no timezone drift)
+            const rawDate = t.deadlineDateRaw || null;
+            const isDone = t.completed || !!t.submittedAt;
             const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
-            // Store rawDate for reliable day-matching (avoids timezone-shifted getDate())
             return { ...t, dueDate, hasTime, isDone, isHomeroom, rawDate };
           };
 
