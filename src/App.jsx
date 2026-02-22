@@ -4015,21 +4015,28 @@ const fetchCanvasTasks = async () => {
           const parseCalTask = (t) => {
             let dueDate = null;
             let hasTime = false;
-            if (t.deadline_date) {
-              // deadline_date from PostgreSQL comes as full ISO string e.g. "2026-02-27T00:00:00.000Z"
-              // Extract just the date part before concatenating time
-              const rawDate = typeof t.deadline_date === 'string'
-                ? t.deadline_date.split('T')[0]
-                : new Date(t.deadline_date).toISOString().split('T')[0];
-              const localStr = t.deadline_time
-                ? `${rawDate}T${t.deadline_time}`
-                : `${rawDate}T23:59:59`;
-              dueDate = new Date(localStr);
-              hasTime = !!t.deadline_time;
+            // Extract the date string - pg DATE returns "YYYY-MM-DD" already
+            const rawDate = t.deadline_date
+              ? (typeof t.deadline_date === 'string'
+                  ? t.deadline_date.split('T')[0]
+                  : new Date(t.deadline_date).toISOString().split('T')[0])
+              : null;
+
+            if (rawDate) {
+              if (t.deadline_time) {
+                // deadline_time is stored as UTC - append Z so JS parses it correctly
+                dueDate = new Date(`${rawDate}T${t.deadline_time}Z`);
+                hasTime = true;
+              } else {
+                // No specific time - treat as end of day in UTC
+                dueDate = new Date(`${rawDate}T23:59:59Z`);
+                hasTime = false;
+              }
             }
             const isDone = t.completed || !!t.submitted_at;
             const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
-            return { ...t, dueDate, hasTime, isDone, isHomeroom };
+            // Store rawDate for reliable day-matching (avoids timezone-shifted getDate())
+            return { ...t, dueDate, hasTime, isDone, isHomeroom, rawDate };
           };
 
           // Get tasks for a specific calendar day
@@ -4038,9 +4045,9 @@ const fetchCanvasTasks = async () => {
             return calendarTasks
               .map(parseCalTask)
               .filter(t => {
-                if (!t.dueDate) return false;
-                const tStr = `${t.dueDate.getFullYear()}-${String(t.dueDate.getMonth()+1).padStart(2,'0')}-${String(t.dueDate.getDate()).padStart(2,'0')}`;
-                if (tStr !== dayStr) return false;
+                if (!t.rawDate) return false;
+                // Compare rawDate strings directly - avoids timezone-shifted getDate() bugs
+                if (t.rawDate !== dayStr) return false;
                 if (t.isHomeroom && !accountSetup.calendarShowHomeroom) return false;
                 if (t.isDone && !accountSetup.calendarShowCompleted) return false;
                 return true;
