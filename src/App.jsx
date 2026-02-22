@@ -4016,9 +4016,14 @@ const fetchCanvasTasks = async () => {
             let dueDate = null;
             let hasTime = false;
             if (t.deadline_date) {
+              // deadline_date from PostgreSQL comes as full ISO string e.g. "2026-02-27T00:00:00.000Z"
+              // Extract just the date part before concatenating time
+              const rawDate = typeof t.deadline_date === 'string'
+                ? t.deadline_date.split('T')[0]
+                : new Date(t.deadline_date).toISOString().split('T')[0];
               const localStr = t.deadline_time
-                ? `${t.deadline_date}T${t.deadline_time}`
-                : `${t.deadline_date}T23:59:59`;
+                ? `${rawDate}T${t.deadline_time}`
+                : `${rawDate}T23:59:59`;
               dueDate = new Date(localStr);
               hasTime = !!t.deadline_time;
             }
