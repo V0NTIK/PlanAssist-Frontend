@@ -3995,11 +3995,13 @@ const fetchCanvasTasks = async () => {
             `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
           // Get tasks for a specific day
+          // Uses dueDate local date — same conversion the Task List uses, so calendar
+          // and task list always agree on which day a task belongs to.
           const getTasksForDay = (dayDate) => {
             const dayStr = toDayStr(dayDate);
             return tasks.filter(t => {
-              if (!t.deadlineDateRaw) return false;
-              if (t.deadlineDateRaw !== dayStr) return false;
+              if (!t.dueDate) return false;
+              if (toDayStr(t.dueDate) !== dayStr) return false;
               const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
               if (isHomeroom && !accountSetup.calendarShowHomeroom) return false;
               const isDone = t.completed || !!t.submittedAt;
@@ -4039,11 +4041,6 @@ const fetchCanvasTasks = async () => {
           const priorityMap = {};
           tasks.forEach(t => { if (t.priorityOrder) priorityMap[t.id] = t.priorityOrder; });
 
-          // Debug: log to console so we can see what's happening
-          console.log('[Calendar] tasks.length:', tasks.length,
-            '| sample deadlineDateRaw:', tasks[0]?.deadlineDateRaw,
-            '| calendarShowHomeroom:', accountSetup.calendarShowHomeroom,
-            '| Feb24 tasks:', tasks.filter(t => t.deadlineDateRaw === '2026-02-24').length);
 
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
