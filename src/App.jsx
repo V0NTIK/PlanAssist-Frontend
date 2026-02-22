@@ -396,7 +396,11 @@ const PlanAssist = () => {
             userEstimate: t.user_estimated_time,
             accumulatedTime: t.accumulated_time || 0,
             priorityOrder: t.priority_order,
-            completed: t.completed
+            completed: t.completed,
+            submittedAt: t.submitted_at || null,
+            deadlineDateRaw: t.deadline_date
+              ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+              : null
           };
         });
         
@@ -4061,14 +4065,8 @@ const fetchCanvasTasks = async () => {
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
-          const dbg0 = tasks[0] ? {id:tasks[0].id,title:(tasks[0].title||'').slice(0,20),dueDate:tasks[0].dueDate?.toISOString?.(),deadlineDateRaw:tasks[0].deadlineDateRaw,completed:tasks[0].completed} : null;
-          const dayStrs = days.map(d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
-
           return (
             <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
-              <div style={{background:'#fef08a',border:'1px solid #ca8a04',padding:'6px',fontSize:'11px',fontFamily:'monospace',wordBreak:'break-all'}}>
-                tasks.length={tasks.length} | days={JSON.stringify(dayStrs)} | tasks[0]={JSON.stringify(dbg0)}
-              </div>
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
