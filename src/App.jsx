@@ -4006,19 +4006,7 @@ const fetchCanvasTasks = async () => {
           // and task list always agree on which day a task belongs to.
           const getTasksForDay = (dayDate) => {
             const dayStr = toDayStr(dayDate);
-            // Debug: log Reinforcement Activity status on Mon Feb 23
-            if (dayStr === '2026-02-23') {
-              const ra = tasks.find(t => t.title && t.title.includes('Reinforcement'));
-              if (ra) {
-                const raDay = ra.dueDate ? toDayStr(ra.dueDate) : 'NO_DUEDATE';
-                console.log('[Cal Debug] Reinforcement:', {id:ra.id, completed:ra.completed, deleted:ra.deleted, dueDate:ra.dueDate, dayStr:raDay, calendarShowCompleted:accountSetup.calendarShowCompleted});
-              } else {
-                const taskIds = tasks.map(t => t.id).sort((a,b)=>a-b);
-                console.log('[Cal Debug] Reinforcement NOT FOUND. IDs in tasks state:', taskIds.join(','));
-                console.log('[Cal Debug] tasks.length=', tasks.length, '| newTasks.length=', newTasks.length);
-              }
-            }
-            return tasks.filter(t => {
+            return [...tasks, ...newTasks].filter(t => {
               if (!t.dueDate) return false;
               if (toDayStr(t.dueDate) !== dayStr) return false;
               const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
