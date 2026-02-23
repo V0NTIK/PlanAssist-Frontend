@@ -1513,7 +1513,7 @@ const fetchCanvasTasks = async () => {
           estimatedTime: task.estimatedTime,
           userEstimate: task.userEstimate,
           accumulatedTime: task.accumulatedTime,
-          priorityOrder: task.priorityOrder,
+          priorityOrder: task.completed ? null : task.priorityOrder,
           completed: task.completed
         };
       });
