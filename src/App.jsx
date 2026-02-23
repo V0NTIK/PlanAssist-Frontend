@@ -2252,6 +2252,7 @@ const fetchCanvasTasks = async () => {
   };
   
   const startSession = (session) => {
+    endSessionCalledRef.current = false; // reset guard for new session
     setCurrentSession(session);
     setCurrentTaskIndex(0);
     setSessionTime(3600);
@@ -2468,6 +2469,7 @@ const fetchCanvasTasks = async () => {
         const remaining = timerStartSessionRef.current - elapsed;
         if (remaining <= 0) {
           setSessionTime(0);
+          endSession(true, null, null, 0); // pass actualRemaining=0 to avoid stale closure
         } else {
           setSessionTime(remaining);
         }
@@ -2487,7 +2489,7 @@ const fetchCanvasTasks = async () => {
         const elapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
         const remaining = Math.max(0, timerStartSessionRef.current - elapsed);
         setSessionTime(remaining);
-        if (remaining === 0) endSession(true);
+        if (remaining === 0) endSession(true, null, null, 0);
       }
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
@@ -2550,14 +2552,20 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  const endSession = async (natural = false, justCompletedTaskId = null, justCompletedTaskData = null) => {
+  const endSessionCalledRef = React.useRef(false);
+  const endSession = async (natural = false, justCompletedTaskId = null, justCompletedTaskData = null, actualRemaining = null) => {
+    // Prevent double-call when both interval and useEffect fire at timer=0
+    if (natural && endSessionCalledRef.current) return;
+    if (natural) endSessionCalledRef.current = true;
     if (!natural) {
       setEndingSession(true);
     }
   
     try {
       const currentTask = currentSession.tasks[currentTaskIndex];
-      const currentTaskTimeSpent = currentTask ? Math.round((taskStartTime - sessionTime) / 60) : 0;
+      // Use actualRemaining if provided (avoids stale sessionTime closure in wall-clock timer)
+      const effectiveRemaining = actualRemaining !== null ? actualRemaining : sessionTime;
+      const currentTaskTimeSpent = currentTask ? Math.round((taskStartTime - effectiveRemaining) / 60) : 0;
     
       // ✅ Save partial time if any time spent on current task (non-blocking)
       // BUT: Don't save if this task was just completed OR is in session completions
