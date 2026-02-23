@@ -2411,7 +2411,7 @@ const fetchCanvasTasks = async () => {
       if (newAccumulatedTime > 0) {
         partialTimesToSave[currentTask.id] = newAccumulatedTime;
       }
-      await apiCall('/sessions/saved-state', 'POST', {
+      const savedStatePayload = {
         sessionId: currentSession.id,
         day: currentSession.day,
         period: currentSession.period,
@@ -2419,8 +2419,13 @@ const fetchCanvasTasks = async () => {
         currentTaskIndex: currentTaskIndex,
         taskStartTime: taskStartTime,
         completedTaskIds: sessionCompletions.map(c => c.task.id),
-        partialTaskTimes: partialTimesToSave
-      });
+        partialTaskTimes: partialTimesToSave,
+        savedAt: new Date().toISOString()
+      };
+      await apiCall('/sessions/saved-state', 'POST', savedStatePayload);
+
+      // Update React state immediately so Sessions page shows "Resume" without reload
+      setSavedSessionState(savedStatePayload);
     
       // Show summary
       const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
