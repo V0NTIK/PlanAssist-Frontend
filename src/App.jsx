@@ -1472,10 +1472,11 @@ const fetchCanvasTasks = async () => {
           throw new Error(`Task "${task.title}" (ID: ${task.id}) has an invalid date. Please reload the page and try again.`);
         }
         
-        // Extract date and time from the Date object
-        const year = task.dueDate.getFullYear();
-        const month = String(task.dueDate.getMonth() + 1).padStart(2, '0');
-        const day = String(task.dueDate.getDate()).padStart(2, '0');
+        // Extract date and time from the Date object — always use UTC methods
+        // so deadlineDate and deadlineTime are a consistent UTC pair matching DB storage
+        const year = task.dueDate.getUTCFullYear();
+        const month = String(task.dueDate.getUTCMonth() + 1).padStart(2, '0');
+        const day = String(task.dueDate.getUTCDate()).padStart(2, '0');
         const deadlineDate = `${year}-${month}-${day}`;
         
         // Validate the resulting date string
