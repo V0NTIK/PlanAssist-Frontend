@@ -708,10 +708,14 @@ const PlanAssist = () => {
       savedCanvasTokenRef.current = accountSetup.canvasApiToken || '';
       
       setCurrentPage('hub');
-      // Show tutorial for new users after setup
+      // Show tutorial only once for brand new users, then mark them as not new
       if (user?.isNewUser) {
         setTutorialStep(0);
         setShowTutorial(true);
+        // Mark user as no longer new so tutorial doesn't re-trigger on next save
+        const updatedUserWithFlag = { ...user, grade: accountSetup.grade, isNewUser: false };
+        setUser(updatedUserWithFlag);
+        localStorage.setItem('user', JSON.stringify(updatedUserWithFlag));
       }
     } catch (error) {
       alert('Failed to save settings: ' + error.message);
@@ -4008,7 +4012,7 @@ const fetchCanvasTasks = async () => {
           // and task list always agree on which day a task belongs to.
           const getTasksForDay = (dayDate) => {
             const dayStr = toDayStr(dayDate);
-            return [...tasks, ...newTasks].filter(t => {
+            return [...tasks, ...newTasks.filter(t => !t.deleted)].filter(t => {
               if (!t.dueDate) return false;
               if (toDayStr(t.dueDate) !== dayStr) return false;
               const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
