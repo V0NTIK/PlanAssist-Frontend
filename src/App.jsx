@@ -38,6 +38,8 @@ const PlanAssist = () => {
   const [currentSession, setCurrentSession] = useState(null);
   const [sessionTime, setSessionTime] = useState(3600);
   const [isTimerRunning, setIsTimerRunning] = useState(false);
+  const timerStartWallRef = React.useRef(null); // wall-clock ms when timer last started
+  const timerStartSessionRef = React.useRef(3600); // sessionTime value when timer last started
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [taskStartTime, setTaskStartTime] = useState(3600);
   const [sessionCompletions, setSessionCompletions] = useState([]);
@@ -2453,15 +2455,44 @@ const fetchCanvasTasks = async () => {
     }
   };
 
+  // Wall-clock-based timer: immune to tab throttling.
+  // Records real Date.now() when started; each tick computes true elapsed time.
   useEffect(() => {
-    let interval;
     if (isTimerRunning && sessionTime > 0) {
-      interval = setInterval(() => setSessionTime(prev => prev - 1), 1000);
+      // Record wall-clock start point whenever the timer (re)starts
+      timerStartWallRef.current = Date.now();
+      timerStartSessionRef.current = sessionTime;
+
+      const interval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+        const remaining = timerStartSessionRef.current - elapsed;
+        if (remaining <= 0) {
+          setSessionTime(0);
+        } else {
+          setSessionTime(remaining);
+        }
+      }, 500); // poll every 500ms for responsiveness; wall-clock keeps it accurate
+
+      return () => clearInterval(interval);
     } else if (sessionTime === 0 && isTimerRunning) {
       endSession(true);
     }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, sessionTime]);
+  }, [isTimerRunning]); // only re-run when timer starts/stops, NOT on every tick
+
+  // When tab becomes visible again after being hidden, snap sessionTime to
+  // the true wall-clock-based remaining time so any throttle gap is corrected instantly.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isTimerRunning && timerStartWallRef.current !== null) {
+        const elapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+        const remaining = Math.max(0, timerStartSessionRef.current - elapsed);
+        setSessionTime(remaining);
+        if (remaining === 0) endSession(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isTimerRunning]);
 
   const completeTask = async () => {
     if (!currentSession) return;
