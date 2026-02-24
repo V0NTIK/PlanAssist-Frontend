@@ -2379,13 +2379,6 @@ const fetchCanvasTasks = async () => {
       };
       await apiCall('/sessions/saved-state', 'POST', savedStatePayload);
 
-      // Also persist partial_task_times to the user_sessions DB record
-      if (currentSession.dbId) {
-        await apiCall(`/sessions/${currentSession.dbId}`, 'PATCH', {
-          partial_task_times: partialTimesToSave
-        });
-      }
-
       // Update React state immediately so Sessions page shows "Resume" without reload
       setSavedSessionState(savedStatePayload);
     
