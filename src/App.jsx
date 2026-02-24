@@ -416,7 +416,7 @@ const PlanAssist = () => {
         const activeTasks = loadedTasks.filter(t => !t.deleted);
         setTasks(loadedTasks); // full set for calendar
         setNewTasks(loadedNewTasks);
-        loadTodaySessions(activeTasks);
+        loadTodaySessions(activeTasks, authToken);
       }
 
 
@@ -605,7 +605,7 @@ const PlanAssist = () => {
       const activeTasks = loadedTasks.filter(t => !t.deleted);
       setTasks(loadedTasks); // full set for calendar
       setNewTasks(loadedNewTasks);
-      loadTodaySessions(activeTasks);
+      loadTodaySessions(activeTasks, localStorage.getItem('token'));
 
 
     } catch (error) {
@@ -1007,12 +1007,22 @@ const fetchCanvasTasks = async () => {
 
   const allTasksRef = React.useRef([]);
 
-  const loadTodaySessions = async (taskList) => {
+  const loadTodaySessions = async (taskList, authToken = null) => {
     setSessionsLoading(true);
     const taskSource = taskList || tasks;
     allTasksRef.current = taskSource;
     try {
-      const data = await apiCall('/sessions/today', 'GET');
+      // Use provided authToken (for calls during initial load before token state is set)
+      // or fall back to apiCall which reads from token state
+      let data;
+      if (authToken) {
+        const res = await fetch(`${API_URL}/sessions/today`, {
+          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }
+        });
+        data = await res.json();
+      } else {
+        data = await apiCall('/sessions/today', 'GET');
+      }
       const rawSessions = data.sessions || [];
 
       const hydratedSessions = rawSessions
