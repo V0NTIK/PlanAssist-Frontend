@@ -4200,11 +4200,14 @@ const fetchCanvasTasks = async () => {
                 <div className="mt-4 flex flex-wrap gap-4">
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">
-                      {courses.filter(c => c.current_score).length > 0
-                        ? (courses.filter(c => c.current_score).reduce((sum, c) => sum + parseFloat(c.current_score), 0) / courses.filter(c => c.current_score).length).toFixed(1) + '%'
-                        : 'N/A'}
+                      {(() => {
+                        const scored = courses.filter(c => c.current_period_score ?? c.current_score);
+                        if (scored.length === 0) return 'N/A';
+                        const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score ?? c.current_score), 0) / scored.length;
+                        return avg.toFixed(1) + '%';
+                      })()}
                     </div>
-                    <div className="text-xs text-blue-100">Overall Average</div>
+                    <div className="text-xs text-blue-100">Period Average</div>
                   </div>
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">{courses.length}</div>
@@ -4227,18 +4230,23 @@ const fetchCanvasTasks = async () => {
                 {/* Grade cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {[...courses].sort((a, b) => {
-                    const aScore = a.current_score != null ? parseFloat(a.current_score) : null;
-                    const bScore = b.current_score != null ? parseFloat(b.current_score) : null;
-                    if (aScore === null && bScore === null) return 0;
-                    if (aScore === null) return 1;  // no grade → bottom
-                    if (bScore === null) return -1;
-                    return aScore - bScore; // lowest score first
+                    const aScore = a.current_period_score ?? a.current_score;
+                    const bScore = b.current_period_score ?? b.current_score;
+                    const aNum = aScore != null ? parseFloat(aScore) : null;
+                    const bNum = bScore != null ? parseFloat(bScore) : null;
+                    if (aNum === null && bNum === null) return 0;
+                    if (aNum === null) return 1;
+                    if (bNum === null) return -1;
+                    return aNum - bNum; // lowest score first
                   }).map((course, index) => {
                     const avgData = courseAverages[course.course_id];
                     const classAverage = avgData?.averageScore ?? null;
                     const studentCount = avgData?.studentCount ?? 0;
-                    const hasScore = course.current_score != null && parseFloat(course.current_score) > 0;
-                    const userScore = hasScore ? parseFloat(course.current_score) : null;
+                    // Prefer current grading period score; fall back to all-year score
+                    const displayScore = course.current_period_score ?? course.current_score ?? null;
+                    const displayGrade = course.current_period_grade ?? course.current_grade ?? null;
+                    const hasScore = displayScore != null && parseFloat(displayScore) > 0;
+                    const userScore = hasScore ? parseFloat(displayScore) : null;
                     const difference = (userScore !== null && classAverage !== null && studentCount > 1)
                       ? userScore - classAverage
                       : null;
@@ -4268,9 +4276,9 @@ const fetchCanvasTasks = async () => {
                           </div>
                           <div className="text-right flex-shrink-0">
                             <div className={`text-4xl font-black ${perfColor}`}>
-                              {course.current_grade || (hasScore ? `${userScore.toFixed(0)}%` : '—')}
+                              {displayGrade || (hasScore ? `${userScore.toFixed(0)}%` : '—')}
                             </div>
-                            {hasScore && course.current_grade && (
+                            {hasScore && displayGrade && (
                               <div className="text-sm text-gray-500 font-semibold">{userScore.toFixed(1)}%</div>
                             )}
                           </div>
@@ -4331,7 +4339,12 @@ const fetchCanvasTasks = async () => {
                               <PerfIcon className="w-4 h-4" />
                               <span>{perfLabel}</span>
                             </div>
-                            {course.final_grade && course.final_grade !== course.current_grade && (
+                            {course.grading_period_title && (
+                              <div className="text-xs text-gray-400">
+                                {course.grading_period_title}
+                              </div>
+                            )}
+                            {!course.grading_period_title && course.final_grade && course.final_grade !== displayGrade && (
                               <div className="text-xs text-gray-400">
                                 Final: <span className="font-semibold text-gray-600">{course.final_grade}</span>
                                 {course.final_score && ` (${parseFloat(course.final_score).toFixed(1)}%)`}
