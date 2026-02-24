@@ -699,9 +699,10 @@ const PlanAssist = () => {
       setUser(updatedUser);
       localStorage.setItem('user', JSON.stringify(updatedUser));
       
-      // Only sync if the Canvas API Token was actually changed (avoids unnecessary API usage)
+      // Always sync on first save (new user). For returning users, only sync if token changed.
       const tokenChanged = accountSetup.canvasApiToken !== savedCanvasTokenRef.current;
-      if (accountSetup.canvasApiToken && tokenChanged) {
+      const isFirstSave = user?.isNewUser;
+      if (accountSetup.canvasApiToken && (tokenChanged || isFirstSave)) {
         await fetchCanvasTasks();
       }
       // Update the ref to reflect the newly saved token
