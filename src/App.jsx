@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -34,35 +34,38 @@ const PlanAssist = () => {
     calendarShowCompleted: true
   });
   const [tasks, setTasks] = useState([]);
-  const [sessionTasks, setSessionTasks] = useState([]); // tasks shown on Sessions page
-  const [currentSessionTask, setCurrentSessionTask] = useState(null); // task being worked on
-  const [sessionElapsed, setSessionElapsed] = useState(0); // seconds elapsed this session (counts up)
+  const [sessionTasks, setSessionTasks] = useState([]);
+  const [currentSessionTask, setCurrentSessionTask] = useState(null);
+  const [sessionElapsed, setSessionElapsed] = useState(0); // seconds, counts up
   const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const timerStartWallRef = React.useRef(null); // wall clock ms when current run started
-  const timerBaseElapsedRef = React.useRef(0);  // accumulated seconds before current run
+  const timerStartWallRef = React.useRef(null);
+  const timerBaseElapsedRef = React.useRef(0); // seconds accumulated before current run
+  const [showSessionComplete, setShowSessionComplete] = useState(false);
   const [completionHistory, setCompletionHistory] = useState([]);
+
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [showSessionComplete, setShowSessionComplete] = useState(false);
   const [showSplitTask, setShowSplitTask] = useState(null);
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
+  const [showAddSessionModal, setShowAddSessionModal] = useState(false);
+  const [addSessionForm, setAddSessionForm] = useState({ period: '2' });
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [draggedTask, setDraggedTask] = useState(null);
   const [dragOverTask, setDragOverTask] = useState(null);
-  const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
-  const [tempTimeValue, setTempTimeValue] = useState('');
   const [newTasks, setNewTasks] = useState([]);
   const [showTaskDescription, setShowTaskDescription] = useState(null);
   const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
   const savedCanvasTokenRef = React.useRef(''); // tracks last-saved token to avoid unnecessary syncs
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
+  const [tempTimeValue, setTempTimeValue] = useState('');
   const [markingComplete, setMarkingComplete] = useState(false);
   const [savingSession, setSavingSession] = useState(false);
   const [endingSession, setEndingSession] = useState(false);
@@ -88,6 +91,30 @@ const PlanAssist = () => {
   const [whiteNoiseVolume, setWhiteNoiseVolume] = useState(0.5);
   const [isWhiteNoisePlaying, setIsWhiteNoisePlaying] = useState(false);
   
+  // ── Count-up wall-clock timer for sessions ─────────────────────────────
+  useEffect(() => {
+    if (!isTimerRunning) return;
+    const baseAtStart = timerBaseElapsedRef.current;
+    const wallAtStart = Date.now();
+    timerStartWallRef.current = wallAtStart;
+    const interval = setInterval(() => {
+      const wallElapsed = Math.floor((Date.now() - wallAtStart) / 1000);
+      setSessionElapsed(baseAtStart + wallElapsed);
+    }, 500);
+    return () => clearInterval(interval);
+  }, [isTimerRunning]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isTimerRunning && timerStartWallRef.current !== null) {
+        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+        setSessionElapsed(timerBaseElapsedRef.current + wallElapsed);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isTimerRunning]);
+
   // Pomodoro timer state
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60); // 25 minutes in seconds
   const [pomodoroMode, setPomodoroMode] = useState('work'); // 'work', 'shortBreak', 'longBreak'
@@ -409,7 +436,7 @@ const PlanAssist = () => {
         const activeTasks = loadedTasks.filter(t => !t.deleted);
         setTasks(loadedTasks); // full set for calendar
         setNewTasks(loadedNewTasks);
-        // Session tasks loaded separately when user navigates to Sessions page
+        // Session tasks loaded on demand when user navigates to Sessions page
       }
 
 
@@ -435,7 +462,7 @@ const PlanAssist = () => {
       });
       setPartialTaskTimes(partialTimes);
 
-      // Session state is stored on tasks (session_active, accumulated_time)
+      // Session state stored on tasks (session_active, accumulated_time)
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -973,18 +1000,14 @@ const fetchCanvasTasks = async () => {
 
   // ── SESSION FUNCTIONS (DB-backed, today-only) ──────────────────────────────
 
-  // ============================================================================
-  // SESSIONS v2 — single-task, count-up timer
-  // ============================================================================
+  // ── Sessions v2: single-task count-up timer ─────────────────────────────
 
   const loadSessionTasks = async () => {
     setSessionsLoading(true);
     try {
       const data = await apiCall('/sessions/tasks', 'GET');
-      // Hydrate with full task info from local tasks state
       const hydratedTasks = data.map(t => {
-        // Find the full local task for dueDate etc (may not exist if tasks not yet loaded)
-        const localTask = tasks.find(lt => lt.id === t.id);
+        const local = tasks.find(lt => lt.id === t.id);
         return {
           id: t.id,
           title: t.title,
@@ -994,10 +1017,10 @@ const fetchCanvasTasks = async () => {
           deadlineDateRaw: t.deadline_date
             ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
             : null,
-          dueDate: localTask?.dueDate || null,
+          dueDate: local?.dueDate || null,
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
-          accumulatedTime: t.accumulated_time || 0,
+          accumulatedTime: t.accumulated_time || 0, // stored in seconds
           sessionActive: t.session_active || false,
           priorityOrder: t.priority_order,
         };
@@ -1010,18 +1033,15 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  // Start a session for a specific task
   const startTaskSession = async (task) => {
     try {
       await apiCall(`/sessions/start/${task.id}`, 'POST');
-      // Update local state so button flips to Resume immediately
       setSessionTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, sessionActive: true } : { ...t, sessionActive: false }
       ));
-      // Enter session screen
-      timerBaseElapsedRef.current = task.accumulatedTime * 60; // convert minutes → seconds
+      timerBaseElapsedRef.current = task.accumulatedTime; // seconds
       timerStartWallRef.current = Date.now();
-      setSessionElapsed(task.accumulatedTime * 60);
+      setSessionElapsed(task.accumulatedTime);
       setCurrentSessionTask(task);
       setIsTimerRunning(true);
       setCurrentPage('session-active');
@@ -1031,22 +1051,16 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  // Save & Exit — pause timer, persist accumulated time
   const pauseTaskSession = async () => {
     if (!currentSessionTask) return;
     setSavingSession(true);
     try {
-      const totalSeconds = sessionElapsed;
-      const totalMinutes = Math.round(totalSeconds / 60);
       await apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
-        accumulatedTime: totalMinutes
+        accumulatedTime: sessionElapsed // seconds
       });
       setIsTimerRunning(false);
-      // Update local task state with new accumulated time
-      const updatedTask = { ...currentSessionTask, accumulatedTime: totalMinutes, sessionActive: false };
-      setSessionTasks(prev => prev.map(t =>
-        t.id === currentSessionTask.id ? updatedTask : t
-      ));
+      const updated = { ...currentSessionTask, accumulatedTime: sessionElapsed, sessionActive: false };
+      setSessionTasks(prev => prev.map(t => t.id === currentSessionTask.id ? updated : t));
       setCurrentSessionTask(null);
       setCurrentPage('sessions');
     } catch (err) {
@@ -1057,24 +1071,19 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-  // Mark the current task complete — session ends automatically
   const completeTaskSession = async () => {
     if (!currentSessionTask || markingComplete) return;
     setMarkingComplete(true);
     try {
-      const totalSeconds = sessionElapsed;
-      const totalMinutes = Math.round(totalSeconds / 60);
       await apiCall(`/tasks/${currentSessionTask.id}/complete`, 'POST', {
-        timeSpent: totalMinutes
+        timeSpent: Math.round(sessionElapsed / 60) // tasks_completed expects minutes
       });
       setIsTimerRunning(false);
-      // Remove from session tasks list
       setSessionTasks(prev => prev.filter(t => t.id !== currentSessionTask.id));
-      // Also remove from main tasks list
       setTasks(prev => prev.map(t =>
         t.id === currentSessionTask.id ? { ...t, completed: true, deleted: true } : t
       ));
-      setShowSessionComplete({ task: currentSessionTask, timeSpent: totalMinutes });
+      setShowSessionComplete({ task: currentSessionTask, timeSpent: sessionElapsed }); // seconds
       setCurrentSessionTask(null);
     } catch (err) {
       console.error('Failed to complete task:', err);
@@ -1084,158 +1093,6 @@ const fetchCanvasTasks = async () => {
     }
   };
 
-
-  // ── Time estimate inline editing ─────────────────────────────────────────
-  const handleStartEditTime = (taskId, currentTime) => {
-    setEditingTimeTaskId(taskId);
-    setTempTimeValue(String(currentTime));
-  };
-
-  const handleTimeInputChange = (e) => {
-    setTempTimeValue(e.target.value);
-  };
-
-  const handleSaveTimeEstimate = async (taskId) => {
-    const parsed = parseInt(tempTimeValue);
-    if (!isNaN(parsed) && parsed > 0) {
-      try {
-        await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { userEstimate: parsed });
-        setTasks(prev => prev.map(t =>
-          t.id === taskId ? { ...t, userEstimate: parsed } : t
-        ));
-        setHasUnsavedChanges(true);
-      } catch (err) {
-        console.error('Failed to save estimate:', err);
-      }
-    }
-    setEditingTimeTaskId(null);
-    setTempTimeValue('');
-  };
-
-  const handleCancelEditTime = () => {
-    setEditingTimeTaskId(null);
-    setTempTimeValue('');
-  };
-
-  // ── New-tasks sidebar helpers ──────────────────────────────────────────────
-  const closeSidebarWithoutSaving = () => {
-    setNewTasksSidebarOpen(false);
-  };
-
-  const clearAllNewTasks = async () => {
-    try {
-      const taskIds = newTasks.map(t => t.id);
-      // Move all new tasks to the main list at end of priority order
-      const maxPriority = Math.max(0, ...tasks.filter(t => !t.deleted && !t.completed && t.priorityOrder !== null).map(t => t.priorityOrder || 0));
-      const updatedNewTasks = newTasks.map((t, i) => ({ ...t, priorityOrder: maxPriority + i + 1 }));
-      setTasks(prev => [...prev, ...updatedNewTasks]);
-      setNewTasks([]);
-      setNewTasksSidebarOpen(false);
-      setHasUnsavedChanges(true);
-      // Clear is_new flags on server
-      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
-    } catch (err) {
-      console.error('Failed to clear new tasks:', err);
-    }
-  };
-
-  const handleAcceptNewTask = (newTask, insertBeforeTask = null) => {
-    // Move from newTasks into main tasks at the right position
-    const activeTasks = tasks
-      .filter(t => !t.deleted && !t.completed && t.priorityOrder !== null)
-      .sort((a, b) => (a.priorityOrder || 0) - (b.priorityOrder || 0));
-
-    let insertIdx = activeTasks.length; // default: append to end
-    if (insertBeforeTask) {
-      const idx = activeTasks.findIndex(t => t.id === insertBeforeTask.id);
-      if (idx !== -1) insertIdx = idx;
-    }
-
-    const withNew = [...activeTasks];
-    withNew.splice(insertIdx, 0, { ...newTask, priorityOrder: insertIdx + 1 });
-    const reordered = withNew.map((t, i) => ({ ...t, priorityOrder: i + 1 }));
-    const rest = tasks.filter(t => t.deleted || t.completed || t.priorityOrder === null);
-
-    setTasks([...reordered, ...rest]);
-    setNewTasks(prev => prev.filter(t => t.id !== newTask.id));
-    setHasUnsavedChanges(true);
-
-    // Clear is_new flag on server
-    apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [newTask.id] }).catch(console.error);
-  };
-
-  const handleIgnoreTask = async (taskId) => {
-    try {
-      await apiCall(`/tasks/${taskId}/ignore`, 'POST');
-      setNewTasks(prev => prev.filter(t => t.id !== taskId));
-    } catch (err) {
-      console.error('Failed to ignore task:', err);
-      alert('Failed to ignore task: ' + err.message);
-    }
-  };
-
-  // ── Drag-and-drop for Task List priority reordering ──────────────────────
-  const draggedTaskRef = React.useRef(null);
-  const dragOverTaskRef = React.useRef(null);
-
-  const handleDragStart = (e, task) => {
-    draggedTaskRef.current = task;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.setData('text/plain', task.id);
-  };
-
-  const handleDragOver = (e, task) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-    dragOverTaskRef.current = task;
-    setDragOverTask(task);
-  };
-
-  const handleDragEnd = async () => {
-    const dragged = draggedTaskRef.current;
-    const target = dragOverTaskRef.current;
-    draggedTaskRef.current = null;
-    dragOverTaskRef.current = null;
-    setDragOverTask(null);
-
-    if (!dragged || !target || dragged.id === target.id) return;
-
-    // Reorder tasks locally
-    const activeTasks = tasks.filter(t => !t.deleted && !t.completed && t.priorityOrder !== null)
-      .sort((a, b) => (a.priorityOrder || 0) - (b.priorityOrder || 0));
-    const rest = tasks.filter(t => t.deleted || t.completed || t.priorityOrder === null);
-
-    const draggedIdx = activeTasks.findIndex(t => t.id === dragged.id);
-    const targetIdx = activeTasks.findIndex(t => t.id === target.id);
-    if (draggedIdx === -1 || targetIdx === -1) return;
-
-    const reordered = [...activeTasks];
-    const [removed] = reordered.splice(draggedIdx, 1);
-    reordered.splice(targetIdx, 0, removed);
-
-    // Assign new priority orders
-    const updated = reordered.map((t, i) => ({ ...t, priorityOrder: i + 1 }));
-    setTasks([...updated, ...rest]);
-    setHasUnsavedChanges(true);
-
-    // Persist to server
-    try {
-      await apiCall('/tasks/reorder', 'POST', {
-        taskOrder: updated.map(t => t.id)
-      });
-    } catch (err) {
-      console.error('Failed to save reorder:', err);
-    }
-  };
-
-  // Handle drop from new-tasks sidebar onto priority list
-  const handleDrop = (e, targetTask) => {
-    e.preventDefault();
-    const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
-    const sidebarTask = newTasks.find(t => t.id === draggedId);
-    if (!sidebarTask) return; // was an internal reorder, already handled by handleDragEnd
-    handleAcceptNewTask(sidebarTask, targetTask);
-  };
 
   const handleSaveAndAdjustPlan = async () => {
     if (isSavingPlan) return;
@@ -1306,7 +1163,7 @@ const fetchCanvasTasks = async () => {
       
       // Reload tasks from server to get fresh data with correct IDs and priority order
       await loadTasks();
-      // Session tasks will reload next time user visits Sessions page
+      // Session tasks auto-refresh when user navigates to Sessions page
       
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
@@ -2034,6 +1891,7 @@ const fetchCanvasTasks = async () => {
     setWorkspaceTab(tab);
   };
   
+
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -3049,7 +2907,6 @@ const fetchCanvasTasks = async () => {
                 <RefreshCw className="w-5 h-5" />
               </button>
             </div>
-
             {sessionsLoading ? (
               <div className="flex items-center justify-center py-16">
                 <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
@@ -3058,7 +2915,7 @@ const fetchCanvasTasks = async () => {
               <div className="text-center py-16 text-gray-400">
                 <Play className="w-12 h-12 mx-auto mb-3 opacity-30" />
                 <p className="font-medium">No tasks to work on</p>
-                <p className="text-sm mt-1">All caught up! Add tasks via Canvas sync.</p>
+                <p className="text-sm mt-1">All caught up! Tasks sync from Canvas automatically.</p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -3071,42 +2928,31 @@ const fetchCanvasTasks = async () => {
                   return (
                     <div key={task.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:border-purple-200 transition-colors overflow-hidden">
                       <div className="flex items-center gap-4 p-4">
-                        {/* Class color bar */}
                         <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                        {/* Task info */}
                         <div className="flex-1 min-w-0">
                           <a href={task.url} target="_blank" rel="noopener noreferrer"
                             className="font-semibold text-gray-900 hover:text-purple-600 hover:underline text-sm line-clamp-1">
                             {cleanTaskTitle(task)}
                           </a>
                           <div className="flex items-center gap-3 mt-1 flex-wrap">
-                            <span className="text-xs text-gray-500 flex items-center gap-1">
-                              <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                              {task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}
+                            <span className="text-xs text-gray-500">{task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}</span>
+                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />Due {dueLabel}
                             </span>
                             <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
-                              Due {dueLabel}
-                            </span>
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {task.userEstimate || task.estimatedTime} min est.
+                              <Clock className="w-3 h-3" />{task.userEstimate || task.estimatedTime} min est.
                             </span>
                             {hasProgress && (
                               <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
-                                <Timer className="w-3 h-3" />
-                                {task.accumulatedTime} min logged
+                                <Timer className="w-3 h-3" />{Math.floor(task.accumulatedTime / 60)} min logged
                               </span>
                             )}
                           </div>
                         </div>
-                        {/* Start/Resume button */}
                         <button
                           onClick={() => startTaskSession(task)}
                           className={`flex-shrink-0 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-1.5 transition-colors ${
-                            hasProgress
-                              ? 'bg-blue-600 text-white hover:bg-blue-700'
-                              : 'bg-green-500 text-white hover:bg-green-600'
+                            hasProgress ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-green-500 text-white hover:bg-green-600'
                           }`}
                         >
                           <Play className="w-4 h-4" />
@@ -3131,7 +2977,7 @@ const fetchCanvasTasks = async () => {
                 <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
               </div>
               <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
-                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent * 60)}</div>
+                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
                 <div className="text-gray-500">Total time spent</div>
               </div>
               <button onClick={() => { setShowSessionComplete(false); setCurrentPage('sessions'); loadUserData(token); }}
@@ -3177,7 +3023,7 @@ const fetchCanvasTasks = async () => {
                   </button>
                 </div>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 mb-4">
+              <div className="bg-white rounded-xl shadow-md p-6">
                 <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
                   <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
                   {currentSessionTask.deadlineDateRaw && (
@@ -3186,7 +3032,9 @@ const fetchCanvasTasks = async () => {
                     </span>
                   )}
                   {currentSessionTask.accumulatedTime > 0 && (
-                    <span className="flex items-center gap-1 text-blue-600 font-medium"><Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime} min previously</span>
+                    <span className="flex items-center gap-1 text-blue-600 font-medium">
+                      <Timer className="w-4 h-4" />{Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
+                    </span>
                   )}
                 </div>
                 <button onClick={completeTaskSession} disabled={markingComplete}
@@ -3202,6 +3050,385 @@ const fetchCanvasTasks = async () => {
               </div>
             </div>
           )
+        )}
+
+                {currentPage === 'calendar' && (() => {
+          const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const today = new Date();
+
+          // Build 7-day window
+          const todayIdx = today.getDay();
+          const dayOffsets = accountSetup.calendarTodayCentered
+            ? [-3,-2,-1,0,1,2,3]
+            : Array.from({length:7}, (_,i) => i - todayIdx);
+
+          const days = dayOffsets.map(offset => {
+            const d = new Date(today);
+            d.setDate(today.getDate() + offset);
+            return d;
+          });
+
+          const isToday = (d) => d.toDateString() === today.toDateString();
+
+          // Build dayStr from a Date object using LOCAL date parts
+          const toDayStr = (d) =>
+            `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+          // Get tasks for a specific day
+          // Uses dueDate local date — same conversion the Task List uses, so calendar
+          // and task list always agree on which day a task belongs to.
+          const getTasksForDay = (dayDate) => {
+            const dayStr = toDayStr(dayDate);
+            return [...tasks, ...newTasks.filter(t => !t.deleted)].filter(t => {
+              if (!t.dueDate) return false;
+              if (toDayStr(t.dueDate) !== dayStr) return false;
+              const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
+              if (isHomeroom && !accountSetup.calendarShowHomeroom) return false;
+              const isDone = t.completed || t.deleted || !!t.submittedAt;
+              if (isDone && !accountSetup.calendarShowCompleted) return false;
+              return true;
+            }).sort((a, b) => {
+              if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
+              if (a.dueDate) return -1;
+              if (b.dueDate) return 1;
+              return (a.priorityOrder ?? 9999) - (b.priorityOrder ?? 9999);
+            });
+          };
+
+          // Text color helper for contrast
+          const getTextColor = (hex) => {
+            try {
+              const h = hex.replace('#','');
+              const r = parseInt(h.substr(0,2),16);
+              const g = parseInt(h.substr(2,2),16);
+              const b = parseInt(h.substr(4,2),16);
+              return (0.299*r + 0.587*g + 0.114*b)/255 > 0.55 ? '#1a1a1a' : '#ffffff';
+            } catch { return '#ffffff'; }
+          };
+
+          const stripHtml = (html) => {
+            if (!html) return '';
+            return html
+              .replace(/<br\s*\/?>/gi,' ').replace(/<\/p>/gi,' ')
+              .replace(/<li>/gi,'• ').replace(/<[^>]+>/g,'')
+              .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&')
+              .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+              .replace(/&quot;/g,'"').replace(/&#39;/g,"'")
+              .replace(/\s{2,}/g,' ').trim();
+          };
+
+          // Priority lookup
+          const priorityMap = {};
+          tasks.forEach(t => { if (t.priorityOrder) priorityMap[t.id] = t.priorityOrder; });
+
+
+          return (
+            <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
+
+              {/* Header */}
+              <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
+                  <p className="text-sm text-gray-500 mt-0.5">
+                    {accountSetup.calendarTodayCentered ? 'Today-centered view' : 'Weekly view (Sun – Sat)'}
+                    {' · '}
+                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCurrentPage('settings')}
+                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <Settings className="w-4 h-4" />
+                  Calendar Settings
+                </button>
+              </div>
+
+              {/* 7-day grid */}
+              <div className="flex-1 overflow-hidden px-4 py-4">
+                <div className="grid grid-cols-7 gap-2 h-full">
+                  {days.map((day, colIdx) => {
+                    const dayTasks = getTasksForDay(day);
+                    const todayCol = isToday(day);
+                    return (
+                      <div
+                        key={colIdx}
+                        className={`flex flex-col rounded-xl border-2 overflow-hidden ${todayCol ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-white'}`}
+                      >
+                        {/* Day header */}
+                        <div className={`px-2 py-2 text-center border-b ${todayCol ? 'bg-purple-600 border-purple-500' : 'bg-gray-50 border-gray-200'}`}>
+                          <p className={`text-xs font-semibold uppercase tracking-wide ${todayCol ? 'text-purple-100' : 'text-gray-500'}`}>
+                            {DAY_NAMES[day.getDay()].slice(0,3)}
+                          </p>
+                          <p className={`text-lg font-bold leading-tight ${todayCol ? 'text-white' : 'text-gray-900'}`}>
+                            {day.getDate()}
+                          </p>
+                          <p className={`text-xs ${todayCol ? 'text-purple-200' : 'text-gray-400'}`}>
+                            {day.toLocaleDateString('en-US',{month:'short'})}
+                          </p>
+                        </div>
+
+                        {/* Task bubbles */}
+                        <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
+                          {dayTasks.length === 0 && (
+                            <p className="text-xs text-gray-300 text-center mt-4">—</p>
+                          )}
+                          {dayTasks.map((task) => {
+                            const color = getClassColor(task.class || '');
+                            const priority = priorityMap[task.id];
+                            const timeStr = task.hasSpecificTime && task.dueDate
+                              ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
+                              : null;
+                            const displayTitle = task.segment
+                              ? `${(task.title||'').replace(/\s*\[[^\]]+\]\s*/,'')} – ${task.segment}`
+                              : (task.title||'').replace(/\s*\[[^\]]+\]\s*/,'');
+                            const isDone = task.completed || task.deleted || !!task.submittedAt;
+                            const isExpanded = calendarExpandedId === task.id;
+
+                            return (
+                              <div
+                                key={task.id}
+                                className={`rounded-lg text-xs cursor-pointer transition-all duration-200 select-none ${isExpanded ? 'shadow-lg z-10 relative' : 'hover:brightness-110'}`}
+                                style={{ backgroundColor: color, color: getTextColor(color) }}
+                                onClick={() => {
+                                  if (isExpanded) {
+                                    if (task.url) window.open(task.url, '_blank', 'noopener,noreferrer');
+                                    setCalendarExpandedId(null);
+                                  } else {
+                                    setCalendarExpandedId(task.id);
+                                  }
+                                }}
+                              >
+                                {!isExpanded && (
+                                  <div className="px-1.5 py-1 flex items-start gap-1">
+                                    {priority && <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>}
+                                    <span className={`truncate flex-1 ${isDone ? 'line-through opacity-60' : ''}`}>
+                                      {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
+                                      {displayTitle}
+                                    </span>
+                                  </div>
+                                )}
+                                {isExpanded && (
+                                  <div className="p-2 space-y-1.5">
+                                    <div className="flex items-start justify-between gap-1">
+                                      <div className={`font-semibold leading-tight ${isDone ? 'line-through opacity-70' : ''}`}>
+                                        {priority && <span className="opacity-80">#{priority} · </span>}
+                                        {timeStr && <span className="opacity-80">{timeStr} · </span>}
+                                        {displayTitle}
+                                      </div>
+                                      <button
+                                        className="opacity-70 hover:opacity-100 flex-shrink-0 ml-1"
+                                        onClick={(e) => { e.stopPropagation(); setCalendarExpandedId(null); }}
+                                      >✕</button>
+                                    </div>
+                                    {isDone && (
+                                      <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">✓ Done</span>
+                                    )}
+                                    {stripHtml(task.description) ? (
+                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-5">{stripHtml(task.description)}</p>
+                                    ) : (
+                                      <p className="text-xs opacity-50 italic">No description</p>
+                                    )}
+                                    <p className="text-xs opacity-60 mt-1">Tap again to open in Canvas →</p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {currentPage === 'marks' && (
+          <div className="max-w-6xl mx-auto p-6">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-64 h-64 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
+              <div className="flex items-center gap-3 mb-2">
+                <BarChart3 className="w-8 h-8" />
+                <h1 className="text-3xl font-bold">Your Marks</h1>
+              </div>
+              <p className="text-blue-100">Track your progress and see how you stack up</p>
+              {courses.length > 0 && (
+                <div className="mt-4 flex flex-wrap gap-4">
+                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
+                    <div className="text-2xl font-bold">
+                      {(() => {
+                        const scored = courses.filter(c => c.current_period_score != null);
+                        if (scored.length === 0) return 'N/A';
+                        const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score), 0) / scored.length;
+                        return avg.toFixed(1) + '%';
+                      })()}
+                    </div>
+                    <div className="text-xs text-blue-100">Period Average</div>
+                  </div>
+                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
+                    <div className="text-2xl font-bold">{courses.length}</div>
+                    <div className="text-xs text-blue-100">Active Courses</div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* No courses yet */}
+            {courses.length === 0 ? (
+              <div className="bg-white rounded-xl shadow-md p-12 text-center">
+                <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-gray-900 mb-2">No Courses Yet</h3>
+                <p className="text-gray-500 mb-1">Your courses will appear here after your first Canvas sync.</p>
+                <p className="text-sm text-gray-400">Go to Settings → Sync Canvas to get started.</p>
+              </div>
+            ) : (
+              <>
+                {/* Grade cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {[...courses].sort((a, b) => {
+                    const aScore = a.current_period_score ?? null;
+                    const bScore = b.current_period_score ?? null;
+                    const aNum = aScore != null ? parseFloat(aScore) : null;
+                    const bNum = bScore != null ? parseFloat(bScore) : null;
+                    if (aNum === null && bNum === null) return 0;
+                    if (aNum === null) return 1;
+                    if (bNum === null) return -1;
+                    return aNum - bNum; // lowest score first
+                  }).map((course, index) => {
+                    const avgData = courseAverages[course.course_id];
+                    const classAverage = avgData?.averageScore ?? null;
+                    const studentCount = avgData?.studentCount ?? 0;
+                    // Show current grading period score only — no fallback to all-year
+                    const displayScore = course.current_period_score ?? null;
+                    const displayGrade = course.current_period_grade ?? null;
+                    const hasScore = displayScore != null && parseFloat(displayScore) > 0;
+                    const userScore = hasScore ? parseFloat(displayScore) : null;
+                    const difference = (userScore !== null && classAverage !== null && studentCount > 1)
+                      ? userScore - classAverage
+                      : null;
+
+                    // Performance tier
+                    let perfColor = 'text-gray-500';
+                    let perfBg = 'bg-gray-50';
+                    let perfBorder = 'border-gray-200';
+                    let PerfIcon = Target;
+                    let perfLabel = 'No Score Yet';
+                    if (userScore !== null) {
+                      if (userScore >= 90) { perfColor = 'text-emerald-600'; perfBg = 'bg-emerald-50'; perfBorder = 'border-emerald-200'; PerfIcon = Award; perfLabel = 'Excellent'; }
+                      else if (userScore >= 80) { perfColor = 'text-blue-600'; perfBg = 'bg-blue-50'; perfBorder = 'border-blue-200'; PerfIcon = TrendingUp; perfLabel = 'Great'; }
+                      else if (userScore >= 70) { perfColor = 'text-purple-600'; perfBg = 'bg-purple-50'; perfBorder = 'border-purple-200'; PerfIcon = Target; perfLabel = 'On Track'; }
+                      else if (userScore >= 60) { perfColor = 'text-amber-600'; perfBg = 'bg-amber-50'; perfBorder = 'border-amber-200'; PerfIcon = AlertCircle; perfLabel = 'Needs Work'; }
+                      else { perfColor = 'text-red-600'; perfBg = 'bg-red-50'; perfBorder = 'border-red-200'; PerfIcon = TrendingDown; perfLabel = 'At Risk'; }
+                    }
+
+                    return (
+                      <div key={course.id} className={`bg-white rounded-xl shadow-md border-2 ${perfBorder} overflow-hidden hover:shadow-lg transition-all duration-200`}
+                        style={{ animationDelay: `${index * 80}ms` }}>
+                        {/* Card header */}
+                        <div className={`${perfBg} px-6 py-4 flex items-start justify-between`}>
+                          <div className="flex-1 mr-4">
+                            <h3 className="font-bold text-gray-900 text-base leading-tight">{course.name}</h3>
+                            {course.course_code && <p className="text-xs text-gray-500 mt-0.5">{course.course_code}</p>}
+                          </div>
+                          <div className="text-right flex-shrink-0">
+                            <div className={`text-4xl font-black ${perfColor}`}>
+                              {displayGrade || (hasScore ? `${userScore.toFixed(0)}%` : '—')}
+                            </div>
+                            {hasScore && displayGrade && (
+                              <div className="text-sm text-gray-500 font-semibold">{userScore.toFixed(1)}%</div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="px-6 py-4 space-y-4">
+                          {/* Score bar */}
+                          {hasScore && (
+                            <div>
+                              {/* Your score bar */}
+                              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                <span className="font-semibold text-gray-700">Your Score</span>
+                                {difference !== null && (
+                                  <span className={`font-bold ${difference >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                    {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs Average
+                                  </span>
+                                )}
+                              </div>
+                              <div className="relative h-7 bg-gray-100 rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold`}
+                                  style={{
+                                    width: `${Math.min(userScore, 100)}%`,
+                                    background: userScore >= 80 ? 'linear-gradient(90deg, #7c3aed, #3b82f6)' : userScore >= 60 ? 'linear-gradient(90deg, #f59e0b, #ef4444)' : 'linear-gradient(90deg, #ef4444, #dc2626)',
+                                    transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                    animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 200}ms both`
+                                  }}
+                                >
+                                  {userScore >= 20 && `${userScore.toFixed(0)}%`}
+                                </div>
+                              </div>
+
+                              {/* Class average bar */}
+                              {classAverage !== null && studentCount > 1 && (
+                                <div className="mt-1.5">
+                                  <div className="flex justify-between text-xs text-gray-400 mb-1">
+                                    <span>Global Average ({studentCount} students)</span>
+                                    <span>{classAverage.toFixed(1)}%</span>
+                                  </div>
+                                  <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
+                                    <div
+                                      className="h-full bg-gray-300 rounded-full"
+                                      style={{
+                                        width: `${Math.min(classAverage, 100)}%`,
+                                        transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 400}ms both`
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Performance badge + final grade */}
+                          <div className="flex items-center justify-between">
+                            <div className={`flex items-center gap-1.5 ${perfColor} text-sm font-semibold`}>
+                              <PerfIcon className="w-4 h-4" />
+                              <span>{perfLabel}</span>
+                            </div>
+                            {course.grading_period_title && (
+                              <div className="text-xs text-gray-400">
+                                {course.grading_period_title}
+                              </div>
+                            )}
+                            {!course.grading_period_title && course.final_grade && course.final_grade !== displayGrade && (
+                              <div className="text-xs text-gray-400">
+                                Final: <span className="font-semibold text-gray-600">{course.final_grade}</span>
+                                {course.final_score && ` (${parseFloat(course.final_score).toFixed(1)}%)`}
+                              </div>
+                            )}
+                            {!hasScore && (
+                              <span className="text-xs text-gray-400 italic">Sync Canvas to see your grade</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+
+            {/* CSS animation */}
+            <style>{`
+              @keyframes markBarSlide {
+                from { width: 0%; opacity: 0.3; }
+                to { opacity: 1; }
+              }
+            `}</style>
+          </div>
         )}
         {currentPage === 'settings' && (
           <div className="max-w-4xl mx-auto p-6">
