@@ -56,13 +56,13 @@ const PlanAssist = () => {
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [draggedTask, setDraggedTask] = useState(null);
   const [dragOverTask, setDragOverTask] = useState(null);
+  const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
+  const [tempTimeValue, setTempTimeValue] = useState('');
   const [newTasks, setNewTasks] = useState([]);
   const [showTaskDescription, setShowTaskDescription] = useState(null);
   const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
   const savedCanvasTokenRef = React.useRef(''); // tracks last-saved token to avoid unnecessary syncs
   const [settingsSaving, setSettingsSaving] = useState(false);
-  const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
-  const [tempTimeValue, setTempTimeValue] = useState('');
   const [markingComplete, setMarkingComplete] = useState(false);
   const [savingSession, setSavingSession] = useState(false);
   const [endingSession, setEndingSession] = useState(false);
@@ -1084,6 +1084,158 @@ const fetchCanvasTasks = async () => {
     }
   };
 
+
+  // ── Time estimate inline editing ─────────────────────────────────────────
+  const handleStartEditTime = (taskId, currentTime) => {
+    setEditingTimeTaskId(taskId);
+    setTempTimeValue(String(currentTime));
+  };
+
+  const handleTimeInputChange = (e) => {
+    setTempTimeValue(e.target.value);
+  };
+
+  const handleSaveTimeEstimate = async (taskId) => {
+    const parsed = parseInt(tempTimeValue);
+    if (!isNaN(parsed) && parsed > 0) {
+      try {
+        await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { userEstimate: parsed });
+        setTasks(prev => prev.map(t =>
+          t.id === taskId ? { ...t, userEstimate: parsed } : t
+        ));
+        setHasUnsavedChanges(true);
+      } catch (err) {
+        console.error('Failed to save estimate:', err);
+      }
+    }
+    setEditingTimeTaskId(null);
+    setTempTimeValue('');
+  };
+
+  const handleCancelEditTime = () => {
+    setEditingTimeTaskId(null);
+    setTempTimeValue('');
+  };
+
+  // ── New-tasks sidebar helpers ──────────────────────────────────────────────
+  const closeSidebarWithoutSaving = () => {
+    setNewTasksSidebarOpen(false);
+  };
+
+  const clearAllNewTasks = async () => {
+    try {
+      const taskIds = newTasks.map(t => t.id);
+      // Move all new tasks to the main list at end of priority order
+      const maxPriority = Math.max(0, ...tasks.filter(t => !t.deleted && !t.completed && t.priorityOrder !== null).map(t => t.priorityOrder || 0));
+      const updatedNewTasks = newTasks.map((t, i) => ({ ...t, priorityOrder: maxPriority + i + 1 }));
+      setTasks(prev => [...prev, ...updatedNewTasks]);
+      setNewTasks([]);
+      setNewTasksSidebarOpen(false);
+      setHasUnsavedChanges(true);
+      // Clear is_new flags on server
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
+    } catch (err) {
+      console.error('Failed to clear new tasks:', err);
+    }
+  };
+
+  const handleAcceptNewTask = (newTask, insertBeforeTask = null) => {
+    // Move from newTasks into main tasks at the right position
+    const activeTasks = tasks
+      .filter(t => !t.deleted && !t.completed && t.priorityOrder !== null)
+      .sort((a, b) => (a.priorityOrder || 0) - (b.priorityOrder || 0));
+
+    let insertIdx = activeTasks.length; // default: append to end
+    if (insertBeforeTask) {
+      const idx = activeTasks.findIndex(t => t.id === insertBeforeTask.id);
+      if (idx !== -1) insertIdx = idx;
+    }
+
+    const withNew = [...activeTasks];
+    withNew.splice(insertIdx, 0, { ...newTask, priorityOrder: insertIdx + 1 });
+    const reordered = withNew.map((t, i) => ({ ...t, priorityOrder: i + 1 }));
+    const rest = tasks.filter(t => t.deleted || t.completed || t.priorityOrder === null);
+
+    setTasks([...reordered, ...rest]);
+    setNewTasks(prev => prev.filter(t => t.id !== newTask.id));
+    setHasUnsavedChanges(true);
+
+    // Clear is_new flag on server
+    apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [newTask.id] }).catch(console.error);
+  };
+
+  const handleIgnoreTask = async (taskId) => {
+    try {
+      await apiCall(`/tasks/${taskId}/ignore`, 'POST');
+      setNewTasks(prev => prev.filter(t => t.id !== taskId));
+    } catch (err) {
+      console.error('Failed to ignore task:', err);
+      alert('Failed to ignore task: ' + err.message);
+    }
+  };
+
+  // ── Drag-and-drop for Task List priority reordering ──────────────────────
+  const draggedTaskRef = React.useRef(null);
+  const dragOverTaskRef = React.useRef(null);
+
+  const handleDragStart = (e, task) => {
+    draggedTaskRef.current = task;
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', task.id);
+  };
+
+  const handleDragOver = (e, task) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    dragOverTaskRef.current = task;
+    setDragOverTask(task);
+  };
+
+  const handleDragEnd = async () => {
+    const dragged = draggedTaskRef.current;
+    const target = dragOverTaskRef.current;
+    draggedTaskRef.current = null;
+    dragOverTaskRef.current = null;
+    setDragOverTask(null);
+
+    if (!dragged || !target || dragged.id === target.id) return;
+
+    // Reorder tasks locally
+    const activeTasks = tasks.filter(t => !t.deleted && !t.completed && t.priorityOrder !== null)
+      .sort((a, b) => (a.priorityOrder || 0) - (b.priorityOrder || 0));
+    const rest = tasks.filter(t => t.deleted || t.completed || t.priorityOrder === null);
+
+    const draggedIdx = activeTasks.findIndex(t => t.id === dragged.id);
+    const targetIdx = activeTasks.findIndex(t => t.id === target.id);
+    if (draggedIdx === -1 || targetIdx === -1) return;
+
+    const reordered = [...activeTasks];
+    const [removed] = reordered.splice(draggedIdx, 1);
+    reordered.splice(targetIdx, 0, removed);
+
+    // Assign new priority orders
+    const updated = reordered.map((t, i) => ({ ...t, priorityOrder: i + 1 }));
+    setTasks([...updated, ...rest]);
+    setHasUnsavedChanges(true);
+
+    // Persist to server
+    try {
+      await apiCall('/tasks/reorder', 'POST', {
+        taskOrder: updated.map(t => t.id)
+      });
+    } catch (err) {
+      console.error('Failed to save reorder:', err);
+    }
+  };
+
+  // Handle drop from new-tasks sidebar onto priority list
+  const handleDrop = (e, targetTask) => {
+    e.preventDefault();
+    const draggedId = parseInt(e.dataTransfer.getData('text/plain'));
+    const sidebarTask = newTasks.find(t => t.id === draggedId);
+    if (!sidebarTask) return; // was an internal reorder, already handled by handleDragEnd
+    handleAcceptNewTask(sidebarTask, targetTask);
+  };
 
   const handleSaveAndAdjustPlan = async () => {
     if (isSavingPlan) return;
