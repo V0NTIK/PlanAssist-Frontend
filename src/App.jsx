@@ -57,7 +57,7 @@ const PlanAssist = () => {
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
-  const [addSessionForm, setAddSessionForm] = useState({ day: 'Monday', period: '2' });
+  const [addSessionForm, setAddSessionForm] = useState({ period: '2' });
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
@@ -460,13 +460,6 @@ const PlanAssist = () => {
     try {
       const tasksData = await apiCall('/tasks', 'GET');
       
-      // DEBUG: Log first task to see what format we're getting
-      if (tasksData.length > 0) {
-        console.log('Sample task from API:', tasksData[0]);
-        console.log('deadline_date:', tasksData[0].deadline_date);
-        console.log('deadline_time:', tasksData[0].deadline_time);
-        console.log('deadline (old):', tasksData[0].deadline);
-      }
       
       const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
         // Convert deadline_date and deadline_time to local Date object
@@ -486,17 +479,14 @@ const PlanAssist = () => {
           if (t.deadline_time !== null && t.deadline_time !== undefined) {
             // Has specific time - convert from UTC to local
             const utcDatetime = `${datePart}T${t.deadline_time}Z`;
-            console.log(`Creating Date from UTC: ${utcDatetime}`);
             dueDate = new Date(utcDatetime);
             hasSpecificTime = true;
           } else {
             // Date-only task - use 23:59:00 in local timezone
             const localDatetime = `${datePart}T23:59:00`;
-            console.log(`Creating Date from local: ${localDatetime}`);
             dueDate = new Date(localDatetime);
             hasSpecificTime = false;
           }
-          console.log(`Result: ${dueDate}, isValid: ${!isNaN(dueDate.getTime())}`);
         }
         // Fallback for old format (single deadline column)
         else if (t.deadline) {
@@ -2220,9 +2210,6 @@ const fetchCanvasTasks = async () => {
         return;
       }
       
-      console.log('Resuming session:', session.id);
-      console.log('Saved state completed IDs:', savedSessionState.completedTaskIds);
-      console.log('Original session tasks:', session.tasks.map(t => ({id: t.id, title: t.title})));
       
       // Filter out tasks that were already completed in the saved session
       const completedIds = savedSessionState.completedTaskIds || [];
@@ -2240,11 +2227,6 @@ const fetchCanvasTasks = async () => {
         return exists;
       });
       
-      if (remainingTasks.length < beforeValidation) {
-        console.log(`ℹ Filtered out ${beforeValidation - remainingTasks.length} non-existent tasks`);
-      }
-      
-      console.log('Remaining tasks after filter:', remainingTasks.map(t => ({id: t.id, title: t.title})));
       
       if (remainingTasks.length === 0) {
         alert('All tasks in this session have been completed!');
@@ -2272,22 +2254,13 @@ const fetchCanvasTasks = async () => {
       
       // Restore partial task times from backend
       if (savedSessionState.partialTaskTimes) {
-        console.log('✓ Restoring partial times from backend:', savedSessionState.partialTaskTimes);
-        console.log('  Tasks with partial time:');
-        Object.entries(savedSessionState.partialTaskTimes).forEach(([taskId, time]) => {
-          const task = remainingTasks.find(t => t.id === parseInt(taskId));
-          console.log(`  - Task ${taskId}: ${time} min${task ? ` (${task.title})` : ' (not in session)'}`);
-        });
         setPartialTaskTimes(savedSessionState.partialTaskTimes);
       } else {
-        console.log('ℹ No partial times to restore');
         setPartialTaskTimes({});
       }
       
       setIsTimerRunning(true);
       setCurrentPage('session-active');
-      
-      console.log('Session resumed successfully');
     } catch (error) {
       console.error('Failed to resume session:', error);
       alert('Failed to resume session: ' + error.message);
@@ -2334,12 +2307,6 @@ const fetchCanvasTasks = async () => {
       // ✅ Calculate and save partial time (non-blocking - continue even if this fails)
       const previousAccumulatedTime = currentTask.accumulatedTime || 0;
       const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
-    
-      console.log('=== Saving Partial Time ===');
-      console.log('Task ID:', currentTask.id);
-      console.log('Time spent this session:', currentTaskTimeSpent, 'min');
-      console.log('Previous accumulated:', previousAccumulatedTime, 'min');
-      console.log('New total accumulated:', newAccumulatedTime, 'min');
     
       // Try to save accumulated time to database, but don't fail if it doesn't work
       try {
@@ -2451,14 +2418,11 @@ const fetchCanvasTasks = async () => {
       // ✅ Get accumulated time from task (from database)
       const previousPartialTime = task.accumulatedTime || 0;
     
-      console.log('=== Completing Task ===');
-      console.log('Task ID:', task.id);
-      console.log('Current session time:', currentSessionTime, 'min');
-      console.log('Previous accumulated time:', previousPartialTime, 'min');
+
     
       // Calculate total time
       const totalTimeSpent = currentSessionTime + previousPartialTime;
-      console.log('Total time spent:', totalTimeSpent, 'min');
+
       
       // Complete the task with total time
       await apiCall(`/tasks/${task.id}/complete`, 'POST', {
@@ -2477,7 +2441,7 @@ const fetchCanvasTasks = async () => {
       );
       setTasks(updatedTasks);
       
-      console.log('Task completed successfully');
+
       
       // Move to next task or end session
       if (currentTaskIndex < currentSession.tasks.length - 1) {
@@ -2518,12 +2482,6 @@ const fetchCanvasTasks = async () => {
       if (currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions) {
         const previousAccumulatedTime = currentTask.accumulatedTime || 0;
         const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
-      
-        console.log('=== Saving Partial Time on End Session ===');
-        console.log('Task ID:', currentTask.id);
-        console.log('Time spent this session:', currentTaskTimeSpent, 'min');
-        console.log('Previous accumulated:', previousAccumulatedTime, 'min');
-        console.log('New total accumulated:', newAccumulatedTime, 'min');
       
         try {
           await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
