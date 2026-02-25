@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -34,30 +34,23 @@ const PlanAssist = () => {
     calendarShowCompleted: true
   });
   const [tasks, setTasks] = useState([]);
-  const [sessions, setSessions] = useState([]);
-  const [currentSession, setCurrentSession] = useState(null);
-  const [sessionTime, setSessionTime] = useState(3600);
+  const [sessionTasks, setSessionTasks] = useState([]); // tasks shown on Sessions page
+  const [currentSessionTask, setCurrentSessionTask] = useState(null); // task being worked on
+  const [sessionElapsed, setSessionElapsed] = useState(0); // seconds elapsed this session (counts up)
   const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const timerStartWallRef = React.useRef(null); // wall-clock ms when timer last started
-  const timerStartSessionRef = React.useRef(3600); // sessionTime value when timer last started
-  const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
-  const [taskStartTime, setTaskStartTime] = useState(3600);
-  const [sessionCompletions, setSessionCompletions] = useState([]);
+  const timerStartWallRef = React.useRef(null); // wall clock ms when current run started
+  const timerBaseElapsedRef = React.useRef(0);  // accumulated seconds before current run
   const [completionHistory, setCompletionHistory] = useState([]);
-  const [showSessionSummary, setShowSessionSummary] = useState(false);
-  const [sessionSummary, setSessionSummary] = useState(null);
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [savedSessionState, setSavedSessionState] = useState(null);
+  const [showSessionComplete, setShowSessionComplete] = useState(false);
   const [showSplitTask, setShowSplitTask] = useState(null);
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
-  const [showAddSessionModal, setShowAddSessionModal] = useState(false);
-  const [addSessionForm, setAddSessionForm] = useState({ period: '2' });
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
@@ -416,7 +409,7 @@ const PlanAssist = () => {
         const activeTasks = loadedTasks.filter(t => !t.deleted);
         setTasks(loadedTasks); // full set for calendar
         setNewTasks(loadedNewTasks);
-        loadTodaySessions(activeTasks, authToken);
+        // Session tasks loaded separately when user navigates to Sessions page
       }
 
 
@@ -442,14 +435,7 @@ const PlanAssist = () => {
       });
       setPartialTaskTimes(partialTimes);
 
-      const sessionStateData = await fetch(`${API_URL}/sessions/saved-state`, {
-        headers: { 'Authorization': `Bearer ${authToken}` }
-      }).then(r => r.json());
-
-      if (sessionStateData.sessionId) {
-        // Sessions are scoped to today in the DB — any returned saved-state is valid
-        setSavedSessionState(sessionStateData);
-      }
+      // Session state is stored on tasks (session_active, accumulated_time)
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -586,7 +572,7 @@ const PlanAssist = () => {
       const activeTasks = loadedTasks.filter(t => !t.deleted);
       setTasks(loadedTasks); // full set for calendar
       setNewTasks(loadedNewTasks);
-      loadTodaySessions(activeTasks, localStorage.getItem('token'));
+
 
 
     } catch (error) {
@@ -658,7 +644,8 @@ const PlanAssist = () => {
     setIsAuthenticated(false);
     setCurrentPage('hub');
     setTasks([]);
-    setSessions([]);
+    setSessionTasks([]);
+    setCurrentSessionTask(null);
   };
 
   const saveAccountSetup = async () => {
@@ -986,396 +973,117 @@ const fetchCanvasTasks = async () => {
 
   // ── SESSION FUNCTIONS (DB-backed, today-only) ──────────────────────────────
 
-  const allTasksRef = React.useRef([]);
+  // ============================================================================
+  // SESSIONS v2 — single-task, count-up timer
+  // ============================================================================
 
-  const loadTodaySessions = async (taskList, authToken = null) => {
+  const loadSessionTasks = async () => {
     setSessionsLoading(true);
-    const taskSource = taskList || tasks;
-    allTasksRef.current = taskSource;
     try {
-      // Use provided authToken (for calls during initial load before token state is set)
-      // or fall back to apiCall which reads from token state
-      let data;
-      if (authToken) {
-        const res = await fetch(`${API_URL}/sessions/today`, {
-          headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }
-        });
-        data = await res.json();
-      } else {
-        data = await apiCall('/sessions/today', 'GET');
-      }
-      const rawSessions = data.sessions || [];
-
-      const hydratedSessions = rawSessions
-        .filter(s => !s.is_deleted && !s.completed)
-        .map(s => {
-          const sessionTasks = (s.task_ids || [])
-            .map(id => {
-              const task = taskSource.find(t => t.id === id);
-              if (!task || task.completed || task.deleted) return null;
-              return { ...task, sessionTag: task.accumulatedTime > 0 ? 'Wrap it Up' : 'Get it Done' };
-            })
-            .filter(Boolean);
-
-          // Tag the last task as Make a Start / Wrap it Up if session overflows 60 min
-          let running = 0;
-          const taggedTasks = sessionTasks.map((t, idx) => {
-            const time = t.userEstimate || t.estimatedTime || 30;
-            const wouldOverflow = running + time > 60;
-            if (wouldOverflow && idx === sessionTasks.length - 1 && running < 60) {
-              return { ...t, sessionTag: t.accumulatedTime > 0 ? 'Wrap it Up' : 'Make a Start' };
-            }
-            if (!wouldOverflow) running += time;
-            return t;
-          });
-
-          const totalTime = taggedTasks.reduce((sum, t) => sum + (t.userEstimate || t.estimatedTime || 30), 0);
-          return {
-            dbId: s.id,
-            id: `today-${s.period}`,
-            period: s.period,
-            tasks: taggedTasks,
-            totalTime,
-            isExtra: s.is_extra,
-            partialTaskTimes: s.partial_task_times || {}
-          };
-        })
-        .filter(s => s.tasks.length > 0);
-
-      setSessions(hydratedSessions);
+      const data = await apiCall('/sessions/tasks', 'GET');
+      // Hydrate with full task info from local tasks state
+      const hydratedTasks = data.map(t => {
+        // Find the full local task for dueDate etc (may not exist if tasks not yet loaded)
+        const localTask = tasks.find(lt => lt.id === t.id);
+        return {
+          id: t.id,
+          title: t.title,
+          segment: t.segment,
+          class: t.class,
+          url: t.url,
+          deadlineDateRaw: t.deadline_date
+            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+            : null,
+          dueDate: localTask?.dueDate || null,
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
+          sessionActive: t.session_active || false,
+          priorityOrder: t.priority_order,
+        };
+      });
+      setSessionTasks(hydratedTasks);
     } catch (err) {
-      console.error('Failed to load today sessions:', err);
+      console.error('Failed to load session tasks:', err);
     } finally {
       setSessionsLoading(false);
     }
   };
 
-  const deleteSession = async (sessionDbId) => {
+  // Start a session for a specific task
+  const startTaskSession = async (task) => {
     try {
-      await apiCall(`/sessions/${sessionDbId}`, 'PATCH', { is_deleted: true });
-      setSessions(prev => prev.filter(s => s.dbId !== sessionDbId));
+      await apiCall(`/sessions/start/${task.id}`, 'POST');
+      // Update local state so button flips to Resume immediately
+      setSessionTasks(prev => prev.map(t =>
+        t.id === task.id ? { ...t, sessionActive: true } : { ...t, sessionActive: false }
+      ));
+      // Enter session screen
+      timerBaseElapsedRef.current = task.accumulatedTime * 60; // convert minutes → seconds
+      timerStartWallRef.current = Date.now();
+      setSessionElapsed(task.accumulatedTime * 60);
+      setCurrentSessionTask(task);
+      setIsTimerRunning(true);
+      setCurrentPage('session-active');
     } catch (err) {
-      console.error('Failed to delete session:', err);
+      console.error('Failed to start session:', err);
+      alert('Failed to start session: ' + err.message);
     }
   };
 
-  const addSession = async () => {
-    const { period } = addSessionForm;
+  // Save & Exit — pause timer, persist accumulated time
+  const pauseTaskSession = async () => {
+    if (!currentSessionTask) return;
+    setSavingSession(true);
     try {
-      await apiCall('/sessions/today', 'POST', { period: parseInt(period) });
-      setShowAddSessionModal(false);
-      await loadTodaySessions();
-    } catch (err) {
-      console.error('Failed to add session:', err);
-      alert('Failed to add session. That period may already exist today.');
-    }
-  };
-
-
-  const updateTaskEstimate = async (taskId, estimate) => {
-    try {
-      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', { userEstimate: estimate });
-      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, userEstimate: estimate } : t);
-      setTasks(updatedTasks);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to update estimate:', error);
-    }
-  };
-
-  const handleManualComplete = async (taskId) => {
-    try {
-      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
-      setTasks(updatedTasks);
-      setShowCompleteConfirm(null);
-      loadTodaySessions(updatedTasks);
-    } catch (error) {
-      console.error('Failed to complete task:', error);
-      alert('Failed to complete task');
-    }
-  };
-
-  const handleCompleteTask = async (taskId) => {
-    try {
-      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-      const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: true } : t);
-      setTasks(updatedTasks);
-      setShowCompleteConfirm(null);
-      loadTodaySessions(updatedTasks);
-    } catch (error) {
-      console.error('Failed to complete task:', error);
-      alert('Failed to complete task');
-    }
-  };
-
-  const toggleTaskCompletion = async (taskId) => {
-    // Find task in the current tasks array by ID
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) {
-      console.error('Task not found:', taskId);
-      alert('Task not found. Please try refreshing the page.');
-      return;
-    }
-
-    // Update local state immediately for better UX
-    const newCompletedStatus = !task.completed;
-    const updatedTasks = tasks.map(t => t.id === taskId ? { ...t, completed: newCompletedStatus } : t);
-    setTasks(updatedTasks);
-    loadTodaySessions(updatedTasks);
-
-    try {
-      if (newCompletedStatus) {
-        // Complete the task - this marks it as deleted in backend
-        await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-        // Reload tasks from server to get proper filtered list (without deleted tasks)
-        await loadTasks();
-      } else {
-        // Uncomplete the task
-        await apiCall(`/tasks/${taskId}/uncomplete`, 'PATCH');
-        await loadTasks();
-      }
-      // Successfully saved to backend
-      console.log('Task completion toggled successfully');
-    } catch (error) {
-      console.error('Failed to toggle task completion:', error);
-      console.error('Task ID:', taskId);
-      console.error('Task details:', task);
-      
-      // Check if this is a newly split task that hasn't been saved yet
-      if (error.message.includes('Failed to complete task') || error.message.includes('500')) {
-        alert('This task needs to be saved first. Click "Save and Adjust Plan" to save your changes, then you can mark it complete.');
-        // Revert the change
-        setTasks(tasks);
-        loadTodaySessions();
-      } else {
-        alert('Failed to update task: ' + error.message);
-        // Revert on error
-        setTasks(tasks);
-        loadTodaySessions();
-      }
-    }
-  };
-
-  // Manual time editing handlers
-  const handleStartEditTime = (taskId, currentTime) => {
-    setEditingTimeTaskId(taskId);
-    setTempTimeValue(currentTime.toString());
-  };
-
-  const handleTimeInputChange = (e) => {
-    const value = e.target.value;
-    // Only allow numbers
-    if (/^\d*$/.test(value)) {
-      const numValue = parseInt(value) || 0;
-      // Limit to 300 minutes
-      if (numValue <= 300) {
-        setTempTimeValue(value);
-      }
-    }
-  };
-
-  const handleSaveTimeEstimate = async (taskId) => {
-    try {
-      const newTime = parseInt(tempTimeValue) || 0;
-      if (newTime < 1 || newTime > 300) {
-        alert('Please enter a time between 1 and 300 minutes');
-        return;
-      }
-
-      // Update local state
-      const updatedTasks = tasks.map(t =>
-        t.id === taskId ? { ...t, userEstimate: newTime } : t
-      );
-      setTasks(updatedTasks);
-
-      // Update backend
-      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', {
-        userEstimate: newTime
+      const totalSeconds = sessionElapsed;
+      const totalMinutes = Math.round(totalSeconds / 60);
+      await apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
+        accumulatedTime: totalMinutes
       });
-
-      setEditingTimeTaskId(null);
-      setTempTimeValue('');
-      setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
-    } catch (error) {
-      console.error('Error updating time estimate:', error);
-      alert('Error updating time estimate: ' + error.message);
+      setIsTimerRunning(false);
+      // Update local task state with new accumulated time
+      const updatedTask = { ...currentSessionTask, accumulatedTime: totalMinutes, sessionActive: false };
+      setSessionTasks(prev => prev.map(t =>
+        t.id === currentSessionTask.id ? updatedTask : t
+      ));
+      setCurrentSessionTask(null);
+      setCurrentPage('sessions');
+    } catch (err) {
+      console.error('Failed to pause session:', err);
+      alert('Failed to save progress: ' + err.message);
+    } finally {
+      setSavingSession(false);
     }
   };
 
-  const handleCancelEditTime = () => {
-    setEditingTimeTaskId(null);
-    setTempTimeValue('');
-  };
-
-  const handleSplitTask = async (taskId) => {
+  // Mark the current task complete — session ends automatically
+  const completeTaskSession = async () => {
+    if (!currentSessionTask || markingComplete) return;
+    setMarkingComplete(true);
     try {
-      const task = tasks.find(t => t.id === taskId);
-      if (!task) return;
-      
-      // Call the backend split endpoint
-      const segmentNames = splitSegments.map(seg => seg.name);
-      const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segmentNames });
-      
-      if (result.success) {
-        // Reload tasks from server to get the new segments
-        await loadTasks();
-        
-        // Open the new tasks sidebar to let user prioritize segments
-        setNewTasksSidebarOpen(true);
-        setHasUnsavedChanges(true);
-        
-        setShowSplitTask(null);
-        setSplitSegments([{ name: 'Part 1' }]);
-      }
-    } catch (error) {
-      console.error('Error splitting task:', error);
-      alert('Error splitting task: ' + error.message);
+      const totalSeconds = sessionElapsed;
+      const totalMinutes = Math.round(totalSeconds / 60);
+      await apiCall(`/tasks/${currentSessionTask.id}/complete`, 'POST', {
+        timeSpent: totalMinutes
+      });
+      setIsTimerRunning(false);
+      // Remove from session tasks list
+      setSessionTasks(prev => prev.filter(t => t.id !== currentSessionTask.id));
+      // Also remove from main tasks list
+      setTasks(prev => prev.map(t =>
+        t.id === currentSessionTask.id ? { ...t, completed: true, deleted: true } : t
+      ));
+      setShowSessionComplete({ task: currentSessionTask, timeSpent: totalMinutes });
+      setCurrentSessionTask(null);
+    } catch (err) {
+      console.error('Failed to complete task:', err);
+      alert('Failed to complete task: ' + err.message);
+    } finally {
+      setMarkingComplete(false);
     }
   };
 
-  // Drag-and-drop functions
-  const handleDragStart = (e, task) => {
-    setDraggedTask(task);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e, task) => {
-    e.preventDefault();
-    if (draggedTask && draggedTask.id !== task.id) {
-      setDragOverTask(task);
-    }
-  };
-
-  const handleDragEnd = () => {
-    setDraggedTask(null);
-    setDragOverTask(null);
-  };
-
-  const handleDrop = async (e, dropTask) => {
-    e.preventDefault();
-    if (!draggedTask || draggedTask.id === dropTask.id) return;
-
-    const reorderedTasks = [...tasks];
-    const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
-    const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
-
-    if (draggedIndex >= 0) {
-      // Dragging within main list
-      const [removed] = reorderedTasks.splice(draggedIndex, 1);
-      reorderedTasks.splice(dropIndex, 0, removed);
-      setTasks(reorderedTasks);
-    } else {
-      // Dragging from sidebar to main list - insert at drop position
-      const updatedNewTasks = newTasks.filter(t => t.id !== draggedTask.id);
-      reorderedTasks.splice(dropIndex, 0, draggedTask);
-      
-      setTasks(reorderedTasks);
-      setNewTasks(updatedNewTasks);
-      
-      // Clear new flag for this task
-      try {
-        await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [draggedTask.id] });
-      } catch (error) {
-        console.error('Failed to clear new flag:', error);
-      }
-      
-      // Close sidebar if no more new tasks
-      if (updatedNewTasks.length === 0) {
-        setNewTasksSidebarOpen(false);
-      }
-    }
-    
-    // Send new order to backend
-    try {
-      const taskOrder = reorderedTasks.map(t => t.id);
-      await apiCall('/tasks/reorder', 'POST', { taskOrder });
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to save task order:', error);
-      // Don't show alert - reordering still works locally and will sync on next save
-    }
-
-    setDraggedTask(null);
-    setDragOverTask(null);
-  };
-
-  const moveNewTaskToMain = async (taskId) => {
-    const taskToMove = newTasks.find(t => t.id === taskId);
-    if (!taskToMove) return;
-
-    try {
-      // Clear the is_new flag
-      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [taskId] });
-      
-      // Move to main list
-      setNewTasks(newTasks.filter(t => t.id !== taskId));
-      setTasks([...tasks, taskToMove]);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to move task:', error);
-      alert('Failed to move task');
-    }
-  };
-
-  const clearAllNewTasks = async () => {
-    if (newTasks.length === 0) return;
-    
-    try {
-      const taskIds = newTasks.map(t => t.id);
-      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
-      
-      // Move all to main list
-      setTasks([...tasks, ...newTasks]);
-      setNewTasks([]);
-      setNewTasksSidebarOpen(false);
-      setHasUnsavedChanges(true);
-    } catch (error) {
-      console.error('Failed to clear new tasks:', error);
-      alert('Failed to clear new tasks');
-    }
-  };
-
-  const closeSidebarWithoutSaving = async () => {
-    if (newTasks.length > 0) {
-      const confirmClose = window.confirm(
-        `You have ${newTasks.length} new task(s) that haven't been prioritized. Close sidebar to automatically add them to the bottom of your list?`
-      );
-      if (!confirmClose) return;
-      
-      // Auto-add all new tasks to the bottom of the list
-      const updatedTasks = [...tasks, ...newTasks];
-      setTasks(updatedTasks);
-      
-      // Clear new flags for these tasks
-      try {
-        await apiCall('/tasks/clear-new-flags', 'POST', { 
-          taskIds: newTasks.map(t => t.id) 
-        });
-      } catch (error) {
-        console.error('Failed to clear new flags:', error);
-      }
-      
-      setHasUnsavedChanges(true);
-    }
-    setNewTasksSidebarOpen(false);
-    setNewTasks([]);
-  };
-
-  const handleIgnoreTask = async (taskId) => {
-    try {
-      // Call the ignore endpoint to mark task as deleted
-      await apiCall(`/tasks/${taskId}/ignore`, 'POST');
-      
-      // Remove from newTasks array in UI
-      setNewTasks(prevTasks => prevTasks.filter(t => t.id !== taskId));
-      
-      console.log(`✓ Task ${taskId} ignored successfully`);
-    } catch (error) {
-      console.error('Failed to ignore task:', error);
-      alert('Failed to ignore task: ' + error.message);
-    }
-  };
 
   const handleSaveAndAdjustPlan = async () => {
     if (isSavingPlan) return;
@@ -1446,13 +1154,7 @@ const fetchCanvasTasks = async () => {
       
       // Reload tasks from server to get fresh data with correct IDs and priority order
       await loadTasks();
-      // Regenerate today's sessions to reflect new priority order
-      // Delete today's auto-generated sessions and reload so server re-generates with new order
-      const todaySessions = sessions.filter(s => !s.isExtra && s.dbId);
-      await Promise.all(todaySessions.map(s =>
-        apiCall(`/sessions/${s.dbId}`, 'PATCH', { is_deleted: true })
-      ));
-      await loadTodaySessions();
+      // Session tasks will reload next time user visits Sessions page
       
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
@@ -2169,7 +1871,7 @@ const fetchCanvasTasks = async () => {
       loadCourses();
     }
     if (currentPage === 'sessions') {
-      loadTodaySessions();
+      loadSessionTasks();
     }
   }, [currentPage]);
 
@@ -2180,384 +1882,6 @@ const fetchCanvasTasks = async () => {
     setWorkspaceTab(tab);
   };
   
-  const startSession = (session) => {
-    endSessionCalledRef.current = false; // reset guard for new session
-    // Restore any partial task times saved for this session
-    const restoredPartials = session.partialTaskTimes || {};
-    setCurrentSession(session);
-    setCurrentTaskIndex(0);
-    setSessionTime(3600);
-    setTaskStartTime(3600);
-    setIsTimerRunning(true);
-    setSessionCompletions([]);
-    setPartialTaskTimes(restoredPartials);
-    setCurrentPage('session-active');
-  };
-
-  const resumeSession = async () => {
-    try {
-      if (!savedSessionState) {
-        alert('No saved session found');
-        return;
-      }
-      // Session ID is now "today-{period}" — match on period
-      const savedPeriod = savedSessionState.period;
-      const session = sessions.find(s => s.period === savedPeriod) || sessions.find(s => s.id === savedSessionState.sessionId);
-      if (!session) {
-        alert('Session no longer exists');
-        await apiCall('/sessions/saved-state', 'DELETE');
-        setSavedSessionState(null);
-        return;
-      }
-      
-      
-      // Filter out tasks that were already completed in the saved session
-      const completedIds = savedSessionState.completedTaskIds || [];
-      let remainingTasks = session.tasks.filter(t => !completedIds.includes(t.id));
-      
-      // IMPORTANT: Also filter out tasks that no longer exist in the current tasks list
-      // This prevents working on deleted/completed tasks from old sessions
-      const validTaskIds = new Set(tasks.map(t => t.id));
-      const beforeValidation = remainingTasks.length;
-      remainingTasks = remainingTasks.filter(t => {
-        const exists = validTaskIds.has(t.id);
-        if (!exists) {
-          console.warn(`⚠ Task ${t.id} ("${t.title}") no longer exists in database, removing from session`);
-        }
-        return exists;
-      });
-      
-      
-      if (remainingTasks.length === 0) {
-        alert('All tasks in this session have been completed!');
-        await apiCall('/sessions/saved-state', 'DELETE');
-        setSavedSessionState(null);
-        return;
-      }
-      
-      // Reconstruct session with only remaining tasks
-      const resumedSession = {
-        ...session,
-        tasks: remainingTasks
-      };
-      
-      setCurrentSession(resumedSession);
-      setSessionTime(savedSessionState.remainingTime);
-      
-      // Always start at index 0 since we've filtered the tasks
-      setCurrentTaskIndex(0);
-      // Set task start time to current remaining time
-      setTaskStartTime(savedSessionState.remainingTime);
-      
-      // Clear completions since they're already saved
-      setSessionCompletions([]);
-      
-      // Restore partial task times from backend
-      if (savedSessionState.partialTaskTimes) {
-        setPartialTaskTimes(savedSessionState.partialTaskTimes);
-      } else {
-        setPartialTaskTimes({});
-      }
-      
-      setIsTimerRunning(true);
-      setCurrentPage('session-active');
-    } catch (error) {
-      console.error('Failed to resume session:', error);
-      alert('Failed to resume session: ' + error.message);
-    }
-  };
-
-  const pauseSession = async () => {
-    setSavingSession(true);
-    try {
-      const currentTask = currentSession.tasks[currentTaskIndex];
-      
-      // Check if currentTask exists before proceeding
-      if (!currentTask) {
-        // If no current task, just save the session state without partial time
-        await apiCall('/sessions/saved-state', 'POST', {
-          sessionId: currentSession.id,
-          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-          period: currentSession.period,
-          remainingTime: sessionTime,
-          currentTaskIndex: currentTaskIndex,
-          taskStartTime: taskStartTime,
-          completedTaskIds: sessionCompletions.map(c => c.task.id),
-          partialTaskTimes: partialTaskTimes
-        });
-        
-        setSessionSummary({
-          isSaveAndExit: true,
-          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-          period: currentSession.period,
-          completions: sessionCompletions,
-          partialTask: null,
-          missedTasks: [],
-          totalTime: Math.round((3600 - sessionTime) / 60),
-          remainingTime: Math.round(sessionTime / 60)
-        });
-        
-        setShowSessionSummary(true);
-        setIsTimerRunning(false);
-        return;
-      }
-      
-      const currentTaskTimeSpent = Math.round((taskStartTime - sessionTime) / 60);
-    
-      // ✅ Calculate and save partial time (non-blocking - continue even if this fails)
-      const previousAccumulatedTime = currentTask.accumulatedTime || 0;
-      const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
-    
-      // Try to save accumulated time to database, but don't fail if it doesn't work
-      try {
-        await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
-          accumulatedTime: newAccumulatedTime
-        });
-      } catch (partialError) {
-        console.error('Failed to save partial time (non-critical):', partialError);
-        // Continue anyway - we'll still save the session state
-      }
-    
-      // Save session state (this is critical)
-      // Build partialTaskTimes: existing partial times + the current in-progress task's time
-      const partialTimesToSave = { ...partialTaskTimes };
-      if (newAccumulatedTime > 0) {
-        partialTimesToSave[currentTask.id] = newAccumulatedTime;
-      }
-      const savedStatePayload = {
-        sessionId: currentSession.id,
-        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-        period: currentSession.period,
-        remainingTime: sessionTime,
-        currentTaskIndex: currentTaskIndex,
-        taskStartTime: taskStartTime,
-        completedTaskIds: sessionCompletions.map(c => c.task.id),
-        partialTaskTimes: partialTimesToSave,
-        savedAt: new Date().toISOString()
-      };
-      await apiCall('/sessions/saved-state', 'POST', savedStatePayload);
-
-      // Update React state immediately so Sessions page shows "Resume" without reload
-      setSavedSessionState(savedStatePayload);
-    
-      // Show summary
-      const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
-      setSessionSummary({
-        isSaveAndExit: true,
-        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-        period: currentSession.period,
-        completions: sessionCompletions,
-        partialTask: {
-          ...currentTask,
-          partialTime: currentTaskTimeSpent
-        },
-        missedTasks: missedTasks,
-        totalTime: Math.round((3600 - sessionTime) / 60),
-        remainingTime: Math.round(sessionTime / 60)
-      });
-    
-      setShowSessionSummary(true);
-      setIsTimerRunning(false);
-    } catch (error) {
-      console.error('Failed to save session:', error);
-      alert('Failed to save session: ' + error.message);
-    } finally {
-      setSavingSession(false);
-    }
-  };
-
-  // Wall-clock-based timer: immune to tab throttling.
-  // Records real Date.now() when started; each tick computes true elapsed time.
-  useEffect(() => {
-    if (isTimerRunning && sessionTime > 0) {
-      // Record wall-clock start point whenever the timer (re)starts
-      timerStartWallRef.current = Date.now();
-      timerStartSessionRef.current = sessionTime;
-
-      const interval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
-        const remaining = timerStartSessionRef.current - elapsed;
-        if (remaining <= 0) {
-          setSessionTime(0);
-          endSession(true, null, null, 0); // pass actualRemaining=0 to avoid stale closure
-        } else {
-          setSessionTime(remaining);
-        }
-      }, 500); // poll every 500ms for responsiveness; wall-clock keeps it accurate
-
-      return () => clearInterval(interval);
-    } else if (sessionTime === 0 && isTimerRunning) {
-      endSession(true);
-    }
-  }, [isTimerRunning]); // only re-run when timer starts/stops, NOT on every tick
-
-  // When tab becomes visible again after being hidden, snap sessionTime to
-  // the true wall-clock-based remaining time so any throttle gap is corrected instantly.
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && isTimerRunning && timerStartWallRef.current !== null) {
-        const elapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
-        const remaining = Math.max(0, timerStartSessionRef.current - elapsed);
-        setSessionTime(remaining);
-        if (remaining === 0) endSession(true, null, null, 0);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isTimerRunning]);
-
-  const completeTask = async () => {
-    if (!currentSession) return;
-  
-    setMarkingComplete(true);
-  
-    try {
-      const task = currentSession.tasks[currentTaskIndex];
-      const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-    
-      // ✅ Get accumulated time from task (from database)
-      const previousPartialTime = task.accumulatedTime || 0;
-    
-
-    
-      // Calculate total time
-      const totalTimeSpent = currentSessionTime + previousPartialTime;
-
-      
-      // Complete the task with total time
-      await apiCall(`/tasks/${task.id}/complete`, 'POST', {
-        timeSpent: totalTimeSpent
-      });
-      
-      // Add to completions
-      setSessionCompletions(prev => [...prev, { 
-        task, 
-        timeSpent: totalTimeSpent 
-      }]);
-      
-      // Update local state
-      const updatedTasks = tasks.map(t => 
-        t.id === task.id ? { ...t, completed: true } : t
-      );
-      setTasks(updatedTasks);
-      
-
-      
-      // Move to next task or end session
-      if (currentTaskIndex < currentSession.tasks.length - 1) {
-        setCurrentTaskIndex(prev => prev + 1);
-        setTaskStartTime(sessionTime);
-      } else {
-        // Pass the completed task data directly to avoid state timing issues
-        await endSession(true, task.id, { task, timeSpent: totalTimeSpent });
-      }
-    } catch (error) {
-      console.error('Failed to complete task:', error);
-      alert('Failed to complete task: ' + error.message);
-    } finally {
-      setMarkingComplete(false);
-    }
-  };
-
-  const endSessionCalledRef = React.useRef(false);
-  const endSession = async (natural = false, justCompletedTaskId = null, justCompletedTaskData = null, actualRemaining = null) => {
-    // Prevent double-call when both interval and useEffect fire at timer=0
-    if (natural && endSessionCalledRef.current) return;
-    if (natural) endSessionCalledRef.current = true;
-    if (!natural) {
-      setEndingSession(true);
-    }
-  
-    try {
-      const currentTask = currentSession.tasks[currentTaskIndex];
-      // Use actualRemaining if provided (avoids stale sessionTime closure in wall-clock timer)
-      const effectiveRemaining = actualRemaining !== null ? actualRemaining : sessionTime;
-      const currentTaskTimeSpent = currentTask ? Math.round((taskStartTime - effectiveRemaining) / 60) : 0;
-    
-      // ✅ Save partial time if any time spent on current task (non-blocking)
-      // BUT: Don't save if this task was just completed OR is in session completions
-      const wasJustCompleted = currentTask && (currentTask.id === justCompletedTaskId);
-      const isInCompletions = currentTask && sessionCompletions.find(c => c.task.id === currentTask.id);
-      
-      if (currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions) {
-        const previousAccumulatedTime = currentTask.accumulatedTime || 0;
-        const newAccumulatedTime = previousAccumulatedTime + currentTaskTimeSpent;
-      
-        try {
-          await apiCall(`/tasks/${currentTask.id}/partial`, 'PATCH', {
-            accumulatedTime: newAccumulatedTime
-          });
-        } catch (partialError) {
-          console.error('Failed to save partial time (non-critical):', partialError);
-          // Continue anyway
-        }
-      }
-    
-      // Delete saved session state and mark session completed in DB
-      try {
-        await apiCall('/sessions/saved-state', 'DELETE');
-        setSavedSessionState(null);
-        if (currentSession.dbId && !natural === false) {
-          // Mark session complete only on natural end (timer expired or End Session)
-        }
-        if (currentSession.dbId) {
-          await apiCall(`/sessions/${currentSession.dbId}`, 'PATCH', { completed: true });
-        }
-      } catch (deleteError) {
-        console.error('Failed to delete saved state (non-critical):', deleteError);
-        // Continue anyway
-      }
-    
-      // Determine missed tasks
-      // Start from current task index, but skip if current task was completed or partially worked on
-      let missedTaskStartIndex = currentTaskIndex;
-      
-      // If current task was just completed OR is in completions, skip it
-      if (wasJustCompleted || isInCompletions) {
-        missedTaskStartIndex = currentTaskIndex + 1;
-      } 
-      // If current task has partial time but wasn't completed, it stays in the list (shown as partial)
-      else if (currentTask && currentTaskTimeSpent > 0) {
-        missedTaskStartIndex = currentTaskIndex + 1;
-      }
-    
-      const missedTasks = currentSession.tasks.slice(missedTaskStartIndex);
-    
-      // Build completions list - include just-completed task if provided
-      let completionsList = [...sessionCompletions];
-      if (justCompletedTaskData) {
-        completionsList.push(justCompletedTaskData);
-      }
-    
-      setSessionSummary({
-        isSaveAndExit: false,
-        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
-        period: currentSession.period,
-        completions: completionsList,
-        partialTask: currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions ? {
-          ...currentTask,
-          partialTime: currentTaskTimeSpent
-        } : null,
-        missedTasks: missedTasks,
-        totalTime: Math.round((3600 - sessionTime) / 60),
-        remainingTime: Math.round(sessionTime / 60)
-      });
-    
-      setShowSessionSummary(true);
-      setIsTimerRunning(false);
-    
-      // Remove completed session from today's list
-      setSessions(prev => prev.filter(s => s.id !== currentSession.id));
-    } catch (error) {
-      console.error('Failed to end session:', error);
-      alert('Failed to end session: ' + error.message);
-    } finally {
-      if (!natural) {
-        setEndingSession(false);
-      }
-    }
-  };
-
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -3562,768 +2886,170 @@ const fetchCanvasTasks = async () => {
           </div>
         )}
         {currentPage === 'sessions' && (() => {
-          const todayFull = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-          const todayDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
           return (
-          <div className="max-w-5xl mx-auto p-6">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-xl p-6 mb-6 flex items-center justify-between">
+          <div className="max-w-2xl mx-auto p-6">
+            <div className="flex items-center justify-between mb-6">
               <div>
-                <h2 className="text-2xl font-bold mb-1">Today's Sessions</h2>
-                <p className="text-purple-200">{todayFull}</p>
+                <h2 className="text-2xl font-bold text-gray-900">Sessions</h2>
+                <p className="text-gray-500 text-sm mt-1">Start working on a task — timer runs while you work</p>
               </div>
-              <button
-                onClick={() => setShowAddSessionModal(true)}
-                className="bg-white text-purple-600 px-4 py-2 rounded-lg font-semibold hover:bg-purple-50 flex items-center gap-2"
-              >
-                <span className="text-lg font-bold">+</span> Add Session
+              <button onClick={loadSessionTasks} className="p-2 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors" title="Refresh">
+                <RefreshCw className="w-5 h-5" />
               </button>
             </div>
 
             {sessionsLoading ? (
-              <div className="text-center py-16">
-                <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-                <p className="text-gray-500">Building your sessions...</p>
+              <div className="flex items-center justify-center py-16">
+                <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
               </div>
-            ) : sessions.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-md p-12 text-center">
-                <AlertCircle className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Sessions Today</h3>
-                <p className="text-gray-500 mb-4">
-                  {new Date().getDay() === 0 || new Date().getDay() === 6
-                    ? "It's the weekend — enjoy your break!"
-                    : "No study periods are scheduled for today, or all tasks are complete. You can add a custom session above."}
-                </p>
+            ) : sessionTasks.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <Play className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p className="font-medium">No tasks to work on</p>
+                <p className="text-sm mt-1">All caught up! Add tasks via Canvas sync.</p>
               </div>
             ) : (
-              <div className="space-y-4">
-                {sessions.map(session => {
-                  const hasSavedState = savedSessionState && (
-                    savedSessionState.sessionId === session.id ||
-                    savedSessionState.period === session.period
-                  );
-                  const tagColors = {
-                    'Get it Done': 'bg-green-100 text-green-800 border-green-300',
-                    'Make a Start': 'bg-blue-100 text-blue-800 border-blue-300',
-                    'Wrap it Up': 'bg-amber-100 text-amber-800 border-amber-300'
-                  };
+              <div className="space-y-3">
+                {sessionTasks.map(task => {
+                  const hasProgress = task.accumulatedTime > 0;
+                  const classColor = getClassColor(task.class);
+                  const dueLabel = task.deadlineDateRaw
+                    ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : '—';
                   return (
-                    <div key={session.id} className={`bg-white rounded-xl shadow-md overflow-hidden border-2 transition-colors ${session.isExtra ? 'border-purple-200' : 'border-gray-100 hover:border-purple-200'}`}>
-                      {/* Session header */}
-                      <div className={`px-6 py-4 flex items-center justify-between ${session.isExtra ? 'bg-purple-50' : 'bg-gray-50'}`}>
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 bg-purple-600 text-white rounded-full flex items-center justify-center font-bold text-lg">
-                            {session.period}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-gray-900">Period {session.period}</span>
-                              {session.isExtra && (
-                                <span className="px-2 py-0.5 text-xs font-semibold rounded-full bg-purple-100 text-purple-700 border border-purple-300">
-                                  Added
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-sm text-gray-500">{session.tasks.length} tasks · ~{Math.round(session.totalTime)} min</p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => deleteSession(session.dbId)}
-                            className="p-2 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                            title="Remove session"
-                          >
-                            <X className="w-5 h-5" />
-                          </button>
-                          {hasSavedState ? (
-                            <button onClick={resumeSession} className="bg-blue-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-blue-700 flex items-center gap-2">
-                              <Play className="w-4 h-4" /> Resume
-                            </button>
-                          ) : (
-                            <button onClick={() => startSession(session)} className="bg-green-500 text-white px-5 py-2 rounded-lg font-semibold hover:bg-green-600 flex items-center gap-2">
-                              <Play className="w-4 h-4" /> Start
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                      {/* Task list */}
-                      <div className="divide-y divide-gray-50">
-                        {session.tasks.map((task, idx) => {
-                          const tagColor = tagColors[task.sessionTag] || 'bg-gray-100 text-gray-800 border-gray-300';
-                          const hasPartial = (session.partialTaskTimes || {})[task.id] > 0;
-                          return (
-                            <div key={task.id || idx} className="flex items-center gap-3 px-6 py-3">
-                              <span className="w-6 h-6 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-                                {idx + 1}
+                    <div key={task.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:border-purple-200 transition-colors overflow-hidden">
+                      <div className="flex items-center gap-4 p-4">
+                        {/* Class color bar */}
+                        <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                        {/* Task info */}
+                        <div className="flex-1 min-w-0">
+                          <a href={task.url} target="_blank" rel="noopener noreferrer"
+                            className="font-semibold text-gray-900 hover:text-purple-600 hover:underline text-sm line-clamp-1">
+                            {cleanTaskTitle(task)}
+                          </a>
+                          <div className="flex items-center gap-3 mt-1 flex-wrap">
+                            <span className="text-xs text-gray-500 flex items-center gap-1">
+                              <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                              {task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}
+                            </span>
+                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                              <Calendar className="w-3 h-3" />
+                              Due {dueLabel}
+                            </span>
+                            <span className="text-xs text-gray-400 flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {task.userEstimate || task.estimatedTime} min est.
+                            </span>
+                            {hasProgress && (
+                              <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                                <Timer className="w-3 h-3" />
+                                {task.accumulatedTime} min logged
                               </span>
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <a href={task.url} target="_blank" rel="noopener noreferrer" className="font-medium text-gray-900 truncate hover:text-purple-600 hover:underline text-sm">
-                                    {cleanTaskTitle(task)}
-                                  </a>
-                                  {task.sessionTag && (
-                                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full border flex-shrink-0 ${tagColor}`}>
-                                      {task.sessionTag}
-                                    </span>
-                                  )}
-                                  {hasPartial && (
-                                    <span className="px-2 py-0.5 text-xs rounded-full bg-amber-50 text-amber-700 border border-amber-200 flex-shrink-0">
-                                      {(session.partialTaskTimes || {})[task.id]}min logged
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-xs text-gray-400 mt-0.5">{task.class} · {task.userEstimate || task.estimatedTime} min est.</p>
-                              </div>
-                            </div>
-                          );
-                        })}
+                            )}
+                          </div>
+                        </div>
+                        {/* Start/Resume button */}
+                        <button
+                          onClick={() => startTaskSession(task)}
+                          className={`flex-shrink-0 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-1.5 transition-colors ${
+                            hasProgress
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-green-500 text-white hover:bg-green-600'
+                          }`}
+                        >
+                          <Play className="w-4 h-4" />
+                          {hasProgress ? 'Resume' : 'Start'}
+                        </button>
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
-
-            {/* Add Session Modal */}
-            {showAddSessionModal && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm">
-                  <div className="flex items-center justify-between mb-5">
-                    <div>
-                      <h3 className="text-lg font-bold text-gray-900">Add Session</h3>
-                      <p className="text-sm text-gray-500">Add a study or class work period for today</p>
-                    </div>
-                    <button onClick={() => setShowAddSessionModal(false)} className="text-gray-400 hover:text-gray-600">
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Period</label>
-                    <select
-                      value={addSessionForm.period}
-                      onChange={e => setAddSessionForm(f => ({ ...f, period: e.target.value }))}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                    >
-                      {selectedPeriods.map(p => (
-                        <option key={p} value={String(p)}>Period {p}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex gap-3 mt-6">
-                    <button onClick={() => setShowAddSessionModal(false)} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 font-medium">
-                      Cancel
-                    </button>
-                    <button onClick={addSession} className="flex-1 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700">
-                      Add Session
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
           );
         })()}
-        {currentPage === 'session-active' && currentSession && (
-          showSessionSummary ? (
-            <div className="max-w-4xl mx-auto p-6">
+
+        {currentPage === 'session-active' && currentSessionTask && (
+          showSessionComplete ? (
+            <div className="max-w-lg mx-auto p-6">
               <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
                 <Check className="w-16 h-16 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">
-                  {sessionSummary.isSaveAndExit ? 'Session Saved!' : 'Session Complete!'}
-                </h2>
-                <p className="text-lg">
-                  {sessionSummary.day} - Period {sessionSummary.period}
-                </p>
+                <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
+                <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6 mb-6">
-                <h3 className="text-xl font-bold mb-4">Summary</h3>
-                <div className="grid grid-cols-2 gap-4 mb-6">
-                  <div className="bg-blue-50 p-4 rounded-lg text-center">
-                    <div className="text-3xl font-bold text-blue-600">{sessionSummary.completions.length}</div>
-                    <div className="text-sm text-gray-600">Tasks Completed</div>
-                  </div>
-                  <div className="bg-purple-50 p-4 rounded-lg text-center">
-                    <div className="text-3xl font-bold text-purple-600">{sessionSummary.totalTime} min</div>
-                    <div className="text-sm text-gray-600">Time Used</div>
-                  </div>
-                </div>
-                
-                {/* Completed Tasks */}
-                {sessionSummary.completions.length > 0 && (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-semibold text-gray-700">Completed Tasks</h4>
-                    {sessionSummary.completions.map((comp, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{cleanTaskTitle(comp.task)}</span>
-                        <span className="text-sm text-gray-600">{comp.timeSpent} min</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Partially Completed Task */}
-                {sessionSummary.partialTask && (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-semibold text-gray-700">Partially Completed</h4>
-                    <div className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
-                      <span className="font-medium text-gray-900">{cleanTaskTitle(sessionSummary.partialTask)}</span>
-                      <span className="text-sm text-orange-600">{sessionSummary.partialTask.partialTime} min progress</span>
-                    </div>
-                  </div>
-                )}
-                
-                {/* Missed Tasks */}
-                {sessionSummary.missedTasks && sessionSummary.missedTasks.length > 0 && (
-                  <div className="space-y-2 mb-4">
-                    <h4 className="font-semibold text-gray-700">
-                      {sessionSummary.isSaveAndExit ? 'Remaining Tasks' : 'Missed Tasks (Rescheduled)'}
-                    </h4>
-                    {sessionSummary.missedTasks.map((task, idx) => (
-                      <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                        <span className="font-medium text-gray-900">{cleanTaskTitle(task)}</span>
-                        <span className="text-sm text-gray-600">
-                          {sessionSummary.isSaveAndExit ? 'Saved for later' : 'Rescheduled'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                
-                {/* Save and Exit info */}
-                {sessionSummary.isSaveAndExit && sessionSummary.remainingTime > 0 && (
-                  <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <p className="text-sm text-blue-800">
-                      <strong>{sessionSummary.remainingTime} minutes</strong> saved for when you resume this session.
-                    </p>
-                  </div>
-                )}
+              <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
+                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent * 60)}</div>
+                <div className="text-gray-500">Total time spent</div>
               </div>
-              <button onClick={() => {
-                setShowSessionSummary(false);
-                setCurrentSession(null);
-                setCurrentPage('hub');
-                loadUserData(token);
-              }} className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                Back to Hub
+              <button onClick={() => { setShowSessionComplete(false); setCurrentPage('sessions'); loadUserData(token); }}
+                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                Back to Sessions
               </button>
             </div>
           ) : (
-            <div className="max-w-4xl mx-auto p-6">
-              <div className="bg-gradient-to-br from-purple-500 to-blue-600 text-white rounded-xl p-8 mb-6">
+            <div className="max-w-lg mx-auto p-6">
+              <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white rounded-xl p-8 mb-5">
                 <div className="text-center mb-6">
-                  <h2 className="text-2xl font-bold mb-2">
-                    {new Date().toLocaleDateString('en-US', { weekday: 'long' })} · Period {currentSession.period}
-                  </h2>
-                  <div className="text-6xl font-bold mb-2">{formatTime(sessionTime)}</div>
-                  <p className="text-purple-100">Time Remaining</p>
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(currentSessionTask.class) }} />
+                    <span className="text-purple-200 text-sm font-medium">
+                      {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g, '') : 'No Class'}
+                    </span>
+                  </div>
+                  <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer"
+                    className="block text-xl font-bold mb-6 hover:underline">{cleanTaskTitle(currentSessionTask)}</a>
+                  <div className="text-7xl font-bold mb-1 tabular-nums">{formatTime(sessionElapsed)}</div>
+                  <p className="text-purple-200 text-sm">Time on this task</p>
                 </div>
-                <div className="flex gap-4 justify-center">
-                  <button onClick={() => setIsTimerRunning(!isTimerRunning)} className="bg-white text-purple-600 px-6 py-3 rounded-lg font-semibold hover:bg-purple-50 flex items-center gap-2">
-                    {isTimerRunning ? (
-                      <>
-                        <Pause className="w-5 h-5" />
-                        Pause Timer
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-5 h-5" />
-                        Resume Timer
-                      </>
-                    )}
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={() => {
+                      if (isTimerRunning) {
+                        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+                        const snapped = timerBaseElapsedRef.current + wallElapsed;
+                        setSessionElapsed(snapped);
+                        timerBaseElapsedRef.current = snapped;
+                      }
+                      setIsTimerRunning(prev => !prev);
+                    }}
+                    className="bg-white bg-opacity-20 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-opacity-30 flex items-center gap-2"
+                  >
+                    {isTimerRunning ? <><Pause className="w-4 h-4" /> Pause Timer</> : <><Play className="w-4 h-4" /> Resume Timer</>}
                   </button>
-                  <button onClick={pauseSession} disabled={savingSession} className="bg-purple-700 text-white px-6 py-3 rounded-lg font-semibold hover:bg-purple-800 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                    {savingSession ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Please Wait...
-                      </>
-                    ) : (
-                      <>
-                        <X className="w-5 h-5" />
-                        Save & Exit
-                      </>
-                    )}
-                  </button>
-                  <button onClick={() => endSession(false)} disabled={endingSession} className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">
-                    {endingSession ? (
-                      <>
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Please Wait...
-                      </>
-                    ) : (
-                      'End Session'
-                    )}
+                  <button onClick={pauseTaskSession} disabled={savingSession}
+                    className="bg-purple-800 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
+                    {savingSession
+                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                      : <><X className="w-4 h-4" /> Save & Exit</>}
                   </button>
                 </div>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-semibold text-gray-900">Current Task</h3>
-                  <span className="text-sm text-gray-600">
-                    Task {currentTaskIndex + 1} of {currentSession.tasks.length}
-                  </span>
+              <div className="bg-white rounded-xl shadow-md p-6 mb-4">
+                <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
+                  <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
+                  {currentSessionTask.deadlineDateRaw && (
+                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
+                      Due {new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                  {currentSessionTask.accumulatedTime > 0 && (
+                    <span className="flex items-center gap-1 text-blue-600 font-medium"><Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime} min previously</span>
+                  )}
                 </div>
-                {currentSession.tasks[currentTaskIndex] && (
-                  <div className="bg-blue-50 border-2 border-blue-300 rounded-lg p-6 mb-6">
-                    <a href={currentSession.tasks[currentTaskIndex].url} target="_blank" rel="noopener noreferrer" className="block text-xl font-bold text-gray-900 mb-4 hover:text-purple-600 hover:underline transition-colors">{cleanTaskTitle(currentSession.tasks[currentTaskIndex])}</a>
-                    <div className="flex items-center gap-4 text-sm text-gray-600 mb-6">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" />
-                        Est. {currentSession.tasks[currentTaskIndex].userEstimate || currentSession.tasks[currentTaskIndex].estimatedTime} min
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" />
-                        Due {currentSession.tasks[currentTaskIndex].dueDate.toLocaleDateString()}
-                      </span>
-                    </div>
-                    <div className="mb-4 text-sm text-gray-600">
-                      {(() => {
-                        const currentTask = currentSession.tasks[currentTaskIndex];
-                        const currentSessionTime = Math.round((taskStartTime - sessionTime) / 60);
-                        const taskId = currentTask.id; // Use parent if exists
-                        const previousTime = partialTaskTimes[taskId] || 0;
-                        const totalTime = currentSessionTime + previousTime;
-                        
-                        if (previousTime > 0) {
-                          return (
-                            <>
-                              Time on this task: {currentSessionTime} min <span className="text-blue-600">(+{previousTime} min from previous session = {totalTime} min total)</span>
-                              {currentTask.segment && (
-                                <span className="text-xs text-gray-500 ml-2">
-                                  (this is a task segment)
-                                </span>
-                              )}
-                            </>
-                          );
-                        }
-                        return `Time on this task: ${currentSessionTime} min`;
-                      })()}
-                    </div>
-                    <button onClick={completeTask} disabled={markingComplete} className="w-full bg-green-500 text-white py-3 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                      {markingComplete ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          Please Wait...
-                        </>
-                      ) : (
-                        <>
-                          <Check className="w-5 h-5" />
-                          Mark Complete
-                        </>
-                      )}
-                    </button>
-                    <button 
-                      onClick={() => openWorkspace(currentSession.tasks[currentTaskIndex])} 
-                      className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 flex items-center justify-center gap-2 mt-3"
-                    >
-                      <BookOpen className="w-5 h-5" />
-                      Open Workspace
-                    </button>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <h4 className="font-semibold text-gray-700 text-sm mb-3">Upcoming in This Session</h4>
-                  {currentSession.tasks.slice(currentTaskIndex + 1).map((task, idx) => {
-                    const taskId = task.id;
-                    const hasPartialTime = partialTaskTimes[taskId] > 0;
-                    return (
-                      <div key={task.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg opacity-60">
-                        <span className="w-6 h-6 bg-gray-400 text-white rounded-full flex items-center justify-center text-sm">
-                          {currentTaskIndex + idx + 2}
-                        </span>
-                        <div className="flex-1">
-                          <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-700 hover:text-purple-600 hover:underline transition-colors">{cleanTaskTitle(task)}</a>
-                          {hasPartialTime && (
-                            <span className="ml-2 text-xs text-blue-600">
-                              ({partialTaskTimes[taskId]} min in progress)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                <button onClick={completeTaskSession} disabled={markingComplete}
+                  className="w-full bg-green-500 text-white py-3.5 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 mb-3">
+                  {markingComplete
+                    ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
+                    : <><Check className="w-5 h-5" /> Mark Complete</>}
+                </button>
+                <button onClick={() => openWorkspace(currentSessionTask)}
+                  className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
+                  <BookOpen className="w-4 h-4" /> Open Workspace
+                </button>
               </div>
             </div>
           )
-        )}
-        {currentPage === 'calendar' && (() => {
-          const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-          const today = new Date();
-
-          // Build 7-day window
-          const todayIdx = today.getDay();
-          const dayOffsets = accountSetup.calendarTodayCentered
-            ? [-3,-2,-1,0,1,2,3]
-            : Array.from({length:7}, (_,i) => i - todayIdx);
-
-          const days = dayOffsets.map(offset => {
-            const d = new Date(today);
-            d.setDate(today.getDate() + offset);
-            return d;
-          });
-
-          const isToday = (d) => d.toDateString() === today.toDateString();
-
-          // Build dayStr from a Date object using LOCAL date parts
-          const toDayStr = (d) =>
-            `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-
-          // Get tasks for a specific day
-          // Uses dueDate local date — same conversion the Task List uses, so calendar
-          // and task list always agree on which day a task belongs to.
-          const getTasksForDay = (dayDate) => {
-            const dayStr = toDayStr(dayDate);
-            return [...tasks, ...newTasks.filter(t => !t.deleted)].filter(t => {
-              if (!t.dueDate) return false;
-              if (toDayStr(t.dueDate) !== dayStr) return false;
-              const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
-              if (isHomeroom && !accountSetup.calendarShowHomeroom) return false;
-              const isDone = t.completed || t.deleted || !!t.submittedAt;
-              if (isDone && !accountSetup.calendarShowCompleted) return false;
-              return true;
-            }).sort((a, b) => {
-              if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
-              if (a.dueDate) return -1;
-              if (b.dueDate) return 1;
-              return (a.priorityOrder ?? 9999) - (b.priorityOrder ?? 9999);
-            });
-          };
-
-          // Text color helper for contrast
-          const getTextColor = (hex) => {
-            try {
-              const h = hex.replace('#','');
-              const r = parseInt(h.substr(0,2),16);
-              const g = parseInt(h.substr(2,2),16);
-              const b = parseInt(h.substr(4,2),16);
-              return (0.299*r + 0.587*g + 0.114*b)/255 > 0.55 ? '#1a1a1a' : '#ffffff';
-            } catch { return '#ffffff'; }
-          };
-
-          const stripHtml = (html) => {
-            if (!html) return '';
-            return html
-              .replace(/<br\s*\/?>/gi,' ').replace(/<\/p>/gi,' ')
-              .replace(/<li>/gi,'• ').replace(/<[^>]+>/g,'')
-              .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&')
-              .replace(/&lt;/g,'<').replace(/&gt;/g,'>')
-              .replace(/&quot;/g,'"').replace(/&#39;/g,"'")
-              .replace(/\s{2,}/g,' ').trim();
-          };
-
-          // Priority lookup
-          const priorityMap = {};
-          tasks.forEach(t => { if (t.priorityOrder) priorityMap[t.id] = t.priorityOrder; });
-
-
-          return (
-            <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
-
-              {/* Header */}
-              <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
-                  <p className="text-sm text-gray-500 mt-0.5">
-                    {accountSetup.calendarTodayCentered ? 'Today-centered view' : 'Weekly view (Sun – Sat)'}
-                    {' · '}
-                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
-                  </p>
-                </div>
-                <button
-                  onClick={() => setCurrentPage('settings')}
-                  className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-                >
-                  <Settings className="w-4 h-4" />
-                  Calendar Settings
-                </button>
-              </div>
-
-              {/* 7-day grid */}
-              <div className="flex-1 overflow-hidden px-4 py-4">
-                <div className="grid grid-cols-7 gap-2 h-full">
-                  {days.map((day, colIdx) => {
-                    const dayTasks = getTasksForDay(day);
-                    const todayCol = isToday(day);
-                    return (
-                      <div
-                        key={colIdx}
-                        className={`flex flex-col rounded-xl border-2 overflow-hidden ${todayCol ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-white'}`}
-                      >
-                        {/* Day header */}
-                        <div className={`px-2 py-2 text-center border-b ${todayCol ? 'bg-purple-600 border-purple-500' : 'bg-gray-50 border-gray-200'}`}>
-                          <p className={`text-xs font-semibold uppercase tracking-wide ${todayCol ? 'text-purple-100' : 'text-gray-500'}`}>
-                            {DAY_NAMES[day.getDay()].slice(0,3)}
-                          </p>
-                          <p className={`text-lg font-bold leading-tight ${todayCol ? 'text-white' : 'text-gray-900'}`}>
-                            {day.getDate()}
-                          </p>
-                          <p className={`text-xs ${todayCol ? 'text-purple-200' : 'text-gray-400'}`}>
-                            {day.toLocaleDateString('en-US',{month:'short'})}
-                          </p>
-                        </div>
-
-                        {/* Task bubbles */}
-                        <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
-                          {dayTasks.length === 0 && (
-                            <p className="text-xs text-gray-300 text-center mt-4">—</p>
-                          )}
-                          {dayTasks.map((task) => {
-                            const color = getClassColor(task.class || '');
-                            const priority = priorityMap[task.id];
-                            const timeStr = task.hasSpecificTime && task.dueDate
-                              ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
-                              : null;
-                            const displayTitle = task.segment
-                              ? `${(task.title||'').replace(/\s*\[[^\]]+\]\s*/,'')} – ${task.segment}`
-                              : (task.title||'').replace(/\s*\[[^\]]+\]\s*/,'');
-                            const isDone = task.completed || task.deleted || !!task.submittedAt;
-                            const isExpanded = calendarExpandedId === task.id;
-
-                            return (
-                              <div
-                                key={task.id}
-                                className={`rounded-lg text-xs cursor-pointer transition-all duration-200 select-none ${isExpanded ? 'shadow-lg z-10 relative' : 'hover:brightness-110'}`}
-                                style={{ backgroundColor: color, color: getTextColor(color) }}
-                                onClick={() => {
-                                  if (isExpanded) {
-                                    if (task.url) window.open(task.url, '_blank', 'noopener,noreferrer');
-                                    setCalendarExpandedId(null);
-                                  } else {
-                                    setCalendarExpandedId(task.id);
-                                  }
-                                }}
-                              >
-                                {!isExpanded && (
-                                  <div className="px-1.5 py-1 flex items-start gap-1">
-                                    {priority && <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>}
-                                    <span className={`truncate flex-1 ${isDone ? 'line-through opacity-60' : ''}`}>
-                                      {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
-                                      {displayTitle}
-                                    </span>
-                                  </div>
-                                )}
-                                {isExpanded && (
-                                  <div className="p-2 space-y-1.5">
-                                    <div className="flex items-start justify-between gap-1">
-                                      <div className={`font-semibold leading-tight ${isDone ? 'line-through opacity-70' : ''}`}>
-                                        {priority && <span className="opacity-80">#{priority} · </span>}
-                                        {timeStr && <span className="opacity-80">{timeStr} · </span>}
-                                        {displayTitle}
-                                      </div>
-                                      <button
-                                        className="opacity-70 hover:opacity-100 flex-shrink-0 ml-1"
-                                        onClick={(e) => { e.stopPropagation(); setCalendarExpandedId(null); }}
-                                      >✕</button>
-                                    </div>
-                                    {isDone && (
-                                      <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">✓ Done</span>
-                                    )}
-                                    {stripHtml(task.description) ? (
-                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-5">{stripHtml(task.description)}</p>
-                                    ) : (
-                                      <p className="text-xs opacity-50 italic">No description</p>
-                                    )}
-                                    <p className="text-xs opacity-60 mt-1">Tap again to open in Canvas →</p>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {currentPage === 'marks' && (
-          <div className="max-w-6xl mx-auto p-6">
-            {/* Header */}
-            <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-64 h-64 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
-              <div className="flex items-center gap-3 mb-2">
-                <BarChart3 className="w-8 h-8" />
-                <h1 className="text-3xl font-bold">Your Marks</h1>
-              </div>
-              <p className="text-blue-100">Track your progress and see how you stack up</p>
-              {courses.length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-4">
-                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
-                    <div className="text-2xl font-bold">
-                      {(() => {
-                        const scored = courses.filter(c => c.current_period_score != null);
-                        if (scored.length === 0) return 'N/A';
-                        const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score), 0) / scored.length;
-                        return avg.toFixed(1) + '%';
-                      })()}
-                    </div>
-                    <div className="text-xs text-blue-100">Period Average</div>
-                  </div>
-                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
-                    <div className="text-2xl font-bold">{courses.length}</div>
-                    <div className="text-xs text-blue-100">Active Courses</div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* No courses yet */}
-            {courses.length === 0 ? (
-              <div className="bg-white rounded-xl shadow-md p-12 text-center">
-                <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-xl font-bold text-gray-900 mb-2">No Courses Yet</h3>
-                <p className="text-gray-500 mb-1">Your courses will appear here after your first Canvas sync.</p>
-                <p className="text-sm text-gray-400">Go to Settings → Sync Canvas to get started.</p>
-              </div>
-            ) : (
-              <>
-                {/* Grade cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {[...courses].sort((a, b) => {
-                    const aScore = a.current_period_score ?? null;
-                    const bScore = b.current_period_score ?? null;
-                    const aNum = aScore != null ? parseFloat(aScore) : null;
-                    const bNum = bScore != null ? parseFloat(bScore) : null;
-                    if (aNum === null && bNum === null) return 0;
-                    if (aNum === null) return 1;
-                    if (bNum === null) return -1;
-                    return aNum - bNum; // lowest score first
-                  }).map((course, index) => {
-                    const avgData = courseAverages[course.course_id];
-                    const classAverage = avgData?.averageScore ?? null;
-                    const studentCount = avgData?.studentCount ?? 0;
-                    // Show current grading period score only — no fallback to all-year
-                    const displayScore = course.current_period_score ?? null;
-                    const displayGrade = course.current_period_grade ?? null;
-                    const hasScore = displayScore != null && parseFloat(displayScore) > 0;
-                    const userScore = hasScore ? parseFloat(displayScore) : null;
-                    const difference = (userScore !== null && classAverage !== null && studentCount > 1)
-                      ? userScore - classAverage
-                      : null;
-
-                    // Performance tier
-                    let perfColor = 'text-gray-500';
-                    let perfBg = 'bg-gray-50';
-                    let perfBorder = 'border-gray-200';
-                    let PerfIcon = Target;
-                    let perfLabel = 'No Score Yet';
-                    if (userScore !== null) {
-                      if (userScore >= 90) { perfColor = 'text-emerald-600'; perfBg = 'bg-emerald-50'; perfBorder = 'border-emerald-200'; PerfIcon = Award; perfLabel = 'Excellent'; }
-                      else if (userScore >= 80) { perfColor = 'text-blue-600'; perfBg = 'bg-blue-50'; perfBorder = 'border-blue-200'; PerfIcon = TrendingUp; perfLabel = 'Great'; }
-                      else if (userScore >= 70) { perfColor = 'text-purple-600'; perfBg = 'bg-purple-50'; perfBorder = 'border-purple-200'; PerfIcon = Target; perfLabel = 'On Track'; }
-                      else if (userScore >= 60) { perfColor = 'text-amber-600'; perfBg = 'bg-amber-50'; perfBorder = 'border-amber-200'; PerfIcon = AlertCircle; perfLabel = 'Needs Work'; }
-                      else { perfColor = 'text-red-600'; perfBg = 'bg-red-50'; perfBorder = 'border-red-200'; PerfIcon = TrendingDown; perfLabel = 'At Risk'; }
-                    }
-
-                    return (
-                      <div key={course.id} className={`bg-white rounded-xl shadow-md border-2 ${perfBorder} overflow-hidden hover:shadow-lg transition-all duration-200`}
-                        style={{ animationDelay: `${index * 80}ms` }}>
-                        {/* Card header */}
-                        <div className={`${perfBg} px-6 py-4 flex items-start justify-between`}>
-                          <div className="flex-1 mr-4">
-                            <h3 className="font-bold text-gray-900 text-base leading-tight">{course.name}</h3>
-                            {course.course_code && <p className="text-xs text-gray-500 mt-0.5">{course.course_code}</p>}
-                          </div>
-                          <div className="text-right flex-shrink-0">
-                            <div className={`text-4xl font-black ${perfColor}`}>
-                              {displayGrade || (hasScore ? `${userScore.toFixed(0)}%` : '—')}
-                            </div>
-                            {hasScore && displayGrade && (
-                              <div className="text-sm text-gray-500 font-semibold">{userScore.toFixed(1)}%</div>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="px-6 py-4 space-y-4">
-                          {/* Score bar */}
-                          {hasScore && (
-                            <div>
-                              {/* Your score bar */}
-                              <div className="flex justify-between text-xs text-gray-500 mb-1">
-                                <span className="font-semibold text-gray-700">Your Score</span>
-                                {difference !== null && (
-                                  <span className={`font-bold ${difference >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                    {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs Average
-                                  </span>
-                                )}
-                              </div>
-                              <div className="relative h-7 bg-gray-100 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold`}
-                                  style={{
-                                    width: `${Math.min(userScore, 100)}%`,
-                                    background: userScore >= 80 ? 'linear-gradient(90deg, #7c3aed, #3b82f6)' : userScore >= 60 ? 'linear-gradient(90deg, #f59e0b, #ef4444)' : 'linear-gradient(90deg, #ef4444, #dc2626)',
-                                    transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                    animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 200}ms both`
-                                  }}
-                                >
-                                  {userScore >= 20 && `${userScore.toFixed(0)}%`}
-                                </div>
-                              </div>
-
-                              {/* Class average bar */}
-                              {classAverage !== null && studentCount > 1 && (
-                                <div className="mt-1.5">
-                                  <div className="flex justify-between text-xs text-gray-400 mb-1">
-                                    <span>Global Average ({studentCount} students)</span>
-                                    <span>{classAverage.toFixed(1)}%</span>
-                                  </div>
-                                  <div className="relative h-4 bg-gray-100 rounded-full overflow-hidden">
-                                    <div
-                                      className="h-full bg-gray-300 rounded-full"
-                                      style={{
-                                        width: `${Math.min(classAverage, 100)}%`,
-                                        transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                        animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 400}ms both`
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Performance badge + final grade */}
-                          <div className="flex items-center justify-between">
-                            <div className={`flex items-center gap-1.5 ${perfColor} text-sm font-semibold`}>
-                              <PerfIcon className="w-4 h-4" />
-                              <span>{perfLabel}</span>
-                            </div>
-                            {course.grading_period_title && (
-                              <div className="text-xs text-gray-400">
-                                {course.grading_period_title}
-                              </div>
-                            )}
-                            {!course.grading_period_title && course.final_grade && course.final_grade !== displayGrade && (
-                              <div className="text-xs text-gray-400">
-                                Final: <span className="font-semibold text-gray-600">{course.final_grade}</span>
-                                {course.final_score && ` (${parseFloat(course.final_score).toFixed(1)}%)`}
-                              </div>
-                            )}
-                            {!hasScore && (
-                              <span className="text-xs text-gray-400 italic">Sync Canvas to see your grade</span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            )}
-
-            {/* CSS animation */}
-            <style>{`
-              @keyframes markBarSlide {
-                from { width: 0%; opacity: 0.3; }
-                to { opacity: 1; }
-              }
-            `}</style>
-          </div>
         )}
         {currentPage === 'settings' && (
           <div className="max-w-4xl mx-auto p-6">
