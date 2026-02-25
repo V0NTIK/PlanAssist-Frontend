@@ -1094,6 +1094,225 @@ const fetchCanvasTasks = async () => {
   };
 
 
+  const handleStartEditTime = (taskId, currentTime) => {
+    setEditingTimeTaskId(taskId);
+    setTempTimeValue(currentTime.toString());
+  };
+
+  const handleTimeInputChange = (e) => {
+    const value = e.target.value;
+    // Only allow numbers
+    if (/^\d*$/.test(value)) {
+      const numValue = parseInt(value) || 0;
+      // Limit to 300 minutes
+      if (numValue <= 300) {
+        setTempTimeValue(value);
+      }
+    }
+  };
+
+  const handleSaveTimeEstimate = async (taskId) => {
+    try {
+      const newTime = parseInt(tempTimeValue) || 0;
+      if (newTime < 1 || newTime > 300) {
+        alert('Please enter a time between 1 and 300 minutes');
+        return;
+      }
+
+      // Update local state
+      const updatedTasks = tasks.map(t =>
+        t.id === taskId ? { ...t, userEstimate: newTime } : t
+      );
+      setTasks(updatedTasks);
+
+      // Update backend
+      await apiCall(`/tasks/${taskId}/estimate`, 'PATCH', {
+        userEstimate: newTime
+      });
+
+      setEditingTimeTaskId(null);
+      setTempTimeValue('');
+      setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
+    } catch (error) {
+      console.error('Error updating time estimate:', error);
+      alert('Error updating time estimate: ' + error.message);
+    }
+  };
+
+  const handleCancelEditTime = () => {
+    setEditingTimeTaskId(null);
+    setTempTimeValue('');
+  };
+
+  const handleSplitTask = async (taskId) => {
+    try {
+      const task = tasks.find(t => t.id === taskId);
+      if (!task) return;
+      
+      // Call the backend split endpoint
+      const segmentNames = splitSegments.map(seg => seg.name);
+      const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segmentNames });
+      
+      if (result.success) {
+        // Reload tasks from server to get the new segments
+        await loadTasks();
+        
+        // Open the new tasks sidebar to let user prioritize segments
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true);
+        
+        setShowSplitTask(null);
+        setSplitSegments([{ name: 'Part 1' }]);
+      }
+    } catch (error) {
+      console.error('Error splitting task:', error);
+      alert('Error splitting task: ' + error.message);
+    }
+  };
+
+  // Drag-and-drop functions
+  const handleDragStart = (e, task) => {
+    setDraggedTask(task);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (e, task) => {
+    e.preventDefault();
+    if (draggedTask && draggedTask.id !== task.id) {
+      setDragOverTask(task);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedTask(null);
+    setDragOverTask(null);
+  };
+
+  const handleDrop = async (e, dropTask) => {
+    e.preventDefault();
+    if (!draggedTask || draggedTask.id === dropTask.id) return;
+
+    const reorderedTasks = [...tasks];
+    const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
+    const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
+
+    if (draggedIndex >= 0) {
+      // Dragging within main list
+      const [removed] = reorderedTasks.splice(draggedIndex, 1);
+      reorderedTasks.splice(dropIndex, 0, removed);
+      setTasks(reorderedTasks);
+    } else {
+      // Dragging from sidebar to main list - insert at drop position
+      const updatedNewTasks = newTasks.filter(t => t.id !== draggedTask.id);
+      reorderedTasks.splice(dropIndex, 0, draggedTask);
+      
+      setTasks(reorderedTasks);
+      setNewTasks(updatedNewTasks);
+      
+      // Clear new flag for this task
+      try {
+        await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [draggedTask.id] });
+      } catch (error) {
+        console.error('Failed to clear new flag:', error);
+      }
+      
+      // Close sidebar if no more new tasks
+      if (updatedNewTasks.length === 0) {
+        setNewTasksSidebarOpen(false);
+      }
+    }
+    
+    // Send new order to backend
+    try {
+      const taskOrder = reorderedTasks.map(t => t.id);
+      await apiCall('/tasks/reorder', 'POST', { taskOrder });
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to save task order:', error);
+      // Don't show alert - reordering still works locally and will sync on next save
+    }
+
+    setDraggedTask(null);
+    setDragOverTask(null);
+  };
+
+  const moveNewTaskToMain = async (taskId) => {
+    const taskToMove = newTasks.find(t => t.id === taskId);
+    if (!taskToMove) return;
+
+    try {
+      // Clear the is_new flag
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [taskId] });
+      
+      // Move to main list
+      setNewTasks(newTasks.filter(t => t.id !== taskId));
+      setTasks([...tasks, taskToMove]);
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to move task:', error);
+      alert('Failed to move task');
+    }
+  };
+
+  const clearAllNewTasks = async () => {
+    if (newTasks.length === 0) return;
+    
+    try {
+      const taskIds = newTasks.map(t => t.id);
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
+      
+      // Move all to main list
+      setTasks([...tasks, ...newTasks]);
+      setNewTasks([]);
+      setNewTasksSidebarOpen(false);
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to clear new tasks:', error);
+      alert('Failed to clear new tasks');
+    }
+  };
+
+  const closeSidebarWithoutSaving = async () => {
+    if (newTasks.length > 0) {
+      const confirmClose = window.confirm(
+        `You have ${newTasks.length} new task(s) that haven't been prioritized. Close sidebar to automatically add them to the bottom of your list?`
+      );
+      if (!confirmClose) return;
+      
+      // Auto-add all new tasks to the bottom of the list
+      const updatedTasks = [...tasks, ...newTasks];
+      setTasks(updatedTasks);
+      
+      // Clear new flags for these tasks
+      try {
+        await apiCall('/tasks/clear-new-flags', 'POST', { 
+          taskIds: newTasks.map(t => t.id) 
+        });
+      } catch (error) {
+        console.error('Failed to clear new flags:', error);
+      }
+      
+      setHasUnsavedChanges(true);
+    }
+    setNewTasksSidebarOpen(false);
+    setNewTasks([]);
+  };
+
+  const handleIgnoreTask = async (taskId) => {
+    try {
+      // Call the ignore endpoint to mark task as deleted
+      await apiCall(`/tasks/${taskId}/ignore`, 'POST');
+      
+      // Remove from newTasks array in UI
+      setNewTasks(prevTasks => prevTasks.filter(t => t.id !== taskId));
+      
+      console.log(`✓ Task ${taskId} ignored successfully`);
+    } catch (error) {
+      console.error('Failed to ignore task:', error);
+      alert('Failed to ignore task: ' + error.message);
+    }
+  };
+
   const handleSaveAndAdjustPlan = async () => {
     if (isSavingPlan) return;
     setIsSavingPlan(true);
