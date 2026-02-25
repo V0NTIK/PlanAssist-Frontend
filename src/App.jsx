@@ -447,17 +447,8 @@ const PlanAssist = () => {
       }).then(r => r.json());
 
       if (sessionStateData.sessionId) {
-        const savedDate = new Date(sessionStateData.savedAt);
-        const today = new Date();
-        const isToday = savedDate.toDateString() === today.toDateString();
-        if (isToday) {
-          setSavedSessionState(sessionStateData);
-        } else {
-          await fetch(`${API_URL}/sessions/saved-state`, {
-            method: 'DELETE',
-            headers: { 'Authorization': `Bearer ${authToken}` }
-          });
-        }
+        // Sessions are scoped to today in the DB — any returned saved-state is valid
+        setSavedSessionState(sessionStateData);
       }
     } catch (error) {
       console.error('Error loading user data:', error);
@@ -2313,7 +2304,7 @@ const fetchCanvasTasks = async () => {
         // If no current task, just save the session state without partial time
         await apiCall('/sessions/saved-state', 'POST', {
           sessionId: currentSession.id,
-          day: currentSession.day,
+          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
           period: currentSession.period,
           remainingTime: sessionTime,
           currentTaskIndex: currentTaskIndex,
@@ -2324,7 +2315,7 @@ const fetchCanvasTasks = async () => {
         
         setSessionSummary({
           isSaveAndExit: true,
-          day: currentSession.day,
+          day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
           period: currentSession.period,
           completions: sessionCompletions,
           partialTask: null,
@@ -2368,7 +2359,7 @@ const fetchCanvasTasks = async () => {
       }
       const savedStatePayload = {
         sessionId: currentSession.id,
-        day: currentSession.day,
+        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         period: currentSession.period,
         remainingTime: sessionTime,
         currentTaskIndex: currentTaskIndex,
@@ -2386,7 +2377,7 @@ const fetchCanvasTasks = async () => {
       const missedTasks = currentSession.tasks.slice(currentTaskIndex + 1);
       setSessionSummary({
         isSaveAndExit: true,
-        day: currentSession.day,
+        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         period: currentSession.period,
         completions: sessionCompletions,
         partialTask: {
@@ -2582,7 +2573,7 @@ const fetchCanvasTasks = async () => {
     
       setSessionSummary({
         isSaveAndExit: false,
-        day: currentSession.day,
+        day: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         period: currentSession.period,
         completions: completionsList,
         partialTask: currentTask && currentTaskTimeSpent > 0 && !wasJustCompleted && !isInCompletions ? {
@@ -2597,9 +2588,8 @@ const fetchCanvasTasks = async () => {
       setShowSessionSummary(true);
       setIsTimerRunning(false);
     
-      // Mark session complete
+      // Remove completed session from today's list
       setSessions(prev => prev.filter(s => s.id !== currentSession.id));
-      setCompletedSessionIds(prev => [...prev, currentSession.id]);
     } catch (error) {
       console.error('Failed to end session:', error);
       alert('Failed to end session: ' + error.message);
@@ -3650,7 +3640,10 @@ const fetchCanvasTasks = async () => {
             ) : (
               <div className="space-y-4">
                 {sessions.map(session => {
-                  const hasSavedState = savedSessionState && savedSessionState.sessionId === session.id;
+                  const hasSavedState = savedSessionState && (
+                    savedSessionState.sessionId === session.id ||
+                    savedSessionState.period === session.period
+                  );
                   const tagColors = {
                     'Get it Done': 'bg-green-100 text-green-800 border-green-300',
                     'Make a Start': 'bg-blue-100 text-blue-800 border-blue-300',
@@ -3861,7 +3854,7 @@ const fetchCanvasTasks = async () => {
               <div className="bg-gradient-to-br from-purple-500 to-blue-600 text-white rounded-xl p-8 mb-6">
                 <div className="text-center mb-6">
                   <h2 className="text-2xl font-bold mb-2">
-                    {currentSession.day} - Period {currentSession.period}
+                    {new Date().toLocaleDateString('en-US', { weekday: 'long' })} · Period {currentSession.period}
                   </h2>
                   <div className="text-6xl font-bold mb-2">{formatTime(sessionTime)}</div>
                   <p className="text-purple-100">Time Remaining</p>
@@ -4204,9 +4197,9 @@ const fetchCanvasTasks = async () => {
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">
                       {(() => {
-                        const scored = courses.filter(c => c.current_period_score ?? c.current_score);
+                        const scored = courses.filter(c => c.current_period_score != null);
                         if (scored.length === 0) return 'N/A';
-                        const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score ?? c.current_score), 0) / scored.length;
+                        const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score), 0) / scored.length;
                         return avg.toFixed(1) + '%';
                       })()}
                     </div>
@@ -4233,8 +4226,8 @@ const fetchCanvasTasks = async () => {
                 {/* Grade cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {[...courses].sort((a, b) => {
-                    const aScore = a.current_period_score ?? a.current_score;
-                    const bScore = b.current_period_score ?? b.current_score;
+                    const aScore = a.current_period_score ?? null;
+                    const bScore = b.current_period_score ?? null;
                     const aNum = aScore != null ? parseFloat(aScore) : null;
                     const bNum = bScore != null ? parseFloat(bScore) : null;
                     if (aNum === null && bNum === null) return 0;
@@ -4245,9 +4238,9 @@ const fetchCanvasTasks = async () => {
                     const avgData = courseAverages[course.course_id];
                     const classAverage = avgData?.averageScore ?? null;
                     const studentCount = avgData?.studentCount ?? 0;
-                    // Prefer current grading period score; fall back to all-year score
-                    const displayScore = course.current_period_score ?? course.current_score ?? null;
-                    const displayGrade = course.current_period_grade ?? course.current_grade ?? null;
+                    // Show current grading period score only — no fallback to all-year
+                    const displayScore = course.current_period_score ?? null;
+                    const displayGrade = course.current_period_grade ?? null;
                     const hasScore = displayScore != null && parseFloat(displayScore) > 0;
                     const userScore = hasScore ? parseFloat(displayScore) : null;
                     const difference = (userScore !== null && classAverage !== null && studentCount > 1)
