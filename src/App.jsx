@@ -4487,7 +4487,12 @@ const fetchCanvasTasks = async () => {
                 <h2 className="text-xl font-bold">{cleanTaskTitle(workspaceTask)}</h2>
                 <p className="text-sm text-purple-100">
                   <span className="mr-3">{extractClassName(workspaceTask)}</span>
-                  <span>Due: {workspaceTask.dueDate.toLocaleDateString()}</span>
+                  <span>Due: {workspaceTask.dueDate
+                    ? workspaceTask.dueDate.toLocaleDateString()
+                    : workspaceTask.deadlineDateRaw
+                      ? new Date(workspaceTask.deadlineDateRaw + 'T12:00:00').toLocaleDateString()
+                      : '—'
+                  }</span>
                 </p>
               </div>
               <button
