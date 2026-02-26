@@ -1396,22 +1396,23 @@ const fetchCanvasTasks = async () => {
   };
 
   const closeAgenda = async () => {
-    // Pause all running timers and save progress
+    // Snap and save all in-progress timers
     const saves = [];
     Object.entries(agendaTaskStates).forEach(([taskId, state]) => {
+      if (state.completed) return;
+      // Snap running timer to true wall-clock elapsed
+      let elapsed = state.elapsed;
       if (state.isRunning) {
-        // Snap elapsed from wall clock
         const refs = agendaTimerRefsMap.current[taskId];
         if (refs) {
           clearInterval(refs.intervalRef);
-          const wallElapsed = Math.floor((Date.now() - refs.wallRef) / 1000);
-          state.elapsed = refs.baseRef + wallElapsed;
+          elapsed = refs.baseRef + Math.floor((Date.now() - refs.wallRef) / 1000);
         }
       }
-      if (!state.completed && state.elapsed > 0) {
+      if (elapsed > 0) {
         saves.push(
           apiCall(`/sessions/pause/${taskId}`, 'POST', {
-            accumulatedTime: Math.round(state.elapsed / 60) // seconds → DB minutes
+            accumulatedTime: Math.round(elapsed / 60) // seconds → DB minutes
           }).catch(e => console.error(`Failed to save task ${taskId}:`, e))
         );
       }
