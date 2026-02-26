@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw , LayoutList , Trash2 } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -41,6 +41,16 @@ const PlanAssist = () => {
   const timerStartWallRef = React.useRef(null);
   const timerBaseElapsedRef = React.useRef(0); // seconds accumulated before current run
   const [showSessionComplete, setShowSessionComplete] = useState(false);
+
+  // ── Agendas state ──────────────────────────────────────────────────────────
+  const [agendas, setAgendas] = useState([]);
+  const [agendasLoading, setAgendasLoading] = useState(false);
+  const [currentAgenda, setCurrentAgenda] = useState(null);    // agenda being worked on
+  const [agendaTaskStates, setAgendaTaskStates] = useState({}); // { taskId: { elapsed, isRunning, completed, timeSpent } }
+  const agendaTimerRefsMap = React.useRef({});                  // { taskId: { baseRef, wallRef, intervalRef } }
+  const [showBuildAgenda, setShowBuildAgenda] = useState(false);
+  const [buildAgendaName, setBuildAgendaName] = useState('');
+  const [buildAgendaTaskIds, setBuildAgendaTaskIds] = useState([]);
   const [completionHistory, setCompletionHistory] = useState([]);
 
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
@@ -1314,6 +1324,212 @@ const fetchCanvasTasks = async () => {
     }
   };
 
+  // ── Agenda functions ────────────────────────────────────────────────────────
+
+  const loadAgendas = async () => {
+    setAgendasLoading(true);
+    try {
+      const data = await apiCall('/agendas', 'GET');
+      // Hydrate tasks with in-memory seconds for accumulated_time
+      const hydrated = data.map(agenda => ({
+        ...agenda,
+        tasks: (agenda.tasks || []).map(t => ({
+          ...t,
+          accumulatedTime: (t.accumulated_time || 0) * 60, // DB minutes → seconds
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimated_time,
+          deadlineDateRaw: t.deadline_date
+            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+            : null,
+          sessionActive: t.session_active || false,
+        }))
+      }));
+      setAgendas(hydrated);
+    } catch (err) {
+      console.error('Failed to load agendas:', err);
+    } finally {
+      setAgendasLoading(false);
+    }
+  };
+
+  const createAgenda = async () => {
+    if (!buildAgendaName.trim() || buildAgendaTaskIds.length === 0) return;
+    try {
+      const data = await apiCall('/agendas', 'POST', {
+        name: buildAgendaName.trim(),
+        taskIds: buildAgendaTaskIds,
+      });
+      setShowBuildAgenda(false);
+      setBuildAgendaName('');
+      setBuildAgendaTaskIds([]);
+      await loadAgendas();
+    } catch (err) {
+      console.error('Failed to create agenda:', err);
+      alert('Failed to create agenda: ' + err.message);
+    }
+  };
+
+  const deleteAgenda = async (agendaId) => {
+    try {
+      await apiCall(`/agendas/${agendaId}`, 'DELETE');
+      setAgendas(prev => prev.filter(a => a.id !== agendaId));
+    } catch (err) {
+      console.error('Failed to delete agenda:', err);
+    }
+  };
+
+  const openAgenda = (agenda) => {
+    // Build initial task states from each task's accumulated_time (already in seconds)
+    const initialStates = {};
+    agenda.tasks.forEach(task => {
+      initialStates[task.id] = {
+        elapsed: task.accumulatedTime || 0,
+        isRunning: false,
+        completed: task.completed || false,
+        timeSpent: null, // set on complete
+      };
+    });
+    setAgendaTaskStates(initialStates);
+    agendaTimerRefsMap.current = {};
+    setCurrentAgenda(agenda);
+    setCurrentPage('agenda-active');
+  };
+
+  const closeAgenda = async () => {
+    // Pause all running timers and save progress
+    const saves = [];
+    Object.entries(agendaTaskStates).forEach(([taskId, state]) => {
+      if (state.isRunning) {
+        // Snap elapsed from wall clock
+        const refs = agendaTimerRefsMap.current[taskId];
+        if (refs) {
+          clearInterval(refs.intervalRef);
+          const wallElapsed = Math.floor((Date.now() - refs.wallRef) / 1000);
+          state.elapsed = refs.baseRef + wallElapsed;
+        }
+      }
+      if (!state.completed && state.elapsed > 0) {
+        saves.push(
+          apiCall(`/sessions/pause/${taskId}`, 'POST', {
+            accumulatedTime: Math.round(state.elapsed / 60) // seconds → DB minutes
+          }).catch(e => console.error(`Failed to save task ${taskId}:`, e))
+        );
+      }
+    });
+    await Promise.all(saves);
+    agendaTimerRefsMap.current = {};
+    setAgendaTaskStates({});
+    setCurrentAgenda(null);
+    setCurrentPage('agendas');
+    loadAgendas();
+  };
+
+  const startAgendaTimer = (taskId) => {
+    // Pause any other running timer first (rule: only one running at a time)
+    const newStates = { ...agendaTaskStates };
+    Object.keys(newStates).forEach(id => {
+      if (id !== String(taskId) && newStates[id].isRunning) {
+        // Snap that timer
+        const refs = agendaTimerRefsMap.current[id];
+        if (refs) {
+          clearInterval(refs.intervalRef);
+          const wallElapsed = Math.floor((Date.now() - refs.wallRef) / 1000);
+          newStates[id] = { ...newStates[id], elapsed: refs.baseRef + wallElapsed, isRunning: false };
+          agendaTimerRefsMap.current[id] = null;
+        } else {
+          newStates[id] = { ...newStates[id], isRunning: false };
+        }
+      }
+    });
+
+    // Start this task's timer
+    const baseElapsed = newStates[taskId]?.elapsed || 0;
+    const wallStart = Date.now();
+    const intervalId = setInterval(() => {
+      const wallElapsed = Math.floor((Date.now() - wallStart) / 1000);
+      setAgendaTaskStates(prev => ({
+        ...prev,
+        [taskId]: { ...prev[taskId], elapsed: baseElapsed + wallElapsed }
+      }));
+    }, 500);
+
+    agendaTimerRefsMap.current[taskId] = {
+      baseRef: baseElapsed,
+      wallRef: wallStart,
+      intervalRef: intervalId,
+    };
+
+    newStates[taskId] = { ...newStates[taskId], elapsed: baseElapsed, isRunning: true };
+    setAgendaTaskStates(newStates);
+  };
+
+  const pauseAgendaTimer = (taskId) => {
+    const refs = agendaTimerRefsMap.current[taskId];
+    if (!refs) return;
+    clearInterval(refs.intervalRef);
+    const wallElapsed = Math.floor((Date.now() - refs.wallRef) / 1000);
+    const snapped = refs.baseRef + wallElapsed;
+    agendaTimerRefsMap.current[taskId] = null;
+    setAgendaTaskStates(prev => ({
+      ...prev,
+      [taskId]: { ...prev[taskId], elapsed: snapped, isRunning: false }
+    }));
+  };
+
+  const completeAgendaTask = async (taskId) => {
+    const state = agendaTaskStates[taskId];
+    if (!state || state.completed) return;
+
+    // Stop timer if running
+    const refs = agendaTimerRefsMap.current[taskId];
+    let finalElapsed = state.elapsed;
+    if (refs) {
+      clearInterval(refs.intervalRef);
+      finalElapsed = refs.baseRef + Math.floor((Date.now() - refs.wallRef) / 1000);
+      agendaTimerRefsMap.current[taskId] = null;
+    }
+
+    try {
+      await apiCall(`/tasks/${taskId}/complete`, 'POST', {
+        timeSpent: Math.round(finalElapsed / 60)
+      });
+
+      const newStates = {
+        ...agendaTaskStates,
+        [taskId]: { ...state, elapsed: finalElapsed, isRunning: false, completed: true, timeSpent: finalElapsed }
+      };
+      setAgendaTaskStates(newStates);
+
+      // Update agenda tasks list locally
+      setCurrentAgenda(prev => ({
+        ...prev,
+        tasks: prev.tasks.map(t => t.id === taskId ? { ...t, completed: true } : t)
+      }));
+      setSessionTasks(prev => prev.filter(t => t.id !== taskId));
+      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: true, deleted: true } : t));
+
+      // Check if all tasks are now complete
+      const allDone = Object.values(newStates).every(s => s.completed);
+      if (allDone) {
+        // Mark agenda finished in DB
+        await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
+        setCurrentAgenda(prev => ({ ...prev, allDone: true }));
+      }
+    } catch (err) {
+      console.error('Failed to complete agenda task:', err);
+      alert('Failed to complete task: ' + err.message);
+    }
+  };
+
+  const finishAgenda = async () => {
+    setAgendas(prev => prev.filter(a => a.id !== currentAgenda.id));
+    agendaTimerRefsMap.current = {};
+    setAgendaTaskStates({});
+    setCurrentAgenda(null);
+    setCurrentPage('agendas');
+  };
+
+
   const handleSaveAndAdjustPlan = async () => {
     if (isSavingPlan) return;
     setIsSavingPlan(true);
@@ -2102,6 +2318,9 @@ const fetchCanvasTasks = async () => {
     if (currentPage === 'sessions') {
       loadSessionTasks();
     }
+    if (currentPage === 'agendas') {
+      loadAgendas();
+    }
   }, [currentPage]);
 
   const switchWorkspaceTab = async (tab) => {
@@ -2249,28 +2468,32 @@ const fetchCanvasTasks = async () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('hub')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
-            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('tasks')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
-              {hasUnsavedChanges && currentPage !== 'session-active' && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
+              {hasUnsavedChanges && !['session-active','agenda-active'].includes(currentPage) && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && currentPage !== 'session-active' && setCurrentPage('sessions')} disabled={currentPage === 'session-active' || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
-            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('calendar')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : ['session-active','agenda-active'].includes(currentPage) || isSavingPlan ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+                <LayoutList className="w-4 h-4" />
+                Agendas
+              </button>
+              <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Calendar className="w-5 h-5" />
               <span className="font-medium">Calendar</span>
             </button>
-            <button onClick={() => !isSavingPlan && currentPage !== 'session-active' && setCurrentPage('marks')} disabled={currentPage === 'session-active' || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && setCurrentPage('settings')} disabled={currentPage === 'session-active' || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : (currentPage === 'session-active' || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && setCurrentPage('settings')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Settings className="w-5 h-5" />
             </button>
             {isLoadingTasks && currentPage !== 'tasks' && (
@@ -2279,7 +2502,7 @@ const fetchCanvasTasks = async () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={currentPage === 'session-active' || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(currentPage === 'session-active' || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -3188,7 +3411,7 @@ const fetchCanvasTasks = async () => {
           );
         })()}
 
-        {currentPage === 'session-active' && (currentSessionTask || showSessionComplete) && (
+        {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete) && (
           showSessionComplete ? (
             <div className="max-w-lg mx-auto p-6">
               <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
@@ -3272,7 +3495,301 @@ const fetchCanvasTasks = async () => {
           )
         )}
 
-                {currentPage === 'calendar' && (() => {
+                {currentPage === 'agendas' && (() => {
+          const totalEst = (tasks) => tasks.reduce((s, t) => s + (t.user_estimated_time || t.estimated_time || 0), 0);
+          return (
+            <div className="max-w-3xl mx-auto p-6">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
+                  <p className="text-gray-500 text-sm mt-1">Group up to 3 tasks into a focused work block</p>
+                </div>
+                <button
+                  onClick={() => { setShowBuildAgenda(true); setBuildAgendaName(''); setBuildAgendaTaskIds([]); }}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> Build an Agenda
+                </button>
+              </div>
+
+              {/* Build Agenda Modal */}
+              {showBuildAgenda && (() => {
+                const available = sessionTasks.filter(t => !buildAgendaTaskIds.includes(t.id));
+                return (
+                  <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+                      <div className="p-6 border-b border-gray-100">
+                        <h3 className="text-xl font-bold text-gray-900">Build an Agenda</h3>
+                        <p className="text-sm text-gray-500 mt-1">Select 1–3 tasks and give this block a name</p>
+                      </div>
+                      <div className="p-6 space-y-5">
+                        {/* Name */}
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Agenda Name</label>
+                          <input
+                            type="text"
+                            value={buildAgendaName}
+                            onChange={e => setBuildAgendaName(e.target.value)}
+                            placeholder="e.g. Period 2, On the Bus, NEST..."
+                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                          />
+                        </div>
+
+                        {/* Selected tasks */}
+                        {buildAgendaTaskIds.length > 0 && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                              Selected Tasks ({buildAgendaTaskIds.length}/3)
+                            </label>
+                            <div className="space-y-2">
+                              {buildAgendaTaskIds.map((id, idx) => {
+                                const task = sessionTasks.find(t => t.id === id);
+                                if (!task) return null;
+                                return (
+                                  <div key={id} className="flex items-center gap-3 p-2.5 bg-purple-50 border border-purple-200 rounded-lg">
+                                    <span className="w-5 h-5 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</span>
+                                    <span className="flex-1 text-sm font-medium text-gray-900 truncate">{cleanTaskTitle(task)}</span>
+                                    <span className="text-xs text-gray-500">{task.userEstimate || task.estimatedTime}m</span>
+                                    <button onClick={() => setBuildAgendaTaskIds(prev => prev.filter(i => i !== id))}
+                                      className="text-gray-400 hover:text-red-500 transition-colors">
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Available tasks */}
+                        {buildAgendaTaskIds.length < 3 && (
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Add Tasks</label>
+                            {available.length === 0 ? (
+                              <p className="text-sm text-gray-400 italic">No more tasks available</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                                {available.map(task => (
+                                  <button key={task.id}
+                                    onClick={() => setBuildAgendaTaskIds(prev => [...prev, task.id])}
+                                    className="w-full flex items-center gap-3 p-2.5 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors text-left"
+                                  >
+                                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(task.class) }} />
+                                    <span className="flex-1 text-sm text-gray-900 truncate">{cleanTaskTitle(task)}</span>
+                                    <span className="text-xs text-gray-400">{task.userEstimate || task.estimatedTime}m</span>
+                                    <Plus className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-6 border-t border-gray-100 flex gap-3">
+                        <button onClick={() => setShowBuildAgenda(false)}
+                          className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">
+                          Cancel
+                        </button>
+                        <button
+                          onClick={createAgenda}
+                          disabled={!buildAgendaName.trim() || buildAgendaTaskIds.length === 0}
+                          className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Create Agenda
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Agenda list */}
+              {agendasLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : agendas.length === 0 ? (
+                <div className="text-center py-16 text-gray-400">
+                  <LayoutList className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">No agendas yet</p>
+                  <p className="text-sm mt-1">Build an agenda to group tasks into a focused work block.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {agendas.map(agenda => {
+                    const totalMins = totalEst(agenda.tasks);
+                    return (
+                      <div key={agenda.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                        {/* Agenda header */}
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                          <div>
+                            <h3 className="font-bold text-gray-900 text-lg">{agenda.name}</h3>
+                            <p className="text-sm text-gray-400 mt-0.5">{agenda.tasks.length} task{agenda.tasks.length !== 1 ? 's' : ''} · {totalMins} min total</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openAgenda(agenda)}
+                              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors"
+                            >
+                              <Play className="w-3.5 h-3.5" /> Open Agenda
+                            </button>
+                            <button onClick={() => deleteAgenda(agenda.id)}
+                              className="p-2 text-gray-300 hover:text-red-400 transition-colors" title="Delete agenda">
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        {/* Task previews */}
+                        <div className="divide-y divide-gray-50">
+                          {agenda.tasks.map((task, idx) => {
+                            const classColor = getClassColor(task.class);
+                            const hasProgress = (task.accumulatedTime || 0) > 0;
+                            const dueLabel = task.deadlineDateRaw
+                              ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                              : '—';
+                            return (
+                              <div key={task.id} className="flex items-center gap-4 px-5 py-3">
+                                <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                <span className="w-5 h-5 bg-gray-100 text-gray-500 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm font-medium text-gray-900 truncate">{cleanTaskTitle(task)}</p>
+                                  <div className="flex items-center gap-3 mt-0.5">
+                                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />{task.userEstimate || task.estimatedTime} min
+                                    </span>
+                                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                                      <Calendar className="w-3 h-3" />Due {dueLabel}
+                                    </span>
+                                    {hasProgress && (
+                                      <span className="text-xs text-blue-500 font-medium flex items-center gap-1">
+                                        <Timer className="w-3 h-3" />{Math.floor((task.accumulatedTime || 0) / 60)} min logged
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {currentPage === 'agenda-active' && currentAgenda && (() => {
+          const allDone = currentAgenda.allDone || Object.values(agendaTaskStates).every(s => s.completed);
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
+              {/* Top bar */}
+              <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-gray-900">{currentAgenda.name}</h2>
+                  <p className="text-sm text-gray-400">{currentAgenda.tasks.length} task{currentAgenda.tasks.length !== 1 ? 's' : ''}</p>
+                </div>
+                {allDone ? (
+                  <button onClick={finishAgenda}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-colors">
+                    <Check className="w-4 h-4" /> Finish Agenda
+                  </button>
+                ) : (
+                  <button onClick={closeAgenda}
+                    className="flex items-center gap-2 px-5 py-2.5 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
+                    <X className="w-4 h-4" /> Close Agenda
+                  </button>
+                )}
+              </div>
+
+              {/* Task cards side by side */}
+              <div className={`p-6 grid gap-5 ${
+                currentAgenda.tasks.length === 1 ? 'grid-cols-1 max-w-md mx-auto' :
+                currentAgenda.tasks.length === 2 ? 'grid-cols-2 max-w-3xl mx-auto' :
+                'grid-cols-3 max-w-5xl mx-auto'
+              }`}>
+                {currentAgenda.tasks.map(task => {
+                  const state = agendaTaskStates[task.id] || { elapsed: 0, isRunning: false, completed: false, timeSpent: null };
+                  const classColor = getClassColor(task.class);
+
+                  // Completion card
+                  if (state.completed) {
+                    return (
+                      <div key={task.id} className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-lg min-h-[420px]">
+                        <Check className="w-12 h-12 mb-4 opacity-90" />
+                        <h3 className="font-bold text-lg mb-1 leading-tight">{cleanTaskTitle(task)}</h3>
+                        <p className="text-green-100 text-sm mb-4">{task.class ? task.class.replace(/[\[\]]/g, '') : ''}</p>
+                        <div className="text-4xl font-bold mb-1">{formatTime(state.timeSpent || 0)}</div>
+                        <p className="text-green-200 text-sm">Total time spent</p>
+                      </div>
+                    );
+                  }
+
+                  // Active in-session card
+                  return (
+                    <div key={task.id} className="flex flex-col rounded-2xl shadow-lg overflow-hidden min-h-[420px]">
+                      {/* Timer section */}
+                      <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white p-6 flex flex-col items-center flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: classColor }} />
+                          <span className="text-purple-200 text-xs font-medium truncate max-w-[160px]">
+                            {task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}
+                          </span>
+                        </div>
+                        <a href={task.url} target="_blank" rel="noopener noreferrer"
+                          className="text-base font-bold text-center mb-5 hover:underline leading-tight line-clamp-2">
+                          {cleanTaskTitle(task)}
+                        </a>
+                        <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(state.elapsed)}</div>
+                        <p className="text-purple-200 text-xs mb-5">Time on this task</p>
+
+                        {/* Timer controls */}
+                        <button
+                          onClick={() => state.isRunning ? pauseAgendaTimer(task.id) : startAgendaTimer(task.id)}
+                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg font-semibold text-sm transition-colors"
+                        >
+                          {state.isRunning
+                            ? <><Pause className="w-4 h-4" /> Pause Timer</>
+                            : <><Play className="w-4 h-4" /> {state.elapsed > 0 ? 'Resume Timer' : 'Start Timer'}</>
+                          }
+                        </button>
+                      </div>
+
+                      {/* Bottom action section */}
+                      <div className="bg-white p-4 space-y-2">
+                        <div className="flex items-center gap-3 text-xs text-gray-400 mb-3 flex-wrap">
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Est. {task.userEstimate || task.estimatedTime} min</span>
+                          {task.deadlineDateRaw && (
+                            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />
+                              Due {new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                            </span>
+                          )}
+                          {(task.accumulatedTime || 0) > 0 && (
+                            <span className="flex items-center gap-1 text-blue-500 font-medium">
+                              <Timer className="w-3 h-3" />{Math.floor(task.accumulatedTime / 60)} min prev.
+                            </span>
+                          )}
+                        </div>
+                        <button onClick={() => completeAgendaTask(task.id)}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm transition-colors">
+                          <Check className="w-4 h-4" /> Mark Complete
+                        </button>
+                        <button onClick={() => openWorkspace(task)}
+                          className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
+                          <BookOpen className="w-3.5 h-3.5" /> Open Workspace
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {currentPage === 'calendar' && (() => {
           const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
 
