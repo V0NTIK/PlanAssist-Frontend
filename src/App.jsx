@@ -279,7 +279,6 @@ const PlanAssist = () => {
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
-      setScheduleEnhanced(setupData.schedule_enhanced || false);
       setIsAuthenticated(true);
       setIsAppLoading(true);
       if (savedColors) {
@@ -313,6 +312,7 @@ const PlanAssist = () => {
           scheduleEnhanced: setupData.schedule_enhanced || false,
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
+        setScheduleEnhanced(setupData.schedule_enhanced || false);
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
         // Update user object with grade for leaderboard to work
