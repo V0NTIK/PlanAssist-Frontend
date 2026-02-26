@@ -1084,7 +1084,8 @@ const fetchCanvasTasks = async () => {
         t.id === currentSessionTask.id ? { ...t, completed: true, deleted: true } : t
       ));
       setShowSessionComplete({ task: currentSessionTask, timeSpent: sessionElapsed }); // seconds
-      setCurrentSessionTask(null);
+      // Don't null currentSessionTask yet — completion screen still needs it
+      // It gets cleared when user clicks "Back to Sessions" 
     } catch (err) {
       console.error('Failed to complete task:', err);
       alert('Failed to complete task: ' + err.message);
@@ -3187,7 +3188,7 @@ const fetchCanvasTasks = async () => {
           );
         })()}
 
-        {currentPage === 'session-active' && currentSessionTask && (
+        {currentPage === 'session-active' && (currentSessionTask || showSessionComplete) && (
           showSessionComplete ? (
             <div className="max-w-lg mx-auto p-6">
               <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
@@ -3199,7 +3200,7 @@ const fetchCanvasTasks = async () => {
                 <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
                 <div className="text-gray-500">Total time spent</div>
               </div>
-              <button onClick={() => { setShowSessionComplete(false); setCurrentPage('sessions'); loadUserData(token); }}
+              <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
                 className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
                 Back to Sessions
               </button>
