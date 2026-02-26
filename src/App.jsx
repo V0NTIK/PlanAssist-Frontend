@@ -3729,20 +3729,20 @@ const fetchCanvasTasks = async () => {
                     <table className="w-full">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Day</th>
-                          {selectedPeriods.map(period => (
-                            <th key={period} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                              P{period}
+                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
+                          {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
+                            <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
+                              {day.slice(0, 3)}
                             </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
-                          <tr key={day} className="border-t">
-                            <td className="px-4 py-3 font-medium text-gray-900">{day}</td>
-                            {selectedPeriods.map(period => (
-                              <td key={period} className="px-4 py-3 text-center">
+                        {selectedPeriods.map(period => (
+                          <tr key={period} className="border-t">
+                            <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
+                            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
+                              <td key={day} className="px-4 py-3 text-center">
                                 <select
                                   value={accountSetup.schedule[day]?.[period] || 'Study'}
                                   onChange={(e) => {
