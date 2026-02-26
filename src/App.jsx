@@ -4645,7 +4645,7 @@ const fetchCanvasTasks = async () => {
                   const assignedCourseIds = new Set(
                     Object.values(enhanceLessons).map(v => v.courseId).filter(Boolean)
                   );
-                  const coursesForZoom = courses.filter(c => assignedCourseIds.has(c.course_id || c.id));
+                  const coursesForZoom = courses.filter(c => assignedCourseIds.has(c.id));
 
                   const allLessonsAssigned = lessonSlots.every(({ day, period }) =>
                     enhanceLessons[`${day}-${period}`]?.courseId
@@ -4685,7 +4685,7 @@ const fetchCanvasTasks = async () => {
                                         value={selected?.courseId || ''}
                                         onChange={e => {
                                           const courseId = parseInt(e.target.value);
-                                          const course = courses.find(c => (c.course_id || c.id) === courseId);
+                                          const course = courses.find(c => c.id === courseId);
                                           setEnhanceLessons(prev => ({
                                             ...prev,
                                             [key]: { courseId, courseName: course?.name || '' }
@@ -4695,7 +4695,7 @@ const fetchCanvasTasks = async () => {
                                       >
                                         <option value="">— Select a course —</option>
                                         {courses.map(c => (
-                                          <option key={c.course_id || c.id} value={c.course_id || c.id}>
+                                          <option key={c.id} value={c.id}>
                                             {c.name}
                                           </option>
                                         ))}
@@ -4719,7 +4719,7 @@ const fetchCanvasTasks = async () => {
                             ) : (
                               <div className="space-y-3">
                                 {coursesForZoom.map(c => {
-                                  const cid = c.course_id || c.id;
+                                  const cid = c.id;
                                   return (
                                     <div key={cid} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
                                       <div className="flex-shrink-0 text-sm font-medium text-gray-700 flex-1 min-w-0 truncate">{c.name}</div>
