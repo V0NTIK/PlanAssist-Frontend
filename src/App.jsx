@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw , LayoutList , Trash2 , Plus } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw , LayoutList , Trash2 , Plus , ClipboardList } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -41,6 +41,17 @@ const PlanAssist = () => {
   const timerStartWallRef = React.useRef(null);
   const timerBaseElapsedRef = React.useRef(0); // seconds accumulated before current run
   const [showSessionComplete, setShowSessionComplete] = useState(false);
+
+  // ── Itinerary & Enhance Schedule state ───────────────────────────────────
+  const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
+  const [showEnhanceDialog, setShowEnhanceDialog] = useState(false);   // full-screen enhance flow
+  const [enhanceStep, setEnhanceStep] = useState(1);                   // 1=courses, 2=zoom
+  const [enhanceLessons, setEnhanceLessons] = useState({});            // { 'Monday-3': { courseId, courseName } }
+  const [enhanceZoom, setEnhanceZoom] = useState({});                  // { courseId: zoomNumber }
+  const [scheduleLessons, setScheduleLessons] = useState([]);           // from DB after enhance
+  const [itinerarySlots, setItinerarySlots] = useState({});            // { period: { agendaId, agendaName } }
+  const [itineraryLoading, setItineraryLoading] = useState(false);
+  const [showAddAgendaSlot, setShowAddAgendaSlot] = useState(null);    // period number being picked
 
   // ── Agendas state ──────────────────────────────────────────────────────────
   const [agendas, setAgendas] = useState([]);
@@ -268,6 +279,7 @@ const PlanAssist = () => {
     if (savedToken && savedUser) {
       setToken(savedToken);
       setUser(JSON.parse(savedUser));
+      setScheduleEnhanced(setupData.schedule_enhanced || false);
       setIsAuthenticated(true);
       setIsAppLoading(true);
       if (savedColors) {
@@ -298,6 +310,7 @@ const PlanAssist = () => {
         calendarShowHomeroom: setupData.calendarShowHomeroom ?? true,
         calendarShowCompleted: setupData.calendarShowCompleted ?? true,
           schedule: setupData.schedule || {},
+          scheduleEnhanced: setupData.schedule_enhanced || false,
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
@@ -1531,6 +1544,86 @@ const fetchCanvasTasks = async () => {
   };
 
 
+  // ── Itinerary functions ─────────────────────────────────────────────────────
+
+  const loadScheduleLessons = async () => {
+    try {
+      const data = await apiCall('/schedule/lessons', 'GET');
+      setScheduleLessons(data || []);
+    } catch (err) {
+      console.error('Failed to load schedule lessons:', err);
+    }
+  };
+
+  const loadItinerary = async (dayName) => {
+    setItineraryLoading(true);
+    try {
+      const data = await apiCall(`/itinerary?day=${dayName}`, 'GET');
+      const slots = {};
+      (data || []).forEach(row => {
+        if (row.agenda_id && !row.finished) {
+          slots[row.period] = { agendaId: row.agenda_id, agendaName: row.agenda_name };
+        }
+      });
+      setItinerarySlots(slots);
+    } catch (err) {
+      console.error('Failed to load itinerary:', err);
+    } finally {
+      setItineraryLoading(false);
+    }
+  };
+
+  const assignAgendaToSlot = async (dayName, period, agendaId, agendaName) => {
+    try {
+      await apiCall('/itinerary', 'PUT', { day: dayName, period, agendaId });
+      setItinerarySlots(prev => ({
+        ...prev,
+        [period]: { agendaId, agendaName }
+      }));
+      setShowAddAgendaSlot(null);
+    } catch (err) {
+      console.error('Failed to assign agenda:', err);
+    }
+  };
+
+  const clearAgendaFromSlot = async (dayName, period) => {
+    try {
+      await apiCall('/itinerary', 'PUT', { day: dayName, period, agendaId: null });
+      setItinerarySlots(prev => {
+        const next = { ...prev };
+        delete next[period];
+        return next;
+      });
+    } catch (err) {
+      console.error('Failed to clear agenda from slot:', err);
+    }
+  };
+
+  const submitEnhanceSchedule = async () => {
+    // Build lessons array from enhanceLessons map
+    const lessons = Object.entries(enhanceLessons).map(([key, val]) => {
+      const [day, period] = key.split('-');
+      return { day, period: parseInt(period), courseId: val.courseId, courseName: val.courseName };
+    });
+    // Build zoom array
+    const zoomNumbers = Object.entries(enhanceZoom)
+      .filter(([, z]) => z && z.trim())
+      .map(([courseId, zoomNumber]) => ({ courseId: parseInt(courseId), zoomNumber: zoomNumber.trim() }));
+
+    try {
+      await apiCall('/schedule/enhance', 'POST', { lessons, zoomNumbers });
+      setScheduleEnhanced(true);
+      setAccountSetup(prev => ({ ...prev, scheduleEnhanced: true }));
+      setShowEnhanceDialog(false);
+      setEnhanceStep(1);
+      await loadScheduleLessons();
+    } catch (err) {
+      console.error('Failed to enhance schedule:', err);
+      alert('Failed to save enhanced schedule: ' + err.message);
+    }
+  };
+
+
   const handleSaveAndAdjustPlan = async () => {
     if (isSavingPlan) return;
     setIsSavingPlan(true);
@@ -2322,6 +2415,12 @@ const fetchCanvasTasks = async () => {
     if (currentPage === 'agendas') {
       loadAgendas();
     }
+    if (currentPage === 'itinerary') {
+      const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
+      loadItinerary(todayName);
+      if (scheduleEnhanced) loadScheduleLessons();
+      loadAgendas();
+    }
   }, [currentPage]);
 
   const switchWorkspaceTab = async (tab) => {
@@ -2473,6 +2572,10 @@ const fetchCanvasTasks = async () => {
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
+            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <Calendar className="w-5 h-5" />
+              <span className="font-medium">Calendar</span>
+            </button>
             <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
@@ -2486,9 +2589,9 @@ const fetchCanvasTasks = async () => {
               <LayoutList className="w-5 h-5" />
               <span className="font-medium">Agendas</span>
             </button>
-              <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Calendar className="w-5 h-5" />
-              <span className="font-medium">Calendar</span>
+            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <ClipboardList className="w-5 h-5" />
+              <span className="font-medium">Itinerary</span>
             </button>
             <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
@@ -3983,6 +4086,214 @@ const fetchCanvasTasks = async () => {
           );
         })()}
 
+        {currentPage === 'itinerary' && (() => {
+          const todayIdx = new Date().getDay(); // 0=Sun
+          const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+          const todayName = dayNames[todayIdx];
+          const isWeekend = todayIdx === 0 || todayIdx === 6;
+
+          // Weekend state
+          if (isWeekend) {
+            return (
+              <div className="max-w-lg mx-auto p-6 text-center py-24">
+                <ClipboardList className="w-14 h-14 mx-auto mb-4 text-gray-300" />
+                <h2 className="text-2xl font-bold text-gray-700 mb-2">No School Today</h2>
+                <p className="text-gray-400">The Itinerary is only available on school days (Mon–Fri).</p>
+              </div>
+            );
+          }
+
+          // Grade check: grades 3-6 see a block dialog
+          const userGrade = user?.grade ? parseInt(user.grade) : 0;
+          if (userGrade >= 3 && userGrade <= 6) {
+            return (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
+                  <button onClick={() => setCurrentPage('hub')}
+                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
+                  <h2 className="text-2xl font-bold text-gray-900 mb-3">Secondary Students Only</h2>
+                  <p className="text-gray-500 mb-6">The Itinerary page is only available for students in grades 7–12.</p>
+                  <button onClick={() => setCurrentPage('hub')}
+                    className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700">
+                    Back to Hub
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          // Grade 7-12 but schedule not enhanced
+          if (!scheduleEnhanced) {
+            return (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
+                  <button onClick={() => setCurrentPage('hub')}
+                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
+                    <X className="w-5 h-5" />
+                  </button>
+                  <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
+                  <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
+                  <p className="text-gray-500 mb-6">
+                    To use the Itinerary, you need to enhance your schedule by linking your courses to your Lesson periods.
+                  </p>
+                  <button
+                    onClick={() => { setCurrentPage('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
+                    className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">
+                    Enhance Schedule
+                  </button>
+                  <button onClick={() => setCurrentPage('hub')}
+                    className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">
+                    Back to Hub
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          // Build today's period list from the user's schedule
+          const todaySchedule = accountSetup.schedule?.[todayName] || {};
+          const selectedPeriods = (() => {
+            const range = accountSetup.presentPeriods || '2-6';
+            const [start, end] = range.split('-').map(Number);
+            return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+          })();
+
+          // Build lesson-course map from scheduleLessons
+          const lessonCourseMap = {};
+          scheduleLessons.forEach(sl => {
+            if (sl.day === todayName) {
+              lessonCourseMap[sl.period] = { courseName: sl.course_name, zoomNumber: sl.zoom_number };
+            }
+          });
+
+          // Available (unfinished) agendas for picker
+          const availableAgendas = agendas.filter(a => !a.finished);
+
+          return (
+            <div className="max-w-2xl mx-auto p-6">
+              <div className="mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
+                <p className="text-gray-500 text-sm mt-1">{todayName} · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+              </div>
+
+              {itineraryLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {selectedPeriods.map(period => {
+                    const slotType = todaySchedule[period] || 'Study';
+                    const isLesson = slotType === 'Lesson';
+                    const lessonInfo = isLesson ? lessonCourseMap[period] : null;
+                    const assignedAgenda = !isLesson ? itinerarySlots[period] : null;
+
+                    return (
+                      <div key={period} className={`rounded-xl border-2 overflow-hidden ${isLesson ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}>
+                        {/* Period label */}
+                        <div className={`px-4 py-2 flex items-center gap-2 border-b ${isLesson ? 'bg-blue-100 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
+                          <span className={`text-xs font-bold uppercase tracking-wide ${isLesson ? 'text-blue-700' : 'text-gray-500'}`}>
+                            Period {period}
+                          </span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isLesson ? 'bg-blue-200 text-blue-800' : 'bg-green-100 text-green-700'}`}>
+                            {slotType}
+                          </span>
+                        </div>
+
+                        {/* Slot content */}
+                        <div className="px-4 py-3">
+                          {isLesson ? (
+                            <div>
+                              {lessonInfo?.courseName ? (
+                                <div>
+                                  <p className="font-semibold text-gray-900">{lessonInfo.courseName}</p>
+                                  {lessonInfo.zoomNumber && (
+                                    <a
+                                      href={`https://oneschoolglobal.zoom.us/j/${lessonInfo.zoomNumber}`}
+                                      target="_blank" rel="noopener noreferrer"
+                                      className="text-sm text-blue-600 hover:underline flex items-center gap-1 mt-1"
+                                    >
+                                      <span>🎥</span>
+                                      Join Zoom Class →
+                                    </a>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-gray-400 italic">No course assigned</p>
+                              )}
+                            </div>
+                          ) : (
+                            <div>
+                              {assignedAgenda ? (
+                                <div className="flex items-center justify-between gap-3">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <LayoutList className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                                    <span className="font-medium text-gray-900 truncate">{assignedAgenda.agendaName}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <button
+                                      onClick={() => {
+                                        const agenda = agendas.find(a => a.id === assignedAgenda.agendaId);
+                                        if (agenda) openAgenda(agenda);
+                                      }}
+                                      className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700"
+                                    >
+                                      <Play className="w-3 h-3" /> Open
+                                    </button>
+                                    <button
+                                      onClick={() => clearAgendaFromSlot(todayName, period)}
+                                      className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
+                                      title="Remove agenda from this slot"
+                                    >
+                                      <X className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : showAddAgendaSlot === period ? (
+                                <div>
+                                  <p className="text-xs font-medium text-gray-600 mb-2">Select an Agenda:</p>
+                                  {availableAgendas.length === 0 ? (
+                                    <p className="text-sm text-gray-400 italic">No agendas available. Build one on the Agendas page.</p>
+                                  ) : (
+                                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                      {availableAgendas.map(agenda => (
+                                        <button key={agenda.id}
+                                          onClick={() => assignAgendaToSlot(todayName, period, agenda.id, agenda.name)}
+                                          className="w-full flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-left transition-colors"
+                                        >
+                                          <LayoutList className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                                          <span className="text-sm text-gray-900 flex-1 truncate">{agenda.name}</span>
+                                          <span className="text-xs text-gray-400">{agenda.tasks?.length || 0} tasks</span>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <button onClick={() => setShowAddAgendaSlot(null)}
+                                    className="mt-2 text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => { setShowAddAgendaSlot(period); loadAgendas(); }}
+                                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-purple-600 transition-colors"
+                                >
+                                  <Plus className="w-4 h-4" /> Add Agenda
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {currentPage === 'marks' && (
           <div className="max-w-6xl mx-auto p-6">
             {/* Header */}
@@ -4286,6 +4597,182 @@ const fetchCanvasTasks = async () => {
                     </table>
                   </div>
                 </div>
+
+                {/* Enhance Schedule — only shown after account setup (courses must exist) */}
+                {courses.length > 0 && (
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-sm font-medium text-gray-700">Enhanced Schedule</label>
+                      {scheduleEnhanced && (
+                        <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" /> Enhanced
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Link your courses to your Lesson periods and add Zoom numbers to unlock the Itinerary page.
+                    </p>
+                    <button
+                      id="enhance-schedule-btn"
+                      onClick={() => { setShowEnhanceDialog(true); setEnhanceStep(1); setEnhanceLessons({}); setEnhanceZoom({}); }}
+                      className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors"
+                    >
+                      <ClipboardList className="w-4 h-4" />
+                      {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
+                    </button>
+                  </div>
+                )}
+
+                {/* Enhance Schedule Dialog */}
+                {showEnhanceDialog && (() => {
+                  const todayName = 'Monday'; // show all days, use Monday as reference
+                  const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+                  const range = accountSetup.presentPeriods || '2-6';
+                  const [start, end] = range.split('-').map(Number);
+                  const selectedPeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+
+                  // Collect all Lesson slots across all days
+                  const lessonSlots = [];
+                  allDays.forEach(day => {
+                    selectedPeriods.forEach(period => {
+                      if ((accountSetup.schedule?.[day]?.[period] || 'Study') === 'Lesson') {
+                        lessonSlots.push({ day, period });
+                      }
+                    });
+                  });
+
+                  // All unique course IDs that have been assigned a lesson
+                  const assignedCourseIds = new Set(
+                    Object.values(enhanceLessons).map(v => v.courseId).filter(Boolean)
+                  );
+                  const coursesForZoom = courses.filter(c => assignedCourseIds.has(c.course_id || c.id));
+
+                  const allLessonsAssigned = lessonSlots.every(({ day, period }) =>
+                    enhanceLessons[`${day}-${period}`]?.courseId
+                  );
+
+                  return (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
+                        {/* Header */}
+                        <div className="p-6 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                          <div>
+                            <h3 className="text-xl font-bold text-gray-900">Enhance Schedule</h3>
+                            <p className="text-sm text-gray-500 mt-0.5">Step {enhanceStep} of 2</p>
+                          </div>
+                          <button onClick={() => setShowEnhanceDialog(false)} className="text-gray-400 hover:text-gray-600">
+                            <X className="w-5 h-5" />
+                          </button>
+                        </div>
+
+                        {/* Step 1: Assign courses to Lesson slots */}
+                        {enhanceStep === 1 && (
+                          <div className="flex-1 overflow-y-auto p-6">
+                            <p className="text-sm text-gray-600 mb-4">
+                              Select which course you have for each <span className="font-semibold text-blue-700">Lesson</span> period.
+                            </p>
+                            {lessonSlots.length === 0 ? (
+                              <p className="text-gray-400 italic text-sm">No Lesson periods found in your schedule. Add some in the Weekly Schedule above.</p>
+                            ) : (
+                              <div className="space-y-3">
+                                {lessonSlots.map(({ day, period }) => {
+                                  const key = `${day}-${period}`;
+                                  const selected = enhanceLessons[key];
+                                  return (
+                                    <div key={key} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                                      <div className="flex-shrink-0 text-sm font-medium text-gray-600 w-28">{day} P{period}</div>
+                                      <select
+                                        value={selected?.courseId || ''}
+                                        onChange={e => {
+                                          const courseId = parseInt(e.target.value);
+                                          const course = courses.find(c => (c.course_id || c.id) === courseId);
+                                          setEnhanceLessons(prev => ({
+                                            ...prev,
+                                            [key]: { courseId, courseName: course?.name || '' }
+                                          }));
+                                        }}
+                                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                      >
+                                        <option value="">— Select a course —</option>
+                                        {courses.map(c => (
+                                          <option key={c.course_id || c.id} value={c.course_id || c.id}>
+                                            {c.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Step 2: Zoom numbers */}
+                        {enhanceStep === 2 && (
+                          <div className="flex-1 overflow-y-auto p-6">
+                            <p className="text-sm text-gray-600 mb-4">
+                              Optionally add the Zoom meeting number for each course. Only fill in the ones you want.
+                            </p>
+                            {coursesForZoom.length === 0 ? (
+                              <p className="text-gray-400 italic text-sm">No courses assigned yet.</p>
+                            ) : (
+                              <div className="space-y-3">
+                                {coursesForZoom.map(c => {
+                                  const cid = c.course_id || c.id;
+                                  return (
+                                    <div key={cid} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                                      <div className="flex-shrink-0 text-sm font-medium text-gray-700 flex-1 min-w-0 truncate">{c.name}</div>
+                                      <input
+                                        type="text"
+                                        value={enhanceZoom[cid] || ''}
+                                        onChange={e => setEnhanceZoom(prev => ({ ...prev, [cid]: e.target.value }))}
+                                        placeholder="Zoom number (optional)"
+                                        className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                      />
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Footer */}
+                        <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
+                          {enhanceStep === 1 ? (
+                            <>
+                              <button onClick={() => setShowEnhanceDialog(false)}
+                                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                                Cancel
+                              </button>
+                              <button
+                                onClick={() => setEnhanceStep(2)}
+                                disabled={!allLessonsAssigned || lessonSlots.length === 0}
+                                className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                Next →
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button onClick={() => setEnhanceStep(1)}
+                                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                                ← Back
+                              </button>
+                              <button
+                                onClick={submitEnhanceSchedule}
+                                className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600"
+                              >
+                                Save & Enhance
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {tasks.length > 0 && (
                   <div>
