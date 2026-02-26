@@ -1020,7 +1020,7 @@ const fetchCanvasTasks = async () => {
           dueDate: local?.dueDate || null,
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
-          accumulatedTime: t.accumulated_time || 0, // stored in seconds
+          accumulatedTime: (t.accumulated_time || 0) * 60, // DB stores minutes, convert to seconds for timer
           sessionActive: t.session_active || false,
           priorityOrder: t.priority_order,
         };
@@ -1056,7 +1056,7 @@ const fetchCanvasTasks = async () => {
     setSavingSession(true);
     try {
       await apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
-        accumulatedTime: sessionElapsed // seconds
+        accumulatedTime: Math.round(sessionElapsed / 60) // DB stores minutes
       });
       setIsTimerRunning(false);
       const updated = { ...currentSessionTask, accumulatedTime: sessionElapsed, sessionActive: false };
@@ -3163,7 +3163,7 @@ const fetchCanvasTasks = async () => {
                             </span>
                             {hasProgress && (
                               <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
-                                <Timer className="w-3 h-3" />{Math.floor(task.accumulatedTime / 60)} min logged
+                                <Timer className="w-3 h-3" />{task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60)} min logged
                               </span>
                             )}
                           </div>
@@ -3252,7 +3252,7 @@ const fetchCanvasTasks = async () => {
                   )}
                   {currentSessionTask.accumulatedTime > 0 && (
                     <span className="flex items-center gap-1 text-blue-600 font-medium">
-                      <Timer className="w-4 h-4" />{Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
+                      <Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
                     </span>
                   )}
                 </div>
