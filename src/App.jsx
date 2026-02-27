@@ -322,6 +322,7 @@ const PlanAssist = () => {
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
         setScheduleEnhanced(setupData.schedule_enhanced || false);
+        if (setupData.schedule_enhanced) loadScheduleLessons();
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
         // Update user object with grade for leaderboard to work
@@ -2487,7 +2488,7 @@ const fetchCanvasTasks = async () => {
       const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
       loadItinerary(todayName);
       loadTutorials(todayName);
-      if (scheduleEnhanced) loadScheduleLessons();
+      loadScheduleLessons(); // always fetch; returns empty if not enhanced
       loadAgendas();
     }
   }, [currentPage]);
