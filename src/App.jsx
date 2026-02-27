@@ -52,6 +52,15 @@ const PlanAssist = () => {
   const [itinerarySlots, setItinerarySlots] = useState({});            // { period: { agendaId, agendaName } }
   const [itineraryLoading, setItineraryLoading] = useState(false);
   const [showAddAgendaSlot, setShowAddAgendaSlot] = useState(null);    // period number being picked
+  const [tutorials, setTutorials] = useState({});          // { 'Monday-3': { zoom_number, topic, period, day } }
+  const [showTutorialDialog, setShowTutorialDialog] = useState(null); // { day, period } or 'hub'
+  const [tutorialZoom, setTutorialZoom] = useState('');
+  const [tutorialTopic, setTutorialTopic] = useState('');
+  const [tutorialDay, setTutorialDay] = useState('');     // for hub booking
+  const [tutorialPeriod, setTutorialPeriod] = useState('');
+  const [isSavingTutorial, setIsSavingTutorial] = useState(false);
+  const [isSavingEnhance, setIsSavingEnhance] = useState(false);
+  const [isLoadingItinerary, setIsLoadingItinerary] = useState(false);
 
   // ── Agendas state ──────────────────────────────────────────────────────────
   const [agendas, setAgendas] = useState([]);
@@ -1600,16 +1609,15 @@ const fetchCanvasTasks = async () => {
   };
 
   const submitEnhanceSchedule = async () => {
-    // Build lessons array from enhanceLessons map
     const lessons = Object.entries(enhanceLessons).map(([key, val]) => {
       const [day, period] = key.split('-');
       return { day, period: parseInt(period), courseId: val.courseId, courseName: val.courseName };
     });
-    // Build zoom array
     const zoomNumbers = Object.entries(enhanceZoom)
       .filter(([, z]) => z && z.trim())
       .map(([courseId, zoomNumber]) => ({ courseId: parseInt(courseId), zoomNumber: zoomNumber.trim() }));
 
+    setIsSavingEnhance(true);
     try {
       await apiCall('/schedule/enhance', 'POST', { lessons, zoomNumbers });
       setScheduleEnhanced(true);
@@ -1620,7 +1628,67 @@ const fetchCanvasTasks = async () => {
     } catch (err) {
       console.error('Failed to enhance schedule:', err);
       alert('Failed to save enhanced schedule: ' + err.message);
+    } finally {
+      setIsSavingEnhance(false);
     }
+  };
+
+
+  // ── Tutorial functions ──────────────────────────────────────────────────────
+
+  const loadTutorials = async (dayName) => {
+    try {
+      const data = await apiCall(`/tutorials?day=${dayName}`, 'GET');
+      const map = {};
+      (data || []).forEach(t => { map[`${t.day}-${t.period}`] = t; });
+      setTutorials(map);
+    } catch (err) {
+      console.error('Failed to load tutorials:', err);
+    }
+  };
+
+  const saveTutorial = async ({ day, period, zoomNumber, topic }) => {
+    setIsSavingTutorial(true);
+    try {
+      await apiCall('/tutorials', 'PUT', { day, period, zoomNumber, topic });
+      const key = `${day}-${period}`;
+      setTutorials(prev => ({ ...prev, [key]: { day, period, zoom_number: zoomNumber, topic } }));
+      setShowTutorialDialog(null);
+      setTutorialZoom('');
+      setTutorialTopic('');
+      setTutorialDay('');
+      setTutorialPeriod('');
+    } catch (err) {
+      console.error('Failed to save tutorial:', err);
+      alert('Failed to save tutorial: ' + err.message);
+    } finally {
+      setIsSavingTutorial(false);
+    }
+  };
+
+  const deleteTutorial = async (day, period) => {
+    try {
+      await apiCall('/tutorials', 'DELETE', { day, period });
+      const key = `${day}-${period}`;
+      setTutorials(prev => { const n = { ...prev }; delete n[key]; return n; });
+    } catch (err) {
+      console.error('Failed to delete tutorial:', err);
+    }
+  };
+
+  const openTutorialDialog = ({ day, period }) => {
+    const existing = tutorials[`${day}-${period}`];
+    setTutorialZoom(existing?.zoom_number || '');
+    setTutorialTopic(existing?.topic || '');
+    setShowTutorialDialog({ day, period });
+  };
+
+  const openHubTutorialDialog = () => {
+    setTutorialZoom('');
+    setTutorialTopic('');
+    setTutorialDay('');
+    setTutorialPeriod('');
+    setShowTutorialDialog('hub');
   };
 
 
@@ -2418,6 +2486,7 @@ const fetchCanvasTasks = async () => {
     if (currentPage === 'itinerary') {
       const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
       loadItinerary(todayName);
+      loadTutorials(todayName);
       if (scheduleEnhanced) loadScheduleLessons();
       loadAgendas();
     }
@@ -2789,7 +2858,7 @@ const fetchCanvasTasks = async () => {
                 </div>
 
                 {/* Quick Actions */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <button onClick={() => setCurrentPage('sessions')} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-green-200">
                     <Play className="w-10 h-10 text-green-600 mb-3" />
                     <h3 className="text-lg font-bold text-gray-900 mb-1">Start Session</h3>
@@ -2800,6 +2869,13 @@ const fetchCanvasTasks = async () => {
                     <h3 className="text-lg font-bold text-gray-900 mb-1">Manage Tasks</h3>
                     <p className="text-sm text-gray-600">View your task list</p>
                   </button>
+                  {user?.grade && parseInt(user.grade) >= 7 && (
+                    <button onClick={openHubTutorialDialog} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-orange-200">
+                      <BookOpen className="w-10 h-10 text-orange-500 mb-3" />
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">Book a Tutorial</h3>
+                      <p className="text-sm text-gray-600">Schedule a teacher meeting</p>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -4087,96 +4163,75 @@ const fetchCanvasTasks = async () => {
         })()}
 
         {currentPage === 'itinerary' && (() => {
-          const todayIdx = new Date().getDay(); // 0=Sun
+          const todayIdx = new Date().getDay();
           const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const todayName = dayNames[todayIdx];
           const isWeekend = todayIdx === 0 || todayIdx === 6;
-
-          // Weekend state
-          if (isWeekend) {
-            return (
-              <div className="max-w-lg mx-auto p-6 text-center py-24">
-                <ClipboardList className="w-14 h-14 mx-auto mb-4 text-gray-300" />
-                <h2 className="text-2xl font-bold text-gray-700 mb-2">No School Today</h2>
-                <p className="text-gray-400">The Itinerary is only available on school days (Mon–Fri).</p>
-              </div>
-            );
-          }
-
-          // Grade check: grades 3-6 see a block dialog
           const userGrade = user?.grade ? parseInt(user.grade) : 0;
-          if (userGrade >= 3 && userGrade <= 6) {
-            return (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
-                  <button onClick={() => setCurrentPage('hub')}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
-                  </button>
-                  <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
-                  <h2 className="text-2xl font-bold text-gray-900 mb-3">Secondary Students Only</h2>
-                  <p className="text-gray-500 mb-6">The Itinerary page is only available for students in grades 7–12.</p>
-                  <button onClick={() => setCurrentPage('hub')}
-                    className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700">
-                    Back to Hub
-                  </button>
-                </div>
-              </div>
-            );
-          }
 
-          // Grade 7-12 but schedule not enhanced
-          if (!scheduleEnhanced) {
-            return (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
-                  <button onClick={() => setCurrentPage('hub')}
-                    className="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-                    <X className="w-5 h-5" />
-                  </button>
-                  <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
-                  <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
-                  <p className="text-gray-500 mb-6">
-                    To use the Itinerary, you need to enhance your schedule by linking your courses to your Lesson periods.
-                  </p>
-                  <button
-                    onClick={() => { setCurrentPage('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
-                    className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">
-                    Enhance Schedule
-                  </button>
-                  <button onClick={() => setCurrentPage('hub')}
-                    className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">
-                    Back to Hub
-                  </button>
-                </div>
-              </div>
-            );
-          }
+          // Tutorial booking URL by grade
+          const tutorialUrl = userGrade >= 11 ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
+            : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
+            : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
 
-          // Build today's period list from the user's schedule
+          // Weekend
+          if (isWeekend) return (
+            <div className="max-w-2xl mx-auto p-6 text-center py-24">
+              <ClipboardList className="w-14 h-14 mx-auto mb-4 text-gray-300" />
+              <h2 className="text-2xl font-bold text-gray-700 mb-2">No School Today</h2>
+              <p className="text-gray-400">The Itinerary is only available on school days (Mon–Fri).</p>
+            </div>
+          );
+
+          // Grade 3-6 block
+          if (userGrade >= 3 && userGrade <= 6) return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
+                <button onClick={() => setCurrentPage('hub')} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
+                <h2 className="text-2xl font-bold text-gray-900 mb-3">Secondary Students Only</h2>
+                <p className="text-gray-500 mb-6">The Itinerary is only available for students in grades 7–12.</p>
+                <button onClick={() => setCurrentPage('hub')} className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700">Back to Hub</button>
+              </div>
+            </div>
+          );
+
+          // Not enhanced
+          if (!scheduleEnhanced) return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
+                <button onClick={() => setCurrentPage('hub')} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
+                <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
+                <p className="text-gray-500 mb-6">Link your courses to your Lesson periods to unlock the Itinerary.</p>
+                <button onClick={() => { setCurrentPage('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
+                  className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">Enhance Schedule</button>
+                <button onClick={() => setCurrentPage('hub')} className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">Back to Hub</button>
+              </div>
+            </div>
+          );
+
+          // Build period list
+          const range = accountSetup.presentPeriods || '2-6';
+          const [pStart, pEnd] = range.split('-').map(Number);
+          const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const todaySchedule = accountSetup.schedule?.[todayName] || {};
-          const selectedPeriods = (() => {
-            const range = accountSetup.presentPeriods || '2-6';
-            const [start, end] = range.split('-').map(Number);
-            return Array.from({ length: end - start + 1 }, (_, i) => start + i);
-          })();
-
-          // Build lesson-course map from scheduleLessons
           const lessonCourseMap = {};
-          scheduleLessons.forEach(sl => {
-            if (sl.day === todayName) {
-              lessonCourseMap[sl.period] = { courseName: sl.course_name, zoomNumber: sl.zoom_number };
-            }
-          });
-
-          // Available (unfinished) agendas for picker
+          scheduleLessons.forEach(sl => { if (sl.day === todayName) lessonCourseMap[sl.period] = sl; });
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
-            <div className="max-w-2xl mx-auto p-6">
-              <div className="mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
-                <p className="text-gray-500 text-sm mt-1">{todayName} · {new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+            <div className="max-w-3xl mx-auto p-6">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
+                  <p className="text-gray-500 text-sm mt-1">{todayName} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                </div>
+                <button onClick={openHubTutorialDialog}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
+                  <BookOpen className="w-4 h-4" /> Book a Tutorial
+                </button>
               </div>
 
               {itineraryLoading ? (
@@ -4184,105 +4239,129 @@ const fetchCanvasTasks = async () => {
                   <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   {selectedPeriods.map(period => {
                     const slotType = todaySchedule[period] || 'Study';
                     const isLesson = slotType === 'Lesson';
-                    const lessonInfo = isLesson ? lessonCourseMap[period] : null;
-                    const assignedAgenda = !isLesson ? itinerarySlots[period] : null;
+                    const lessonInfo = lessonCourseMap[period];
+                    const assignedAgenda = itinerarySlots[period];
+                    const tutorial = tutorials[`${todayName}-${period}`];
 
                     return (
-                      <div key={period} className={`rounded-xl border-2 overflow-hidden ${isLesson ? 'border-blue-200 bg-blue-50' : 'border-gray-200 bg-white'}`}>
-                        {/* Period label */}
-                        <div className={`px-4 py-2 flex items-center gap-2 border-b ${isLesson ? 'bg-blue-100 border-blue-200' : 'bg-gray-50 border-gray-200'}`}>
-                          <span className={`text-xs font-bold uppercase tracking-wide ${isLesson ? 'text-blue-700' : 'text-gray-500'}`}>
-                            Period {period}
-                          </span>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${isLesson ? 'bg-blue-200 text-blue-800' : 'bg-green-100 text-green-700'}`}>
-                            {slotType}
-                          </span>
+                      <div key={period} className={`rounded-2xl border-2 overflow-hidden shadow-sm ${isLesson ? 'border-blue-200' : 'border-gray-200'}`}>
+                        {/* Period header bar */}
+                        <div className={`px-5 py-3 flex items-center justify-between ${isLesson ? 'bg-blue-600' : 'bg-gray-700'}`}>
+                          <div className="flex items-center gap-3">
+                            <span className="text-white font-bold text-base">Period {period}</span>
+                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${isLesson ? 'bg-blue-500 text-blue-100' : 'bg-gray-600 text-gray-200'}`}>
+                              {slotType}
+                            </span>
+                          </div>
+                          {isLesson && lessonInfo?.zoom_number && (
+                            <a href={`https://oneschoolglobal.zoom.us/j/${lessonInfo.zoom_number}`}
+                              target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1.5 text-xs bg-white text-blue-700 px-3 py-1.5 rounded-full font-semibold hover:bg-blue-50 transition-colors">
+                              🎥 Join Zoom
+                            </a>
+                          )}
                         </div>
 
-                        {/* Slot content */}
-                        <div className="px-4 py-3">
-                          {isLesson ? (
-                            <div>
-                              {lessonInfo?.courseName ? (
-                                <div>
-                                  <p className="font-semibold text-gray-900">{lessonInfo.courseName}</p>
-                                  {lessonInfo.zoomNumber && (
-                                    <a
-                                      href={`https://oneschoolglobal.zoom.us/j/${lessonInfo.zoomNumber}`}
+                        <div className="bg-white p-5 space-y-4">
+                          {/* Lesson info */}
+                          {isLesson && (
+                            <div className="flex items-center gap-3">
+                              <div className="w-1 h-10 rounded-full bg-blue-400 flex-shrink-0" />
+                              <div>
+                                <p className="font-semibold text-gray-900 text-base">
+                                  {lessonInfo?.course_name || <span className="text-gray-400 italic font-normal">No course assigned</span>}
+                                </p>
+                                {lessonInfo?.zoom_number && (
+                                  <a href={`https://oneschoolglobal.zoom.us/j/${lessonInfo.zoom_number}`}
+                                    target="_blank" rel="noopener noreferrer"
+                                    className="text-xs text-blue-500 hover:underline">
+                                    zoom.us/j/{lessonInfo.zoom_number}
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tutorial row */}
+                          {tutorial ? (
+                            <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-xl">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <BookOpen className="w-5 h-5 text-orange-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-orange-900">Tutorial{tutorial.topic ? `: ${tutorial.topic}` : ''}</p>
+                                  {tutorial.zoom_number ? (
+                                    <a href={`https://oneschoolglobal.zoom.us/j/${tutorial.zoom_number}`}
                                       target="_blank" rel="noopener noreferrer"
-                                      className="text-sm text-blue-600 hover:underline flex items-center gap-1 mt-1"
-                                    >
-                                      <span>🎥</span>
-                                      Join Zoom Class →
+                                      className="text-xs text-orange-600 hover:underline">
+                                      zoom.us/j/{tutorial.zoom_number}
                                     </a>
-                                  )}
+                                  ) : <p className="text-xs text-orange-400">No Zoom link</p>}
                                 </div>
-                              ) : (
-                                <p className="text-sm text-gray-400 italic">No course assigned</p>
-                              )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <button onClick={() => openTutorialDialog({ day: todayName, period })}
+                                  className="text-xs text-orange-600 hover:text-orange-800 font-medium px-2 py-1 rounded hover:bg-orange-100">Edit</button>
+                                <button onClick={() => deleteTutorial(todayName, period)}
+                                  className="text-gray-300 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
+                              </div>
                             </div>
                           ) : (
-                            <div>
-                              {assignedAgenda ? (
-                                <div className="flex items-center justify-between gap-3">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <LayoutList className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                                    <span className="font-medium text-gray-900 truncate">{assignedAgenda.agendaName}</span>
-                                  </div>
-                                  <div className="flex items-center gap-2 flex-shrink-0">
-                                    <button
-                                      onClick={() => {
-                                        const agenda = agendas.find(a => a.id === assignedAgenda.agendaId);
-                                        if (agenda) openAgenda(agenda);
-                                      }}
-                                      className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700"
-                                    >
-                                      <Play className="w-3 h-3" /> Open
-                                    </button>
-                                    <button
-                                      onClick={() => clearAgendaFromSlot(todayName, period)}
-                                      className="p-1.5 text-gray-300 hover:text-red-400 transition-colors"
-                                      title="Remove agenda from this slot"
-                                    >
-                                      <X className="w-4 h-4" />
-                                    </button>
-                                  </div>
+                            <button onClick={() => openTutorialDialog({ day: todayName, period })}
+                              className="flex items-center gap-2 text-sm text-orange-500 hover:text-orange-700 transition-colors font-medium">
+                              <BookOpen className="w-4 h-4" /> + Add Tutorial
+                            </button>
+                          )}
+
+                          {/* Agenda row */}
+                          {assignedAgenda ? (
+                            <div className="flex items-center justify-between p-3 bg-purple-50 border border-purple-200 rounded-xl">
+                              <div className="flex items-center gap-3 min-w-0">
+                                <LayoutList className="w-5 h-5 text-purple-500 flex-shrink-0" />
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-purple-900 truncate">{assignedAgenda.agendaName}</p>
+                                  <p className="text-xs text-purple-400">Agenda</p>
                                 </div>
-                              ) : showAddAgendaSlot === period ? (
-                                <div>
-                                  <p className="text-xs font-medium text-gray-600 mb-2">Select an Agenda:</p>
-                                  {availableAgendas.length === 0 ? (
-                                    <p className="text-sm text-gray-400 italic">No agendas available. Build one on the Agendas page.</p>
-                                  ) : (
-                                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                      {availableAgendas.map(agenda => (
-                                        <button key={agenda.id}
-                                          onClick={() => assignAgendaToSlot(todayName, period, agenda.id, agenda.name)}
-                                          className="w-full flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-left transition-colors"
-                                        >
-                                          <LayoutList className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                                          <span className="text-sm text-gray-900 flex-1 truncate">{agenda.name}</span>
-                                          <span className="text-xs text-gray-400">{agenda.tasks?.length || 0} tasks</span>
-                                        </button>
-                                      ))}
-                                    </div>
-                                  )}
-                                  <button onClick={() => setShowAddAgendaSlot(null)}
-                                    className="mt-2 text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                                </div>
-                              ) : (
-                                <button
-                                  onClick={() => { setShowAddAgendaSlot(period); loadAgendas(); }}
-                                  className="flex items-center gap-2 text-sm text-gray-400 hover:text-purple-600 transition-colors"
-                                >
-                                  <Plus className="w-4 h-4" /> Add Agenda
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <button onClick={() => { const a = agendas.find(ag => ag.id === assignedAgenda.agendaId); if (a) openAgenda(a); }}
+                                  className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700">
+                                  <Play className="w-3 h-3" /> Open
                                 </button>
-                              )}
+                                <button onClick={() => clearAgendaFromSlot(todayName, period)}
+                                  className="text-gray-300 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
+                              </div>
                             </div>
+                          ) : (
+                            showAddAgendaSlot === period ? (
+                              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+                                <p className="text-xs font-medium text-gray-600 mb-2">Select an Agenda:</p>
+                                {availableAgendas.length === 0 ? (
+                                  <p className="text-sm text-gray-400 italic">No agendas available.</p>
+                                ) : (
+                                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                                    {availableAgendas.map(agenda => (
+                                      <button key={agenda.id}
+                                        onClick={() => assignAgendaToSlot(todayName, period, agenda.id, agenda.name)}
+                                        className="w-full flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-left transition-colors">
+                                        <LayoutList className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                                        <span className="text-sm text-gray-900 flex-1 truncate">{agenda.name}</span>
+                                        <span className="text-xs text-gray-400">{agenda.tasks?.length || 0} tasks</span>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                                <button onClick={() => setShowAddAgendaSlot(null)} className="mt-2 text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+                              </div>
+                            ) : (
+                              <button onClick={() => { setShowAddAgendaSlot(period); loadAgendas(); }}
+                                className="flex items-center gap-2 text-sm text-purple-500 hover:text-purple-700 transition-colors font-medium">
+                                <LayoutList className="w-4 h-4" /> + Add Agenda
+                              </button>
+                            )
                           )}
                         </div>
                       </div>
@@ -4290,6 +4369,48 @@ const fetchCanvasTasks = async () => {
                   })}
                 </div>
               )}
+
+              {/* Tutorial Dialog — shared for itinerary slot booking */}
+              {showTutorialDialog && showTutorialDialog !== 'hub' && (() => {
+                const { day, period } = showTutorialDialog;
+                return (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+                      <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                        <div>
+                          <h3 className="text-xl font-bold text-gray-900">Book a Tutorial</h3>
+                          <p className="text-sm text-gray-500 mt-0.5">{day} · Period {period}</p>
+                        </div>
+                        <button onClick={() => setShowTutorialDialog(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <iframe src={tutorialUrl} className="w-full h-[420px] border-0" title="Book a Tutorial" />
+                      </div>
+                      <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
+                        <p className="text-xs text-gray-500">Once booked, enter your Zoom details below:</p>
+                        <div className="flex gap-3">
+                          <input type="text" value={tutorialZoom} onChange={e => setTutorialZoom(e.target.value)}
+                            placeholder="Zoom number (optional)" maxLength={20}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
+                          <input type="text" value={tutorialTopic} onChange={e => setTutorialTopic(e.target.value)}
+                            placeholder="Topic (optional, max 60 chars)" maxLength={60}
+                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
+                        </div>
+                        <div className="flex gap-3">
+                          <button onClick={() => setShowTutorialDialog(null)}
+                            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Close</button>
+                          <button
+                            onClick={() => saveTutorial({ day, period, zoomNumber: tutorialZoom, topic: tutorialTopic })}
+                            disabled={isSavingTutorial}
+                            className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-60 flex items-center justify-center gap-2">
+                            {isSavingTutorial ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</> : 'Save'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}
@@ -4762,9 +4883,12 @@ const fetchCanvasTasks = async () => {
                               </button>
                               <button
                                 onClick={submitEnhanceSchedule}
-                                className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600"
+                                disabled={isSavingEnhance}
+                                className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-2"
                               >
-                                Save & Enhance
+                                {isSavingEnhance ? (
+                                  <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</>
+                                ) : 'Save & Enhance'}
                               </button>
                             </>
                           )}
@@ -4966,6 +5090,73 @@ const fetchCanvasTasks = async () => {
       )}
       
       {/* Task Workspace Modal */}
+      {/* Hub Tutorial Dialog */}
+      {showTutorialDialog === 'hub' && (() => {
+          const userGrade = user?.grade ? parseInt(user.grade) : 0;
+          const tutorialUrl = userGrade >= 11 ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
+            : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
+            : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
+          const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+          const range = accountSetup.presentPeriods || '2-6';
+          const [pStart, pEnd] = range.split('-').map(Number);
+          const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+          const canSave = tutorialDay && tutorialPeriod;
+          return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+                <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Book a Tutorial</h3>
+                    <p className="text-sm text-gray-500 mt-0.5">Book a meeting with your teacher</p>
+                  </div>
+                  <button onClick={() => setShowTutorialDialog(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="flex-1 overflow-hidden">
+                  <iframe src={tutorialUrl} className="w-full h-[380px] border-0" title="Book a Tutorial" />
+                </div>
+                <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
+                  <p className="text-xs text-gray-500">Once booked, fill in your tutorial details:</p>
+                  <div className="flex gap-3">
+                    <select value={tutorialDay} onChange={e => setTutorialDay(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
+                      <option value="">Day *</option>
+                      {dayNames.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                    <select value={tutorialPeriod} onChange={e => setTutorialPeriod(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
+                      <option value="">Period *</option>
+                      {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex gap-3">
+                    <input type="text" value={tutorialZoom} onChange={e => setTutorialZoom(e.target.value)}
+                      placeholder="Zoom number (optional)" maxLength={20}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
+                    <input type="text" value={tutorialTopic} onChange={e => setTutorialTopic(e.target.value)}
+                      placeholder="Topic (optional, max 60 chars)" maxLength={60}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => setShowTutorialDialog(null)}
+                      className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Close</button>
+                    <button
+                      onClick={() => saveTutorial({ day: tutorialDay, period: parseInt(tutorialPeriod), zoomNumber: tutorialZoom, topic: tutorialTopic })}
+                      disabled={!canSave || isSavingTutorial}
+                      className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                      {isSavingTutorial
+                        ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</>
+                        : 'Save Tutorial'}
+                    </button>
+                  </div>
+                  {!canSave && (tutorialZoom || tutorialTopic) && (
+                    <p className="text-xs text-red-400 text-center">Please select a Day and Period to save.</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+      })()}
+
       {showWorkspace && workspaceTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl w-full h-full max-w-[95vw] max-h-[95vh] flex flex-col">
