@@ -4720,8 +4720,8 @@ const fetchCanvasTasks = async () => {
                   </div>
                 </div>
 
-                {/* Enhance Schedule — only shown after account setup (courses must exist) */}
-                {courses.length > 0 && (
+                {/* Enhance Schedule — only shown after account setup (courses must exist) and grades 7-12 */}
+                {courses.length > 0 && !user?.isNewUser && parseInt(user?.grade || 0) >= 7 && (
                   <div>
                     <div className="flex items-center justify-between mb-1">
                       <label className="block text-sm font-medium text-gray-700">Enhanced Schedule</label>
