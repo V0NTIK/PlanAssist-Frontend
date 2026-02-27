@@ -2514,7 +2514,7 @@ const fetchCanvasTasks = async () => {
       days.forEach(day => {
         newSchedule[day] = {};
         for (let period = start; period <= end; period++) {
-          newSchedule[day][period] = accountSetup.schedule[day]?.[period] || 'Study';
+          newSchedule[day][period] = accountSetup.schedule[day]?.[String(period)] || 'Study';
         }
       });
       if (JSON.stringify(newSchedule) !== JSON.stringify(accountSetup.schedule)) {
@@ -4241,7 +4241,7 @@ const fetchCanvasTasks = async () => {
               ) : (
                 <div className="space-y-4">
                   {selectedPeriods.map(period => {
-                    const slotType = todaySchedule[period] || 'Study';
+                    const slotType = todaySchedule[String(period)] || 'Study';
                     const isLesson = slotType === 'Lesson';
                     const lessonInfo = lessonCourseMap[period];
                     const assignedAgenda = itinerarySlots[period];
@@ -4694,7 +4694,7 @@ const fetchCanvasTasks = async () => {
                             {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
                               <td key={day} className="px-4 py-3 text-center">
                                 <select
-                                  value={accountSetup.schedule[day]?.[period] || 'Study'}
+                                  value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
                                   onChange={(e) => {
                                     const newSchedule = { ...accountSetup.schedule };
                                     if (!newSchedule[day]) newSchedule[day] = {};
@@ -4702,7 +4702,7 @@ const fetchCanvasTasks = async () => {
                                     setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
                                   }}
                                   className={`px-3 py-2 rounded-lg font-medium ${
-                                    accountSetup.schedule[day]?.[period] === 'Study'
+                                    accountSetup.schedule[day]?.[String(period)] === 'Study'
                                       ? 'bg-green-100 text-green-800'
                                       : 'bg-blue-100 text-blue-800'
                                   }`}
@@ -4753,10 +4753,11 @@ const fetchCanvasTasks = async () => {
                   const selectedPeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
                   // Collect all Lesson slots across all days
+                  // Note: schedule keys are strings (JSON serialisation), so use String(period)
                   const lessonSlots = [];
                   allDays.forEach(day => {
                     selectedPeriods.forEach(period => {
-                      if ((accountSetup.schedule?.[day]?.[period] || 'Study') === 'Lesson') {
+                      if ((accountSetup.schedule?.[day]?.[String(period)] || 'Study') === 'Lesson') {
                         lessonSlots.push({ day, period });
                       }
                     });
