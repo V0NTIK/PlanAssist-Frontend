@@ -59,6 +59,10 @@ const PlanAssist = () => {
   const [tutorialDay, setTutorialDay] = useState('');     // for hub booking
   const [tutorialPeriod, setTutorialPeriod] = useState('');
   const [isSavingTutorial, setIsSavingTutorial] = useState(false);
+  const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
+  const [isSavingManualTask, setIsSavingManualTask] = useState(false);
   const [isSavingEnhance, setIsSavingEnhance] = useState(false);
   const [isLoadingItinerary, setIsLoadingItinerary] = useState(false);
 
@@ -322,6 +326,16 @@ const PlanAssist = () => {
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
         setScheduleEnhanced(setupData.schedule_enhanced || false);
+        // Sync name from DB (in case admin changed it)
+        if (setupData.name) {
+          setUser(prev => prev ? { ...prev, name: setupData.name } : prev);
+          setAccountSetup(prev => ({ ...prev, name: setupData.name }));
+          const savedUser = localStorage.getItem('user');
+          if (savedUser) {
+            const parsed = JSON.parse(savedUser);
+            localStorage.setItem('user', JSON.stringify({ ...parsed, name: setupData.name }));
+          }
+        }
         if (setupData.schedule_enhanced) loadScheduleLessons();
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
@@ -1008,7 +1022,7 @@ const fetchCanvasTasks = async () => {
     } catch (error) {}
     if (lower.includes('lab')) return 60;
     if (lower.includes('summative') || lower.includes('assessment') || lower.includes('project')) return 60;
-    if (lower.includes('[osg accelerate]')) return 5;
+
     if (lower.includes('quiz') || lower.includes('exam') || lower.includes('test')) {
       const testHistory = completionHistory.filter(h => {
         const hLower = h.taskTitle.toLowerCase();
@@ -1111,6 +1125,7 @@ const fetchCanvasTasks = async () => {
       await apiCall(`/tasks/${currentSessionTask.id}/complete`, 'POST', {
         timeSpent: Math.round(sessionElapsed / 60) // tasks_completed expects minutes
       });
+      await normalizePriority(); // compact priority_order gaps
       setIsTimerRunning(false);
       setSessionTasks(prev => prev.filter(t => t.id !== currentSessionTask.id));
       setTasks(prev => prev.map(t =>
@@ -1517,6 +1532,7 @@ const fetchCanvasTasks = async () => {
       await apiCall(`/tasks/${taskId}/complete`, 'POST', {
         timeSpent: Math.round(finalElapsed / 60)
       });
+      await normalizePriority();
 
       const newStates = {
         ...agendaTaskStates,
@@ -1690,6 +1706,62 @@ const fetchCanvasTasks = async () => {
     setTutorialDay('');
     setTutorialPeriod('');
     setShowTutorialDialog('hub');
+  };
+
+
+  // ── Priority normalize (remove gaps) ─────────────────────────────────────────
+  const normalizePriority = async () => {
+    try {
+      await apiCall('/tasks/normalize', 'POST');
+    } catch (err) {
+      console.error('Failed to normalize priority:', err);
+    }
+  };
+
+  // ── Toggle task completion (manual checkbox) ──────────────────────────────────
+  const toggleTaskCompletion = async (taskId) => {
+    setCheckingTask(taskId);
+    try {
+      await apiCall(`/tasks/${taskId}/delete`, 'POST'); // marks deleted=true
+      setTasks(prev => prev.filter(t => t.id !== taskId));
+      setSessionTasks(prev => prev.filter(t => t.id !== taskId));
+      // Remove from any agendas in state
+      setAgendas(prev => prev.map(a => ({
+        ...a,
+        tasks: (a.tasks || []).filter(t => t.id !== taskId)
+      })));
+      await normalizePriority();
+    } catch (err) {
+      console.error('Failed to check off task:', err);
+      alert('Failed to mark task complete: ' + err.message);
+    } finally {
+      setCheckingTask(null);
+    }
+  };
+
+  // ── Create manual task ────────────────────────────────────────────────────────
+  const submitManualTask = async () => {
+    const { title, deadlineDate, deadlineTime, estimatedTime } = addTaskForm;
+    if (!title || !deadlineDate || !estimatedTime) return;
+    setIsSavingManualTask(true);
+    try {
+      await apiCall('/tasks/manual', 'POST', {
+        title: addTaskForm.title,
+        deadlineDate: addTaskForm.deadlineDate,
+        deadlineTime: addTaskForm.deadlineTime || null,
+        estimatedTime: parseInt(addTaskForm.estimatedTime),
+        description: addTaskForm.description || '',
+        url: addTaskForm.url || null,
+      });
+      setShowAddTask(false);
+      setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
+      await loadTasks(); // refresh task list (new task appears in sidebar)
+    } catch (err) {
+      console.error('Failed to create task:', err);
+      alert('Failed to create task: ' + err.message);
+    } finally {
+      setIsSavingManualTask(false);
+    }
   };
 
 
@@ -2870,7 +2942,7 @@ const fetchCanvasTasks = async () => {
                     <h3 className="text-lg font-bold text-gray-900 mb-1">Manage Tasks</h3>
                     <p className="text-sm text-gray-600">View your task list</p>
                   </button>
-                  {user?.grade && parseInt(user.grade) >= 7 && (
+                  {user?.grade && parseInt(user.grade) >= 7 && parseInt(user.grade) <= 12 && (
                     <button onClick={openHubTutorialDialog} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-orange-200">
                       <BookOpen className="w-10 h-10 text-orange-500 mb-3" />
                       <h3 className="text-lg font-bold text-gray-900 mb-1">Book a Tutorial</h3>
@@ -3000,21 +3072,22 @@ const fetchCanvasTasks = async () => {
                         <p className="text-gray-600">Manage your upcoming tasks</p>
                       </div>
                       <div className="flex gap-2 items-center">
-                        <button 
-                          onClick={fetchCanvasTasks} 
-                          disabled={isLoadingTasks} 
+                        <button
+                          onClick={() => { setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' }); setShowAddTask(true); }}
+                          className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 font-medium flex items-center gap-2 transition-all"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span className="hidden sm:inline">Add Task</span>
+                        </button>
+                        <button
+                          onClick={fetchCanvasTasks}
+                          disabled={isLoadingTasks}
                           className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
                         >
                           {isLoadingTasks ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              <span className="hidden sm:inline">Sync</span>
-                            </>
+                            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div><span className="hidden sm:inline">Sync</span></>
                           ) : (
-                            <>
-                              <Upload className="w-4 h-4" />
-                              <span className="hidden sm:inline">Sync</span>
-                            </>
+                            <><Upload className="w-4 h-4" /><span className="hidden sm:inline">Sync</span></>
                           )}
                         </button>
                       </div>
@@ -3092,13 +3165,20 @@ const fetchCanvasTasks = async () => {
                                     <GripVertical className="w-4 h-4 text-gray-400" />
                                   </div>
                                   
-                                  {/* Checkbox */}
-                                  <input
-                                    type="checkbox"
-                                    checked={task.completed || false}
-                                    onChange={() => toggleTaskCompletion(task.id)}
-                                    className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer flex-shrink-0"
-                                  />
+                                  {/* Checkbox with loading state */}
+                                  {checkingTask === task.id ? (
+                                    <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center">
+                                      <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                                    </div>
+                                  ) : (
+                                    <input
+                                      type="checkbox"
+                                      checked={task.completed || false}
+                                      onChange={() => toggleTaskCompletion(task.id)}
+                                      disabled={checkingTask !== null}
+                                      className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer flex-shrink-0"
+                                    />
+                                  )}
                                   
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -4736,7 +4816,22 @@ const fetchCanvasTasks = async () => {
                     </p>
                     <button
                       id="enhance-schedule-btn"
-                      onClick={() => { setShowEnhanceDialog(true); setEnhanceStep(1); setEnhanceLessons({}); setEnhanceZoom({}); }}
+                      onClick={() => {
+                        // Pre-fill with existing lesson-course mappings
+                        const prefillLessons = {};
+                        scheduleLessons.forEach(sl => {
+                          if (sl.course_id) {
+                            prefillLessons[`${sl.day}-${sl.period}`] = { courseId: sl.course_id, courseName: sl.course_name };
+                          }
+                        });
+                        // Pre-fill zoom numbers from courses
+                        const prefillZoom = {};
+                        courses.forEach(c => { if (c.zoom_number) prefillZoom[c.id] = c.zoom_number; });
+                        setEnhanceLessons(prefillLessons);
+                        setEnhanceZoom(prefillZoom);
+                        setShowEnhanceDialog(true);
+                        setEnhanceStep(1);
+                      }}
                       className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors"
                     >
                       <ClipboardList className="w-4 h-4" />
@@ -5158,6 +5253,81 @@ const fetchCanvasTasks = async () => {
             </div>
           );
       })()}
+
+      {/* Add Task Dialog */}
+      {showAddTask && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-xl font-bold text-gray-900">Add a Task</h3>
+              <button onClick={() => setShowAddTask(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Title <span className="text-red-400">*</span></label>
+                <input type="text" value={addTaskForm.title}
+                  onChange={e => setAddTaskForm(prev => ({ ...prev, title: e.target.value }))}
+                  placeholder="Task title"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Date <span className="text-red-400">*</span></label>
+                  <input type="date" value={addTaskForm.deadlineDate}
+                    onChange={e => setAddTaskForm(prev => ({ ...prev, deadlineDate: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
+                </div>
+                <div className="flex-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Time <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <input type="time" value={addTaskForm.deadlineTime}
+                    onChange={e => setAddTaskForm(prev => ({ ...prev, deadlineTime: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Estimated Time (minutes) <span className="text-red-400">*</span>
+                  <span className="text-gray-400 font-normal ml-1">(5–300)</span>
+                </label>
+                <input type="number" min="5" max="300" value={addTaskForm.estimatedTime}
+                  onChange={e => setAddTaskForm(prev => ({ ...prev, estimatedTime: e.target.value }))}
+                  placeholder="e.g. 45"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Description <span className="text-gray-400 font-normal">(optional)</span></label>
+                <textarea value={addTaskForm.description}
+                  onChange={e => setAddTaskForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Any notes or context..."
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">URL <span className="text-gray-400 font-normal">(optional)</span></label>
+                <input type="url" value={addTaskForm.url}
+                  onChange={e => setAddTaskForm(prev => ({ ...prev, url: e.target.value }))}
+                  placeholder="https://..."
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 flex gap-3">
+              <button onClick={() => setShowAddTask(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                Cancel
+              </button>
+              <button
+                onClick={submitManualTask}
+                disabled={!addTaskForm.title || !addTaskForm.deadlineDate || !addTaskForm.estimatedTime || parseInt(addTaskForm.estimatedTime) < 5 || parseInt(addTaskForm.estimatedTime) > 300 || isSavingManualTask}
+                className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isSavingManualTask
+                  ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Adding...</>
+                  : 'Add Task'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showWorkspace && workspaceTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
