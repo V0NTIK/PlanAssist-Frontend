@@ -1376,16 +1376,29 @@ const fetchCanvasTasks = async () => {
       // Hydrate tasks with in-memory seconds for accumulated_time
       const hydrated = data.map(agenda => ({
         ...agenda,
-        tasks: (agenda.tasks || []).map(t => ({
-          ...t,
-          accumulatedTime: (t.accumulated_time || 0) * 60, // DB minutes → seconds
-          estimatedTime: t.estimated_time,
-          userEstimate: t.user_estimated_time,
-          deadlineDateRaw: t.deadline_date
+        tasks: (agenda.tasks || []).map(t => {
+          const deadlineDateRaw = t.deadline_date
             ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
-            : null,
-          sessionActive: t.session_active || false,
-        }))
+            : null;
+          // Reconstruct dueDate the same way loadTasks does (UTC-correct)
+          let dueDate = null;
+          if (deadlineDateRaw) {
+            if (t.deadline_time !== null && t.deadline_time !== undefined) {
+              dueDate = new Date(`${deadlineDateRaw}T${t.deadline_time}Z`);
+            } else {
+              dueDate = new Date(`${deadlineDateRaw}T23:59:00`); // local time, no shift needed
+            }
+          }
+          return {
+            ...t,
+            accumulatedTime: (t.accumulated_time || 0) * 60,
+            estimatedTime: t.estimated_time,
+            userEstimate: t.user_estimated_time,
+            deadlineDateRaw,
+            dueDate,
+            sessionActive: t.session_active || false,
+          };
+        })
       }));
       setAgendas(hydrated);
     } catch (err) {
@@ -3644,9 +3657,13 @@ const fetchCanvasTasks = async () => {
                 {sessionTasks.map(task => {
                   const hasProgress = task.accumulatedTime > 0;
                   const classColor = getClassColor(task.class);
-                  const dueLabel = task.deadlineDateRaw
-                    ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : '—';
+                  // Use the pre-parsed dueDate from tasks state (already UTC-corrected)
+                  // Fall back to deadlineDateRaw+T12 only if dueDate wasn't hydrated
+                  const dueLabel = task.dueDate
+                    ? task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                    : task.deadlineDateRaw
+                      ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                      : '—';
                   return (
                     <div key={task.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:border-purple-200 transition-colors overflow-hidden">
                       <div className="flex items-center gap-4 p-4">
@@ -3750,7 +3767,7 @@ const fetchCanvasTasks = async () => {
                   <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
                   {currentSessionTask.deadlineDateRaw && (
                     <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
-                      Due {new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      Due {(currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                     </span>
                   )}
                   {currentSessionTask.accumulatedTime > 0 && (
@@ -3924,9 +3941,13 @@ const fetchCanvasTasks = async () => {
                           {agenda.tasks.map((task, idx) => {
                             const classColor = getClassColor(task.class);
                             const hasProgress = (task.accumulatedTime || 0) > 0;
-                            const dueLabel = task.deadlineDateRaw
-                              ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                              : '—';
+                            // Use pre-parsed dueDate from tasks state if available (UTC-corrected)
+                            const agendaTaskFull = tasks.find(t => t.id === task.id);
+                            const dueLabel = agendaTaskFull?.dueDate
+                              ? agendaTaskFull.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                              : task.deadlineDateRaw
+                                ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                : '—';
                             return (
                               <div key={task.id} className="flex items-center gap-4 px-5 py-3">
                                 <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
@@ -4040,9 +4061,9 @@ const fetchCanvasTasks = async () => {
                       <div className="bg-white p-4 space-y-2">
                         <div className="flex items-center gap-3 text-xs text-gray-400 mb-3 flex-wrap">
                           <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Est. {task.userEstimate || task.estimatedTime} min</span>
-                          {task.deadlineDateRaw && (
+                          {(task.deadlineDateRaw || tasks.find(t => t.id === task.id)?.dueDate) && (
                             <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />
-                              Due {new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                              Due {(tasks.find(t => t.id === task.id)?.dueDate || new Date(task.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                             </span>
                           )}
                           {(task.accumulatedTime || 0) > 0 && (
