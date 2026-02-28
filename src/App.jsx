@@ -1750,10 +1750,22 @@ const fetchCanvasTasks = async () => {
     if (!title || !deadlineDate || !estimatedTime) return;
     setIsSavingManualTask(true);
     try {
+      // Convert user's local date+time to UTC before storing
+      // e.g. user at UTC-5 enters 2025-03-02 23:00 → DB gets 2025-03-03 04:00
+      let utcDeadlineDate = addTaskForm.deadlineDate;
+      let utcDeadlineTime = null;
+      if (addTaskForm.deadlineTime) {
+        const localDt = new Date(`${addTaskForm.deadlineDate}T${addTaskForm.deadlineTime}:00`);
+        const utcIso = localDt.toISOString(); // always UTC
+        utcDeadlineDate = utcIso.split('T')[0];                  // YYYY-MM-DD in UTC
+        utcDeadlineTime = utcIso.split('T')[1].replace('.000Z', ''); // HH:MM:SS in UTC
+      }
+      // If no time given, store date as-is (no timezone shift needed for date-only tasks)
+
       await apiCall('/tasks/manual', 'POST', {
         title: addTaskForm.title,
-        deadlineDate: addTaskForm.deadlineDate,
-        deadlineTime: addTaskForm.deadlineTime || null,
+        deadlineDate: utcDeadlineDate,
+        deadlineTime: utcDeadlineTime,
         estimatedTime: parseInt(addTaskForm.estimatedTime),
         description: addTaskForm.description || '',
         url: addTaskForm.url || null,
