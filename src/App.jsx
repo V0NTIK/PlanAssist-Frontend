@@ -1761,6 +1761,7 @@ const fetchCanvasTasks = async () => {
       setShowAddTask(false);
       setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
       await loadTasks(); // refresh task list (new task appears in sidebar)
+      setNewTasksSidebarOpen(true); // open sidebar so user can prioritize the new task
     } catch (err) {
       console.error('Failed to create task:', err);
       alert('Failed to create task: ' + err.message);
