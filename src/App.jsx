@@ -336,7 +336,12 @@ const PlanAssist = () => {
             localStorage.setItem('user', JSON.stringify({ ...parsed, name: setupData.name }));
           }
         }
-        if (setupData.schedule_enhanced) loadScheduleLessons();
+        if (setupData.schedule_enhanced) {
+          // Use authToken directly — React state `token` may not be set yet at this point
+          fetch(`${API_URL}/schedule/lessons`, {
+            headers: { 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' }
+          }).then(r => r.ok ? r.json() : []).then(data => setScheduleLessons(data || [])).catch(() => {});
+        }
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
         // Update user object with grade for leaderboard to work
@@ -1722,7 +1727,7 @@ const fetchCanvasTasks = async () => {
   const toggleTaskCompletion = async (taskId) => {
     setCheckingTask(taskId);
     try {
-      await apiCall(`/tasks/${taskId}/delete`, 'POST'); // marks deleted=true
+      await apiCall(`/tasks/${taskId}/complete`, 'PATCH'); // marks deleted=true
       setTasks(prev => prev.filter(t => t.id !== taskId));
       setSessionTasks(prev => prev.filter(t => t.id !== taskId));
       // Remove from any agendas in state
