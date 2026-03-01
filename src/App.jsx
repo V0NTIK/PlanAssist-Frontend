@@ -2,9 +2,55 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw , LayoutList , Trash2 , Plus , ClipboardList } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw , LayoutList , Trash2 , Plus , ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
+
+// ── EditUserForm helper (used inside Admin Console) ─────────────────────────
+const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
+  const [form, setForm] = React.useState({
+    name: user.name || '',
+    grade: user.grade || '',
+    present_periods: user.present_periods || '',
+    is_admin: user.is_admin || false,
+  });
+  return (
+    <div className="space-y-3 mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+          <input value={form.name} onChange={e => setForm(p => ({...p, name: e.target.value}))}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Grade</label>
+          <input value={form.grade} onChange={e => setForm(p => ({...p, grade: e.target.value}))}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Present Periods</label>
+          <input value={form.present_periods} onChange={e => setForm(p => ({...p, present_periods: e.target.value}))}
+            placeholder="e.g. 2-6"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
+        <div className="flex items-center gap-2 pt-4">
+          <input type="checkbox" id="isAdminCheck" checked={form.is_admin}
+            onChange={e => {
+              if (!e.target.checked && user.id === currentUserId) return; // no self-demotion
+              setForm(p => ({...p, is_admin: e.target.checked}));
+            }}
+            className="w-4 h-4 text-red-600 rounded" />
+          <label htmlFor="isAdminCheck" className="text-sm font-medium text-gray-700">Admin</label>
+          {user.id === currentUserId && <span className="text-xs text-gray-400">(can't remove own admin)</span>}
+        </div>
+      </div>
+      <div className="flex gap-2 pt-1">
+        <button onClick={onCancel} className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
+        <button onClick={() => onSave(form)} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
+      </div>
+    </div>
+  );
+};
 
 const PlanAssist = () => {
   // Auth state
@@ -63,6 +109,24 @@ const PlanAssist = () => {
   const [showAddTask, setShowAddTask] = useState(false);
   const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
   const [isSavingManualTask, setIsSavingManualTask] = useState(false);
+
+  // ── Admin state ───────────────────────────────────────────────────────────
+  const [announcements, setAnnouncements] = useState([]);
+  const [adminUsers, setAdminUsers] = useState([]);
+  const [adminSelectedUser, setAdminSelectedUser] = useState(null);
+  const [adminUserDetail, setAdminUserDetail] = useState(null);
+  const [adminDiagnostics, setAdminDiagnostics] = useState(null);
+  const [adminAuditLog, setAdminAuditLog] = useState([]);
+  const [adminSection, setAdminSection] = useState('users');
+  const [adminSearch, setAdminSearch] = useState('');
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminAnnouncements, setAdminAnnouncements] = useState([]);
+  const [newAnnouncementMsg, setNewAnnouncementMsg] = useState('');
+  const [newAnnouncementType, setNewAnnouncementType] = useState('info');
+  const [banReason, setBanReason] = useState('');
+  const [showBanDialog, setShowBanDialog] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
+
   const [isSavingEnhance, setIsSavingEnhance] = useState(false);
   const [isLoadingItinerary, setIsLoadingItinerary] = useState(false);
 
@@ -278,8 +342,8 @@ const PlanAssist = () => {
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${API_URL}${endpoint}`, options);
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error || 'Request failed');
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || error.message || 'Request failed');
     }
     return response.json();
   };
@@ -298,6 +362,7 @@ const PlanAssist = () => {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
       loadUserData(savedToken).finally(() => setIsAppLoading(false));
+      loadAnnouncements();
     }
   }, []);
 
@@ -326,14 +391,14 @@ const PlanAssist = () => {
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
         setScheduleEnhanced(setupData.schedule_enhanced || false);
-        // Sync name from DB (in case admin changed it)
+        // Sync name + isAdmin from DB (in case admin changed it)
         if (setupData.name) {
-          setUser(prev => prev ? { ...prev, name: setupData.name } : prev);
+          setUser(prev => prev ? { ...prev, name: setupData.name, isAdmin: setupData.is_admin || false } : prev);
           setAccountSetup(prev => ({ ...prev, name: setupData.name }));
           const savedUser = localStorage.getItem('user');
           if (savedUser) {
             const parsed = JSON.parse(savedUser);
-            localStorage.setItem('user', JSON.stringify({ ...parsed, name: setupData.name }));
+            localStorage.setItem('user', JSON.stringify({ ...parsed, name: setupData.name, isAdmin: setupData.is_admin || false }));
           }
         }
         if (setupData.schedule_enhanced) {
@@ -674,17 +739,22 @@ const PlanAssist = () => {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setToken(data.token);
-      setUser(data.user);
+      setUser({ ...data.user, isAdmin: data.user.isAdmin || false });
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
       if (data.user.isNewUser) {
         setCurrentPage('settings');
       } else {
         await loadUserData(data.token);
+        loadAnnouncements();
         setCurrentPage('hub');
       }
     } catch (error) {
-      setAuthError(error.message);
+      if (error.message === 'ACCOUNT_BLOCKED') {
+        setAuthError('Your account has been temporarily blocked. Please contact your administrator.');
+      } else {
+        setAuthError(error.message);
+      }
     } finally {
       setAuthLoading(false);
     }
@@ -1726,6 +1796,123 @@ const fetchCanvasTasks = async () => {
     setShowTutorialDialog('hub');
   };
 
+
+  // ── Announcement loading ──────────────────────────────────────────────────
+  const loadAnnouncements = async () => {
+    try {
+      const data = await apiCall('/announcements', 'GET');
+      setAnnouncements(data || []);
+    } catch (err) { /* silent */ }
+  };
+
+  const dismissAnnouncement = async (id) => {
+    try {
+      await apiCall(`/announcements/${id}/dismiss`, 'POST');
+      setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
+    } catch (err) { /* silent */ }
+  };
+
+  // ── Admin functions ────────────────────────────────────────────────────────
+  const loadAdminUsers = async () => {
+    setAdminLoading(true);
+    try {
+      const data = await apiCall('/admin/users', 'GET');
+      setAdminUsers(data || []);
+    } catch (err) { console.error(err); }
+    finally { setAdminLoading(false); }
+  };
+
+  const loadAdminUserDetail = async (userId) => {
+    try {
+      const data = await apiCall(`/admin/users/${userId}`, 'GET');
+      setAdminUserDetail(data);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadAdminDiagnostics = async () => {
+    setAdminLoading(true);
+    try {
+      const data = await apiCall('/admin/diagnostics', 'GET');
+      setAdminDiagnostics(data);
+    } catch (err) { console.error(err); }
+    finally { setAdminLoading(false); }
+  };
+
+  const loadAdminAuditLog = async () => {
+    try {
+      const data = await apiCall('/admin/audit-log', 'GET');
+      setAdminAuditLog(data || []);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadAdminAnnouncements = async () => {
+    try {
+      const data = await apiCall('/admin/announcements', 'GET');
+      setAdminAnnouncements(data || []);
+    } catch (err) { console.error(err); }
+  };
+
+  const adminBanUser = async (userId, reason) => {
+    try {
+      await apiCall(`/admin/users/${userId}/ban`, 'POST', { reason });
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, is_banned: true, ban_reason: reason } : u));
+      if (adminUserDetail?.user?.id === userId) setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, is_banned: true, ban_reason: reason } }));
+      setShowBanDialog(null); setBanReason('');
+    } catch (err) { alert('Failed to ban user: ' + err.message); }
+  };
+
+  const adminUnbanUser = async (userId) => {
+    try {
+      await apiCall(`/admin/users/${userId}/unban`, 'POST');
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, is_banned: false, ban_reason: null } : u));
+      if (adminUserDetail?.user?.id === userId) setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, is_banned: false, ban_reason: null } }));
+    } catch (err) { alert('Failed to unban: ' + err.message); }
+  };
+
+  const adminEditUser = async (userId, fields) => {
+    try {
+      await apiCall(`/admin/users/${userId}`, 'PATCH', fields);
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, ...fields } : u));
+      if (adminUserDetail?.user?.id === userId) setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, ...fields } }));
+      setEditingUser(null);
+    } catch (err) { alert('Failed to edit user: ' + err.message); }
+  };
+
+  const adminClearToken = async (userId) => {
+    if (!confirm('Clear this user\'s Canvas API token? They will need to re-enter it.')) return;
+    try {
+      await apiCall(`/admin/users/${userId}/clear-token`, 'POST');
+      alert('Canvas token cleared.');
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminDeleteTask = async (taskId) => {
+    if (!confirm('Soft-delete this task?')) return;
+    try {
+      await apiCall(`/admin/tasks/${taskId}`, 'DELETE');
+      if (adminUserDetail) {
+        setAdminUserDetail(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, deleted: true } : t) }));
+      }
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminCreateAnnouncement = async () => {
+    if (!newAnnouncementMsg.trim()) return;
+    try {
+      const data = await apiCall('/admin/announcements', 'POST', { message: newAnnouncementMsg, type: newAnnouncementType });
+      setAdminAnnouncements(prev => [data, ...prev]);
+      setNewAnnouncementMsg('');
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminDeactivateAnnouncement = async (id) => {
+    if (!confirm('Deactivate this announcement?')) return;
+    try {
+      await apiCall(`/admin/announcements/${id}/deactivate`, 'PATCH');
+      setAdminAnnouncements(prev => prev.map(a => a.id === id ? { ...a, is_active: false } : a));
+      loadAnnouncements(); // refresh user-facing banners
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
 
   // ── Priority normalize (remove gaps) ─────────────────────────────────────────
   const normalizePriority = async () => {
@@ -2773,6 +2960,16 @@ const fetchCanvasTasks = async () => {
             <button onClick={() => !isSavingPlan && !isLoadingTasks && setCurrentPage('settings')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Settings className="w-5 h-5" />
             </button>
+            {user?.isAdmin && (
+              <button
+                onClick={() => { setAdminSection('users'); setCurrentPage('admin'); loadAdminUsers(); }}
+                disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${currentPage === 'admin' ? 'bg-red-100 text-red-700' : 'text-red-600 hover:bg-red-50'}`}
+              >
+                <Shield className="w-5 h-5" />
+                <span className="hidden md:inline">Admin</span>
+              </button>
+            )}
             {isLoadingTasks && currentPage !== 'tasks' && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium">
                 <div className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -2785,6 +2982,33 @@ const fetchCanvasTasks = async () => {
           </div>
         </div>
       </nav>
+
+      {/* ── Announcement Banners ─────────────────────────────────────────── */}
+      {announcements.filter(a => !a.dismissed).map(a => (
+        <div
+          key={a.id}
+          className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium z-30 ${
+            a.type === 'urgent'
+              ? 'bg-red-600 text-white'
+              : 'bg-blue-600 text-white'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {a.type === 'urgent'
+              ? <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+              : <Bell className="w-4 h-4 flex-shrink-0" />}
+            <span>{a.message}</span>
+          </div>
+          {a.type === 'info' && (
+            <button
+              onClick={() => dismissAnnouncement(a.id)}
+              className="ml-4 flex-shrink-0 opacity-80 hover:opacity-100"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      ))}
 
       {/* Save & Adjust Plan - Full Lock Overlay */}
       {isSavingPlan && (
@@ -5180,6 +5404,441 @@ const fetchCanvasTasks = async () => {
         )}
       </div>
       
+
+        {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
+        {currentPage === 'admin' && user?.isAdmin && (
+          <div className="max-w-6xl mx-auto p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
+                <Shield className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Admin Console</h1>
+                <p className="text-sm text-gray-500">PlanAssist administration — handle with care</p>
+              </div>
+            </div>
+
+            {/* Section tabs */}
+            <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-sm border border-gray-100 p-1 flex-wrap">
+              {[
+                { id: 'users', label: 'Users', icon: UserCheck },
+                { id: 'announcements', label: 'Banners', icon: Bell },
+                { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
+                { id: 'audit', label: 'Audit Log', icon: FileText },
+              ].map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => {
+                    setAdminSection(id);
+                    if (id === 'users' && adminUsers.length === 0) loadAdminUsers();
+                    if (id === 'diagnostics' && !adminDiagnostics) loadAdminDiagnostics();
+                    if (id === 'audit') loadAdminAuditLog();
+                    if (id === 'announcements') loadAdminAnnouncements();
+                  }}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
+                >
+                  <Icon className="w-4 h-4" />{label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── USERS ── */}
+            {adminSection === 'users' && (
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* User list */}
+                <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100">
+                  <div className="p-4 border-b border-gray-100">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                      <input
+                        value={adminSearch}
+                        onChange={e => setAdminSearch(e.target.value)}
+                        placeholder="Search users..."
+                        className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                  <div className="overflow-y-auto max-h-[600px]">
+                    {adminLoading && <div className="p-4 text-center text-gray-400 text-sm">Loading...</div>}
+                    {adminUsers
+                      .filter(u => !adminSearch || u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase()) || u.grade?.toString().includes(adminSearch))
+                      .map(u => (
+                        <div
+                          key={u.id}
+                          onClick={() => { setAdminSelectedUser(u.id); loadAdminUserDetail(u.id); }}
+                          className={`p-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${adminSelectedUser === u.id ? 'bg-red-50 border-l-2 border-l-red-500' : ''}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
+                              <p className="text-xs text-gray-400">{u.email}</p>
+                            </div>
+                            <div className="flex flex-col items-end gap-1">
+                              <span className="text-xs text-gray-500">Gr {u.grade || '?'}</span>
+                              <div className="flex gap-1">
+                                {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
+                                {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
+                                {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed</p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+
+                {/* User detail */}
+                <div className="lg:col-span-2">
+                  {!adminUserDetail && (
+                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
+                      <UserCheck className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm">Select a user to view details</p>
+                    </div>
+                  )}
+                  {adminUserDetail && (() => {
+                    const u = adminUserDetail.user;
+                    return (
+                      <div className="space-y-4">
+                        {/* Profile card */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <div className="flex items-start justify-between mb-4">
+                            <div>
+                              <h3 className="text-lg font-bold text-gray-900">{u.name}</h3>
+                              <p className="text-sm text-gray-500">{u.email}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">Grade {u.grade} · Joined {new Date(u.created_at).toLocaleDateString()}</p>
+                            </div>
+                            <div className="flex gap-2 flex-wrap justify-end">
+                              {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-semibold">Admin</span>}
+                              {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-semibold">Blocked</span>}
+                              {u.schedule_enhanced && <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-semibold">Enhanced</span>}
+                            </div>
+                          </div>
+
+                          {/* Edit form */}
+                          {editingUser === u.id ? (
+                            <EditUserForm user={u} onSave={fields => adminEditUser(u.id, fields)} onCancel={() => setEditingUser(null)} currentUserId={user.id} />
+                          ) : (
+                            <div className="flex flex-wrap gap-2">
+                              <button onClick={() => setEditingUser(u.id)} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1">
+                                <Edit2 className="w-3.5 h-3.5" />Edit
+                              </button>
+                              <button onClick={() => adminClearToken(u.id)} className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 flex items-center gap-1">
+                                <X className="w-3.5 h-3.5" />Clear Token
+                              </button>
+                              {u.is_banned ? (
+                                <button onClick={() => adminUnbanUser(u.id)} className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 flex items-center gap-1">
+                                  <UserCheck className="w-3.5 h-3.5" />Unblock
+                                </button>
+                              ) : (
+                                <button onClick={() => setShowBanDialog(u.id)} className="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center gap-1">
+                                  <Ban className="w-3.5 h-3.5" />Block Account
+                                </button>
+                              )}
+                            </div>
+                          )}
+
+                          {u.is_banned && u.ban_reason && (
+                            <p className="mt-3 text-xs text-orange-700 bg-orange-50 rounded-lg px-3 py-2">
+                              Block reason: {u.ban_reason}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Tasks */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <h4 className="font-semibold text-gray-700 mb-3 text-sm">Active Tasks ({adminUserDetail.tasks.filter(t => !t.deleted && !t.completed).length})</h4>
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {adminUserDetail.tasks.filter(t => !t.deleted && !t.completed).map(t => (
+                              <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
+                                  <span className="text-gray-400">{t.class} · {t.deadline_date ? new Date(t.deadline_date + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
+                                </div>
+                                <button onClick={() => adminDeleteTask(t.id)} className="ml-2 text-red-400 hover:text-red-600 flex-shrink-0">
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Recent completions */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <h4 className="font-semibold text-gray-700 mb-3 text-sm">Recent Completions</h4>
+                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                            {adminUserDetail.recentCompletions.map((c, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
+                                <span className="font-medium text-gray-800 flex-1 truncate">{c.title}</span>
+                                <span className="text-gray-400 ml-2 flex-shrink-0">{c.actual_time}m · {new Date(c.completed_at).toLocaleDateString()}</span>
+                              </div>
+                            ))}
+                            {adminUserDetail.recentCompletions.length === 0 && <p className="text-gray-400 text-xs">No completions yet</p>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+
+            {/* ── ANNOUNCEMENTS ── */}
+            {adminSection === 'announcements' && (
+              <div className="space-y-6">
+                {/* Compose */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="font-bold text-gray-900 mb-4">New Banner</h3>
+                  <div className="space-y-3">
+                    <textarea
+                      value={newAnnouncementMsg}
+                      onChange={e => setNewAnnouncementMsg(e.target.value)}
+                      placeholder="Banner message..."
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 resize-none h-20"
+                    />
+                    <div className="flex gap-3 items-center flex-wrap">
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setNewAnnouncementType('info')}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium border-2 ${newAnnouncementType === 'info' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}
+                        >
+                          <span className="flex items-center gap-1.5"><Bell className="w-3.5 h-3.5" />Dismissible (blue)</span>
+                        </button>
+                        <button
+                          onClick={() => setNewAnnouncementType('urgent')}
+                          className={`px-4 py-2 rounded-lg text-sm font-medium border-2 ${newAnnouncementType === 'urgent' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-600'}`}
+                        >
+                          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />Permanent (red)</span>
+                        </button>
+                      </div>
+                      <button
+                        onClick={adminCreateAnnouncement}
+                        disabled={!newAnnouncementMsg.trim()}
+                        className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
+                      >
+                        Publish Banner
+                      </button>
+                    </div>
+                    <div className={`text-xs rounded-lg px-3 py-2 ${newAnnouncementType === 'urgent' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'}`}>
+                      Preview: {newAnnouncementMsg || 'Your message here...'}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Existing */}
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                  <h3 className="font-bold text-gray-900 mb-4">Active Banners</h3>
+                  <div className="space-y-3">
+                    {adminAnnouncements.filter(a => a.is_active).map(a => (
+                      <div key={a.id} className={`flex items-start justify-between p-3 rounded-lg text-sm ${a.type === 'urgent' ? 'bg-red-50 border border-red-200' : 'bg-blue-50 border border-blue-200'}`}>
+                        <div>
+                          <p className={`font-medium ${a.type === 'urgent' ? 'text-red-800' : 'text-blue-800'}`}>{a.message}</p>
+                          <p className="text-xs text-gray-400 mt-1">{a.type === 'urgent' ? 'Permanent' : 'Dismissible'} · by {a.author_name} · {new Date(a.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <button onClick={() => adminDeactivateAnnouncement(a.id)} className="ml-3 text-xs text-gray-500 hover:text-red-600 flex-shrink-0 underline">
+                          Deactivate
+                        </button>
+                      </div>
+                    ))}
+                    {adminAnnouncements.filter(a => !a.is_active).length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mt-4 mb-2">Past Banners</p>
+                        {adminAnnouncements.filter(a => !a.is_active).slice(0, 5).map(a => (
+                          <div key={a.id} className="flex items-center justify-between p-2.5 rounded-lg text-xs bg-gray-50 text-gray-400 mb-1.5">
+                            <span className="truncate">{a.message}</span>
+                            <span className="ml-2 flex-shrink-0">{new Date(a.created_at).toLocaleDateString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {adminAnnouncements.filter(a => a.is_active).length === 0 && (
+                      <p className="text-gray-400 text-sm">No active banners</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── DIAGNOSTICS ── */}
+            {adminSection === 'diagnostics' && (
+              <div className="space-y-6">
+                {adminLoading && <div className="text-center py-10 text-gray-400">Loading diagnostics...</div>}
+                {adminDiagnostics && (() => {
+                  const d = adminDiagnostics;
+                  return (
+                    <div className="space-y-5">
+                      {/* New user signups */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                          New Signups — Last 14 Days ({d.newUsers.length})
+                        </h4>
+                        {d.newUsers.length === 0 && <p className="text-gray-400 text-sm">No new signups</p>}
+                        <div className="space-y-1.5">
+                          {d.newUsers.map(u => (
+                            <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded-lg">
+                              <div>
+                                <span className="font-semibold text-gray-800">{u.name || '(unnamed)'}</span>
+                                <span className="text-gray-500 ml-2">{u.email}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-gray-400">Gr {u.grade || '?'}</span>
+                                {u.is_new_user && <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-xs font-medium">Setup pending</span>}
+                                <span className="text-gray-400">{new Date(u.created_at).toLocaleDateString()}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Grade stats */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-3">Completion Stats by Grade</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {d.gradeStats.map(g => (
+                            <div key={g.grade} className="p-3 bg-gray-50 rounded-lg text-center">
+                              <p className="text-lg font-bold text-purple-600">Grade {g.grade}</p>
+                              <p className="text-xs text-gray-500">{g.user_count} users</p>
+                              <p className="text-sm font-semibold text-gray-700">{g.total_completions} completions</p>
+                              <p className="text-xs text-gray-400">Avg {g.avg_actual_min}m actual / {g.avg_estimated_min}m est</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* No token */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-yellow-500" />
+                          No Canvas Token ({d.noToken.length})
+                        </h4>
+                        {d.noToken.length === 0 && <p className="text-green-600 text-sm">All set up ✓</p>}
+                        <div className="space-y-1.5">
+                          {d.noToken.map(u => (
+                            <div key={u.id} className="flex justify-between text-xs p-2 bg-yellow-50 rounded-lg">
+                              <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
+                              <span className="text-gray-400">Gr {u.grade}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Stale syncs */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-orange-500" />
+                          Stale Syncs — No activity in 7+ days ({d.staleSyncs.length})
+                        </h4>
+                        {d.staleSyncs.length === 0 && <p className="text-green-600 text-sm">All users syncing ✓</p>}
+                        <div className="space-y-1.5">
+                          {d.staleSyncs.map(u => (
+                            <div key={u.id} className="flex justify-between text-xs p-2 bg-orange-50 rounded-lg">
+                              <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
+                              <span className="text-gray-400">{u.last_task_import ? new Date(u.last_task_import).toLocaleDateString() : 'never'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Duplicates */}
+                      {d.duplicates.length > 0 && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-red-500" />
+                            Duplicate Tasks ({d.duplicates.length})
+                          </h4>
+                          <div className="space-y-1.5">
+                            {d.duplicates.map((d2, i) => (
+                              <div key={i} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
+                                <span className="font-medium text-gray-800">{d2.user_name}</span>
+                                <span className="text-gray-500 truncate mx-3 flex-1">{d2.url}</span>
+                                <span className="text-red-600 font-bold">{d2.count}×</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Bad tasks */}
+                      {d.badTasks.length > 0 && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-red-500" />
+                            Tasks Missing Deadlines ({d.badTasks.length})
+                          </h4>
+                          <div className="space-y-1.5">
+                            {d.badTasks.map(t => (
+                              <div key={t.id} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
+                                <span className="font-medium text-gray-800">{t.title}</span>
+                                <span className="text-gray-400">{t.user_name} · Gr {t.grade}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="text-right">
+                        <button onClick={loadAdminDiagnostics} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh diagnostics</button>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* ── AUDIT LOG ── */}
+            {adminSection === 'audit' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-bold text-gray-900">Admin Audit Log</h3>
+                  <button onClick={loadAdminAuditLog} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh</button>
+                </div>
+                <div className="space-y-2 max-h-[600px] overflow-y-auto">
+                  {adminAuditLog.length === 0 && <p className="text-gray-400 text-sm">No actions recorded yet</p>}
+                  {adminAuditLog.map(entry => (
+                    <div key={entry.id} className="flex items-start gap-3 text-xs p-3 bg-gray-50 rounded-lg">
+                      <div className="flex-1">
+                        <span className="font-bold text-gray-800">{entry.admin_name}</span>
+                        <span className="mx-1.5 font-mono bg-gray-200 px-1.5 py-0.5 rounded text-gray-600">{entry.action}</span>
+                        {entry.target_user_name && <span className="text-gray-600">on <span className="font-medium">{entry.target_user_name}</span></span>}
+                        {entry.details && Object.keys(JSON.parse(typeof entry.details === 'string' ? entry.details : JSON.stringify(entry.details))).length > 0 && (
+                          <span className="ml-2 text-gray-400">{JSON.stringify(typeof entry.details === 'string' ? JSON.parse(entry.details) : entry.details)}</span>
+                        )}
+                      </div>
+                      <span className="text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Ban Dialog */}
+        {showBanDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl p-6 max-w-md w-full shadow-2xl">
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Block Account</h3>
+              <p className="text-sm text-gray-500 mb-4">The user will see this message when they try to log in.</p>
+              <textarea
+                value={banReason}
+                onChange={e => setBanReason(e.target.value)}
+                placeholder="Reason (shown to user on login attempt)..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm mb-4 h-24 resize-none focus:ring-2 focus:ring-red-500"
+              />
+              <div className="flex gap-3">
+                <button onClick={() => { setShowBanDialog(null); setBanReason(''); }} className="flex-1 px-4 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+                <button
+                  onClick={() => adminBanUser(showBanDialog, banReason || 'This account has been temporarily blocked. Please contact your administrator.')}
+                  className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700"
+                >
+                  Confirm Block
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       {showFeedbackForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl p-6 max-w-2xl w-full">
