@@ -362,7 +362,7 @@ const PlanAssist = () => {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
       loadUserData(savedToken).finally(() => setIsAppLoading(false));
-      loadAnnouncements();
+      loadAnnouncements(savedToken);
     }
   }, []);
 
@@ -409,12 +409,12 @@ const PlanAssist = () => {
         }
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
-        // Update user object with grade for leaderboard to work
-        if (savedUser) {
-          const updatedUser = { ...JSON.parse(savedUser), grade: setupData.grade };
-          setUser(updatedUser);
-          localStorage.setItem('user', JSON.stringify(updatedUser));
-        }
+        // Update user object with grade + isAdmin (merge, don't clobber prior setUser)
+        setUser(prev => {
+          const merged = { ...(prev || {}), grade: setupData.grade, isAdmin: setupData.is_admin || false };
+          localStorage.setItem('user', JSON.stringify(merged));
+          return merged;
+        });
       } else {
         // If no grade setup yet, still set the name
         setAccountSetup(prev => ({
@@ -746,7 +746,7 @@ const PlanAssist = () => {
         setCurrentPage('settings');
       } else {
         await loadUserData(data.token);
-        loadAnnouncements();
+        loadAnnouncements(data.token);
         setCurrentPage('hub');
       }
     } catch (error) {
@@ -1798,9 +1798,15 @@ const fetchCanvasTasks = async () => {
 
 
   // ── Announcement loading ──────────────────────────────────────────────────
-  const loadAnnouncements = async () => {
+  const loadAnnouncements = async (authToken = null) => {
     try {
-      const data = await apiCall('/announcements', 'GET');
+      // authToken param used on startup before React token state is set
+      const headers = { 'Content-Type': 'application/json' };
+      const t = authToken || token;
+      if (t) headers['Authorization'] = `Bearer ${t}`;
+      const response = await fetch(`${API_URL}/announcements`, { headers });
+      if (!response.ok) return;
+      const data = await response.json();
       setAnnouncements(data || []);
     } catch (err) { /* silent */ }
   };
