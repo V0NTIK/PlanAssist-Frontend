@@ -5494,7 +5494,6 @@ const fetchCanvasTasks = async () => {
                             <div className="flex flex-col items-end gap-1">
                               <span className="text-xs text-gray-500">Gr {u.grade || '?'}</span>
                               <div className="flex gap-1 flex-wrap justify-end">
-                                {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block" />Live</span>}
                                 {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
                                 {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
                                 {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
@@ -5502,7 +5501,7 @@ const fetchCanvasTasks = async () => {
                               </div>
                             </div>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed{u.in_session ? ' · 🟢 in session' : ''}</p>
+                          <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed</p>
                         </div>
                       ))}
                   </div>
@@ -5529,11 +5528,6 @@ const fetchCanvasTasks = async () => {
                               <p className="text-xs text-gray-400 mt-0.5">Grade {u.grade} · Joined {new Date(u.created_at).toLocaleDateString()}</p>
                             </div>
                             <div className="flex gap-2 flex-wrap justify-end">
-                              {adminUsers.find(au => au.id === u.id)?.in_session && (
-                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold flex items-center gap-1">
-                                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse inline-block" />In Session
-                                </span>
-                              )}
                               {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-semibold">Admin</span>}
                               {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-semibold">Blocked</span>}
                               {u.schedule_enhanced && <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-semibold">Enhanced</span>}
@@ -5726,7 +5720,7 @@ const fetchCanvasTasks = async () => {
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                           <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                          New Signups — Last 14 Days ({d.newUsers.length})
+                          New Signups — Last 3 Days ({d.newUsers.length})
                         </h4>
                         {d.newUsers.length === 0 && <p className="text-gray-400 text-sm">No new signups</p>}
                         <div className="space-y-1.5">
