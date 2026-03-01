@@ -1902,6 +1902,18 @@ const fetchCanvasTasks = async () => {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
+  const adminTasksScan = async (userId) => {
+    if (!confirm('This will clear ALL is_new flags for this user and reassign priority order. Continue?')) return;
+    try {
+      const result = await apiCall(`/admin/users/${userId}/tasks-scan`, 'POST');
+      // Refresh the user detail with updated tasks
+      setAdminUserDetail(prev => prev ? { ...prev, tasks: result.tasks, newTasks: [] } : prev);
+      // Also clear new_tasks count in user list
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, new_tasks: 0 } : u));
+      alert('Tasks Scan complete. All is_new flags cleared and priority order reassigned.');
+    } catch (err) { alert('Tasks Scan failed: ' + err.message); }
+  };
+
   const adminCreateAnnouncement = async () => {
     if (!newAnnouncementMsg.trim()) return;
     try {
@@ -5481,14 +5493,16 @@ const fetchCanvasTasks = async () => {
                             </div>
                             <div className="flex flex-col items-end gap-1">
                               <span className="text-xs text-gray-500">Gr {u.grade || '?'}</span>
-                              <div className="flex gap-1">
+                              <div className="flex gap-1 flex-wrap justify-end">
+                                {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block" />Live</span>}
                                 {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
                                 {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
                                 {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
+                                {parseInt(u.new_tasks) > 0 && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded font-medium">{u.new_tasks} unsorted</span>}
                               </div>
                             </div>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed</p>
+                          <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed{u.in_session ? ' · 🟢 in session' : ''}</p>
                         </div>
                       ))}
                   </div>
@@ -5515,6 +5529,11 @@ const fetchCanvasTasks = async () => {
                               <p className="text-xs text-gray-400 mt-0.5">Grade {u.grade} · Joined {new Date(u.created_at).toLocaleDateString()}</p>
                             </div>
                             <div className="flex gap-2 flex-wrap justify-end">
+                              {adminUsers.find(au => au.id === u.id)?.in_session && (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold flex items-center gap-1">
+                                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse inline-block" />In Session
+                                </span>
+                              )}
                               {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-semibold">Admin</span>}
                               {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-semibold">Blocked</span>}
                               {u.schedule_enhanced && <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-semibold">Enhanced</span>}
@@ -5567,6 +5586,36 @@ const fetchCanvasTasks = async () => {
                               </div>
                             ))}
                           </div>
+                        </div>
+
+                        {/* Unsorted tasks (is_new) + Tasks Scan */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-gray-700 text-sm">
+                              Unsorted Tasks — is_new ({adminUserDetail.newTasks?.length || 0})
+                            </h4>
+                            <button
+                              onClick={() => adminTasksScan(u.id)}
+                              className="text-xs px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 flex items-center gap-1 font-semibold"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />Tasks Scan
+                            </button>
+                          </div>
+                          {(!adminUserDetail.newTasks || adminUserDetail.newTasks.length === 0) ? (
+                            <p className="text-green-600 text-xs">No unsorted tasks ✓</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                              {adminUserDetail.newTasks.map(t => (
+                                <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-yellow-50 rounded-lg border border-yellow-100">
+                                  <div className="flex-1 min-w-0">
+                                    <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
+                                    <span className="text-gray-400">{t.class}{t.manually_created ? ' · manual' : ''}</span>
+                                  </div>
+                                  <span className="ml-2 text-gray-400 flex-shrink-0">{t.deadline_date ? new Date(t.deadline_date + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Recent completions */}
