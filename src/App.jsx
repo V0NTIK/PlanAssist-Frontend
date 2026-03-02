@@ -4626,7 +4626,7 @@ const fetchCanvasTasks = async () => {
                             </span>
                           </div>
                           {isLesson && lessonInfo?.zoom_number && (
-                            <a href={`https://oneschoolglobal.zoom.us/j/${lessonInfo.zoom_number}`}
+                            <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/\s/g, "")}`}
                               target="_blank" rel="noopener noreferrer"
                               className="flex items-center gap-1.5 text-xs bg-white text-blue-700 px-3 py-1.5 rounded-full font-semibold hover:bg-blue-50 transition-colors">
                               🎥 Join Zoom
@@ -4644,10 +4644,10 @@ const fetchCanvasTasks = async () => {
                                   {lessonInfo?.course_name || <span className="text-gray-400 italic font-normal">No course assigned</span>}
                                 </p>
                                 {lessonInfo?.zoom_number && (
-                                  <a href={`https://oneschoolglobal.zoom.us/j/${lessonInfo.zoom_number}`}
+                                  <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/\s/g, "")}`}
                                     target="_blank" rel="noopener noreferrer"
                                     className="text-xs text-blue-500 hover:underline">
-                                    zoom.us/j/{lessonInfo.zoom_number}
+                                    zoom.us/j/{(lessonInfo.zoom_number || "").replace(/\s/g, "")}
                                   </a>
                                 )}
                               </div>
@@ -4662,10 +4662,10 @@ const fetchCanvasTasks = async () => {
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold text-orange-900">Tutorial{tutorial.topic ? `: ${tutorial.topic}` : ''}</p>
                                   {tutorial.zoom_number ? (
-                                    <a href={`https://oneschoolglobal.zoom.us/j/${tutorial.zoom_number}`}
+                                    <a href={`https://oneschoolglobal.zoom.us/j/${(tutorial.zoom_number || "").replace(/\s/g, "")}`}
                                       target="_blank" rel="noopener noreferrer"
                                       className="text-xs text-orange-600 hover:underline">
-                                      zoom.us/j/{tutorial.zoom_number}
+                                      zoom.us/j/{(tutorial.zoom_number || "").replace(/\s/g, "")}
                                     </a>
                                   ) : <p className="text-xs text-orange-400">No Zoom link</p>}
                                 </div>
@@ -4757,8 +4757,8 @@ const fetchCanvasTasks = async () => {
                       <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
                         <p className="text-xs text-gray-500">Once booked, enter your Zoom details below:</p>
                         <div className="flex gap-3">
-                          <input type="text" value={tutorialZoom} onChange={e => setTutorialZoom(e.target.value)}
-                            placeholder="Zoom number (optional)" maxLength={20}
+                          <input type="text" value={tutorialZoom} onChange={e => setTutorialZoom(e.target.value.replace(/[^0-9]/g, ''))}
+                            placeholder="Zoom number (e.g. 74751073335)" maxLength={15}
                             className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
                           <input type="text" value={tutorialTopic} onChange={e => setTutorialTopic(e.target.value)}
                             placeholder="Topic (optional, max 60 chars)" maxLength={60}
@@ -5231,8 +5231,9 @@ const fetchCanvasTasks = async () => {
                                       <input
                                         type="text"
                                         value={enhanceZoom[cid] || ''}
-                                        onChange={e => setEnhanceZoom(prev => ({ ...prev, [cid]: e.target.value }))}
-                                        placeholder="Zoom number (optional)"
+                                        onChange={e => setEnhanceZoom(prev => ({ ...prev, [cid]: e.target.value.replace(/[^0-9]/g, '') }))}
+                                        placeholder="Zoom number (e.g. 74751073335)"
+                                        maxLength={15}
                                         className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                                       />
                                     </div>
