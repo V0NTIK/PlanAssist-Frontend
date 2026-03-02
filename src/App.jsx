@@ -1658,6 +1658,13 @@ const fetchCanvasTasks = async () => {
   };
 
   const finishAgenda = async () => {
+    // Ensure agenda is marked finished in DB (may not have been called if tasks
+    // were completed in a prior session or via pre-marked state)
+    try {
+      await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
+    } catch (err) {
+      console.error('Failed to mark agenda finished:', err);
+    }
     setAgendas(prev => prev.filter(a => a.id !== currentAgenda.id));
     agendaTimerRefsMap.current = {};
     setAgendaTaskStates({});
