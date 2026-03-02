@@ -1980,7 +1980,7 @@ const fetchCanvasTasks = async () => {
   // ── Create manual task ────────────────────────────────────────────────────────
   const submitManualTask = async () => {
     const { title, deadlineDate, deadlineTime, estimatedTime } = addTaskForm;
-    if (!title || !deadlineDate || !estimatedTime) return;
+    if (!title || !deadlineDate || !deadlineTime || !estimatedTime) return;
     setIsSavingManualTask(true);
     try {
       // Convert user's local date+time to UTC before storing
@@ -2001,7 +2001,7 @@ const fetchCanvasTasks = async () => {
         deadlineTime: utcDeadlineTime,
         estimatedTime: parseInt(addTaskForm.estimatedTime),
         description: addTaskForm.description || '',
-        url: addTaskForm.url || null,
+        url: addTaskForm.url || 'https://planassist.onrender.com/',
       });
       setShowAddTask(false);
       setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
@@ -5591,7 +5591,7 @@ const fetchCanvasTasks = async () => {
                               <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
                                 <div className="flex-1 min-w-0">
                                   <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
-                                  <span className="text-gray-400">{t.class} · {t.deadline_date ? new Date(t.deadline_date + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
+                                  <span className="text-gray-400">{t.class} · {t.deadline_date ? new Date((t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date) + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
                                 </div>
                                 <button onClick={() => adminDeleteTask(t.id)} className="ml-2 text-red-400 hover:text-red-600 flex-shrink-0">
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -5624,7 +5624,7 @@ const fetchCanvasTasks = async () => {
                                     <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
                                     <span className="text-gray-400">{t.class}{t.manually_created ? ' · manual' : ''}</span>
                                   </div>
-                                  <span className="ml-2 text-gray-400 flex-shrink-0">{t.deadline_date ? new Date(t.deadline_date + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
+                                  <span className="ml-2 text-gray-400 flex-shrink-0">{t.deadline_date ? new Date((t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date) + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
                                 </div>
                               ))}
                             </div>
@@ -6044,7 +6044,7 @@ const fetchCanvasTasks = async () => {
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
                 </div>
                 <div className="flex-1">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Time <span className="text-gray-400 font-normal">(optional)</span></label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Due Time <span className="text-red-400">*</span></label>
                   <input type="time" value={addTaskForm.deadlineTime}
                     onChange={e => setAddTaskForm(prev => ({ ...prev, deadlineTime: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent" />
@@ -6083,7 +6083,7 @@ const fetchCanvasTasks = async () => {
               </button>
               <button
                 onClick={submitManualTask}
-                disabled={!addTaskForm.title || !addTaskForm.deadlineDate || !addTaskForm.estimatedTime || parseInt(addTaskForm.estimatedTime) < 5 || parseInt(addTaskForm.estimatedTime) > 300 || isSavingManualTask}
+                disabled={!addTaskForm.title || !addTaskForm.deadlineDate || !addTaskForm.deadlineTime || !addTaskForm.estimatedTime || parseInt(addTaskForm.estimatedTime) < 5 || parseInt(addTaskForm.estimatedTime) > 300 || isSavingManualTask}
                 className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isSavingManualTask
