@@ -366,6 +366,13 @@ const PlanAssist = () => {
     }
   }, []);
 
+  // Poll for new announcements every 60 seconds while authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(() => loadAnnouncements(), 60000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
+
   // Load user data
   const loadUserData = async (authToken) => {
     try {
