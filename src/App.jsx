@@ -1512,14 +1512,15 @@ const fetchCanvasTasks = async () => {
   };
 
   const openAgenda = (agenda) => {
-    // Build initial task states from each task's accumulated_time (already in seconds)
+    // Build initial task states — treat deleted/completed tasks as already done
     const initialStates = {};
     agenda.tasks.forEach(task => {
+      const alreadyDone = task.completed || task.deleted || false;
       initialStates[task.id] = {
         elapsed: task.accumulatedTime || 0,
         isRunning: false,
-        completed: task.completed || false,
-        timeSpent: null, // set on complete
+        completed: alreadyDone,
+        timeSpent: alreadyDone ? (task.accumulatedTime || 0) : null,
       };
     });
     setAgendaTaskStates(initialStates);
@@ -4237,7 +4238,11 @@ const fetchCanvasTasks = async () => {
               <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
                 <div>
                   <h2 className="text-xl font-bold text-gray-900">{currentAgenda.name}</h2>
-                  <p className="text-sm text-gray-400">{currentAgenda.tasks.length} task{currentAgenda.tasks.length !== 1 ? 's' : ''}</p>
+                  {(() => {
+                    const remaining = currentAgenda.tasks.filter(t => !agendaTaskStates[t.id]?.completed).length;
+                    const total = currentAgenda.tasks.length;
+                    return <p className="text-sm text-gray-400">{remaining} of {total} task{total !== 1 ? 's' : ''} remaining</p>;
+                  })()}
                 </div>
                 {allDone ? (
                   <button onClick={finishAgenda}
