@@ -4626,7 +4626,7 @@ const fetchCanvasTasks = async () => {
                             </span>
                           </div>
                           {isLesson && lessonInfo?.zoom_number && (
-                            <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/\s/g, "")}`}
+                            <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/[\s\-]/g, "")}`}
                               target="_blank" rel="noopener noreferrer"
                               className="flex items-center gap-1.5 text-xs bg-white text-blue-700 px-3 py-1.5 rounded-full font-semibold hover:bg-blue-50 transition-colors">
                               🎥 Join Zoom
@@ -4644,10 +4644,10 @@ const fetchCanvasTasks = async () => {
                                   {lessonInfo?.course_name || <span className="text-gray-400 italic font-normal">No course assigned</span>}
                                 </p>
                                 {lessonInfo?.zoom_number && (
-                                  <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/\s/g, "")}`}
+                                  <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/[\s\-]/g, "")}`}
                                     target="_blank" rel="noopener noreferrer"
                                     className="text-xs text-blue-500 hover:underline">
-                                    zoom.us/j/{(lessonInfo.zoom_number || "").replace(/\s/g, "")}
+                                    zoom.us/j/{(lessonInfo.zoom_number || "").replace(/[\s\-]/g, "")}
                                   </a>
                                 )}
                               </div>
@@ -4662,10 +4662,10 @@ const fetchCanvasTasks = async () => {
                                 <div className="min-w-0">
                                   <p className="text-sm font-semibold text-orange-900">Tutorial{tutorial.topic ? `: ${tutorial.topic}` : ''}</p>
                                   {tutorial.zoom_number ? (
-                                    <a href={`https://oneschoolglobal.zoom.us/j/${(tutorial.zoom_number || "").replace(/\s/g, "")}`}
+                                    <a href={`https://oneschoolglobal.zoom.us/j/${(tutorial.zoom_number || "").replace(/[\s\-]/g, "")}`}
                                       target="_blank" rel="noopener noreferrer"
                                       className="text-xs text-orange-600 hover:underline">
-                                      zoom.us/j/{(tutorial.zoom_number || "").replace(/\s/g, "")}
+                                      zoom.us/j/{(tutorial.zoom_number || "").replace(/[\s\-]/g, "")}
                                     </a>
                                   ) : <p className="text-xs text-orange-400">No Zoom link</p>}
                                 </div>
