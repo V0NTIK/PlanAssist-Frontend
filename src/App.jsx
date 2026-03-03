@@ -5591,7 +5591,7 @@ const fetchCanvasTasks = async () => {
                               <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
                                 <div className="flex-1 min-w-0">
                                   <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
-                                  <span className="text-gray-400">{t.class} · {t.deadline_date ? new Date((t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date) + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
+                                  <span className="text-gray-400">{t.class} · {(() => { if (!t.deadline_date) return 'no date'; const dp = (t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date); const d = t.deadline_time ? new Date(dp + 'T' + t.deadline_time + 'Z') : new Date(dp + 'T23:59:00'); return d.toLocaleDateString(); })()}</span>
                                 </div>
                                 <button onClick={() => adminDeleteTask(t.id)} className="ml-2 text-red-400 hover:text-red-600 flex-shrink-0">
                                   <Trash2 className="w-3.5 h-3.5" />
@@ -5624,7 +5624,7 @@ const fetchCanvasTasks = async () => {
                                     <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
                                     <span className="text-gray-400">{t.class}{t.manually_created ? ' · manual' : ''}</span>
                                   </div>
-                                  <span className="ml-2 text-gray-400 flex-shrink-0">{t.deadline_date ? new Date((t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date) + 'T12:00:00').toLocaleDateString() : 'no date'}</span>
+                                  <span className="ml-2 text-gray-400 flex-shrink-0">{(() => { if (!t.deadline_date) return 'no date'; const dp = (t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date); const d = t.deadline_time ? new Date(dp + 'T' + t.deadline_time + 'Z') : new Date(dp + 'T23:59:00'); return d.toLocaleDateString(); })()}</span>
                                 </div>
                               ))}
                             </div>
