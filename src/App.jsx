@@ -1207,11 +1207,13 @@ const fetchCanvasTasks = async () => {
       await apiCall(`/tasks/${currentSessionTask.id}/complete`, 'POST', {
         timeSpent: Math.round(sessionElapsed / 60) // tasks_completed expects minutes
       });
-      await normalizePriority(); // compact priority_order gaps
+      await normalizePriority(); // compact priority_order gaps + null completed tasks
       setIsTimerRunning(false);
       setSessionTasks(prev => prev.filter(t => t.id !== currentSessionTask.id));
       setTasks(prev => prev.map(t =>
-        t.id === currentSessionTask.id ? { ...t, completed: true, deleted: true } : t
+        t.id === currentSessionTask.id
+          ? { ...t, completed: true, deleted: true, priorityOrder: null, priority_order: null }
+          : t
       ));
       setShowSessionComplete({ task: currentSessionTask, timeSpent: sessionElapsed }); // seconds
       // Don't null currentSessionTask yet — completion screen still needs it
@@ -1387,19 +1389,60 @@ const fetchCanvasTasks = async () => {
 
   const clearAllNewTasks = async () => {
     if (newTasks.length === 0) return;
-    
+
     try {
       const taskIds = newTasks.map(t => t.id);
       await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
-      
-      // Move all to main list
-      setTasks([...tasks, ...newTasks]);
+
+      // Smart insertion: merge new tasks into existing list by deadline order.
+      // Algorithm:
+      //   1. Sort new tasks by deadline (ascending, nulls last).
+      //   2. For each new task, find the insertion index in the current active list
+      //      — insert before the first existing task whose deadline is strictly later,
+      //      or append if no such task exists.
+      //   3. After merging, reassign sequential priority_order values.
+
+      const activeTasks = [...tasks]; // current ordered list
+
+      // Sort new tasks by deadline
+      const sortedNew = [...newTasks].sort((a, b) => {
+        if (!a.dueDate && !b.dueDate) return 0;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return a.dueDate - b.dueDate;
+      });
+
+      // Insert each new task into the active list
+      let merged = [...activeTasks];
+      for (const nt of sortedNew) {
+        const insertIdx = merged.findIndex(existing => {
+          if (!existing.dueDate) return false; // push before tasks with no date? No — append
+          if (!nt.dueDate) return false; // new task has no date — will append
+          return existing.dueDate > nt.dueDate;
+        });
+        if (insertIdx === -1) {
+          merged.push(nt); // append if no later task found
+        } else {
+          merged.splice(insertIdx, 0, nt);
+        }
+      }
+
+      // Reassign priority_order sequentially
+      const reordered = merged.map((t, idx) => ({ ...t, priorityOrder: idx + 1, priority_order: idx + 1 }));
+
+      // Persist new order to server
+      const orderPayload = reordered
+        .filter(t => !t.completed && !t.deleted)
+        .map(t => ({ id: t.id, priorityOrder: t.priorityOrder }));
+      await apiCall('/tasks/reorder', 'POST', { tasks: orderPayload });
+
+      setTasks(reordered);
       setNewTasks([]);
       setNewTasksSidebarOpen(false);
-      setHasUnsavedChanges(true);
+      setHasUnsavedChanges(false); // already persisted
     } catch (error) {
       console.error('Failed to clear new tasks:', error);
-      alert('Failed to clear new tasks');
+      alert('Failed to add tasks to list');
     }
   };
 
@@ -1552,6 +1595,7 @@ const fetchCanvasTasks = async () => {
       }
     });
     await Promise.all(saves);
+    await normalizePriority(); // clear priority_order on any completed tasks
     agendaTimerRefsMap.current = {};
     setAgendaTaskStates({});
     setCurrentAgenda(null);
@@ -1665,6 +1709,7 @@ const fetchCanvasTasks = async () => {
     } catch (err) {
       console.error('Failed to mark agenda finished:', err);
     }
+    await normalizePriority(); // clear priority_order on completed tasks
     setAgendas(prev => prev.filter(a => a.id !== currentAgenda.id));
     agendaTimerRefsMap.current = {};
     setAgendaTaskStates({});
@@ -3607,7 +3652,7 @@ const fetchCanvasTasks = async () => {
                   {/* Instructions */}
                   <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg text-sm">
                     <p className="text-yellow-900 font-medium mb-1">📌 Drag tasks to your list</p>
-                    <p className="text-yellow-800">Drag each task to its priority position in your main list, or click "Add All" to append them to the end.</p>
+                    <p className="text-yellow-800">Drag each task to its priority position in your main list, or click "Add All" to smart-insert them by deadline.</p>
                   </div>
 
                   {/* Add All Button */}
@@ -4526,6 +4571,28 @@ const fetchCanvasTasks = async () => {
                                     ) : (
                                       <p className="text-xs opacity-50 italic">No description</p>
                                     )}
+                                    {!isDone && (
+                                      <button
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          setCalendarExpandedId(null);
+                                          // Ensure sessionTasks are loaded, then start
+                                          if (sessionTasks.length === 0) await loadSessionTasks();
+                                          // Build a task object compatible with startTaskSession
+                                          const sessionTask = sessionTasks.find(t => t.id === task.id) || {
+                                            ...task,
+                                            accumulatedTime: (task.accumulated_time || 0) * 60, // min→sec if needed
+                                            userEstimate: task.user_estimated_time || task.estimated_time,
+                                            estimatedTime: task.estimated_time,
+                                          };
+                                          await startTaskSession(sessionTask);
+                                        }}
+                                        className="w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors"
+                                      >
+                                        <Play className="w-3 h-3" />
+                                        {task.accumulated_time > 0 ? 'Resume Session' : 'Start Session'}
+                                      </button>
+                                    )}
                                     <p className="text-xs opacity-60 mt-1">Tap again to open in Canvas →</p>
                                   </div>
                                 )}
@@ -4880,7 +4947,7 @@ const fetchCanvasTasks = async () => {
                         {/* Card header */}
                         <div className={`${perfBg} px-6 py-4 flex items-start justify-between`}>
                           <div className="flex-1 mr-4">
-                            <h3 className="font-bold text-gray-900 text-base leading-tight">{course.name}</h3>
+                            <a href={`https://canvas.oneschoolglobal.com/courses/${course.course_id}/grades`} target="_blank" rel="noopener noreferrer" className="font-bold text-gray-900 text-base leading-tight hover:text-blue-600 hover:underline transition-colors">{course.name}</a>
                             {course.course_code && <p className="text-xs text-gray-500 mt-0.5">{course.course_code}</p>}
                           </div>
                           <div className="text-right flex-shrink-0">
