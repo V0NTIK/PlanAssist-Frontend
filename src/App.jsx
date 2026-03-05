@@ -55,6 +55,8 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
 const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [pwaInstallPrompt, setPwaInstallPrompt] = useState(null);   // deferred install event
+  const [showPwaBanner, setShowPwaBanner] = useState(false);         // show install banner
   const [isAppLoading, setIsAppLoading] = useState(false);
   // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
@@ -372,6 +374,21 @@ const PlanAssist = () => {
     const interval = setInterval(() => loadAnnouncements(), 60000);
     return () => clearInterval(interval);
   }, [isAuthenticated]);
+
+  // Capture the browser's PWA install prompt for our custom UI
+  useEffect(() => {
+    const handler = (e) => {
+      e.preventDefault(); // stop the browser's default mini-infobar
+      setPwaInstallPrompt(e);
+      // Only show banner if not already installed and user hasn't dismissed
+      if (!window.matchMedia('(display-mode: standalone)').matches) {
+        const dismissed = localStorage.getItem('pwa-banner-dismissed');
+        if (!dismissed) setShowPwaBanner(true);
+      }
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
 
   // Load user data
   const loadUserData = async (authToken) => {
@@ -1871,6 +1888,22 @@ const fetchCanvasTasks = async () => {
     } catch (err) { /* silent */ }
   };
 
+  const handlePwaInstall = async () => {
+    if (!pwaInstallPrompt) return;
+    pwaInstallPrompt.prompt();
+    const { outcome } = await pwaInstallPrompt.userChoice;
+    setPwaInstallPrompt(null);
+    setShowPwaBanner(false);
+    if (outcome === 'accepted') {
+      localStorage.setItem('pwa-banner-dismissed', 'true');
+    }
+  };
+
+  const dismissPwaBanner = () => {
+    setShowPwaBanner(false);
+    localStorage.setItem('pwa-banner-dismissed', 'true');
+  };
+
   const dismissAnnouncement = async (id) => {
     try {
       await apiCall(`/announcements/${id}/dismiss`, 'POST');
@@ -3059,6 +3092,36 @@ const fetchCanvasTasks = async () => {
           </div>
         </div>
       </nav>
+
+      {/* PWA Install Banner */}
+      {showPwaBanner && isAuthenticated && (
+        <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Shield className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm leading-tight">Install PlanAssist</p>
+              <p className="text-purple-200 text-xs">Add to your desktop for quick access — no browser needed</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={handlePwaInstall}
+              className="bg-white text-purple-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-purple-50 transition-colors"
+            >
+              Install
+            </button>
+            <button
+              onClick={dismissPwaBanner}
+              className="text-purple-200 hover:text-white transition-colors p-1"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Announcement Banners ─────────────────────────────────────────── */}
       {announcements.filter(a => !a.dismissed).map(a => (
