@@ -1430,11 +1430,11 @@ const fetchCanvasTasks = async () => {
       // Reassign priority_order sequentially
       const reordered = merged.map((t, idx) => ({ ...t, priorityOrder: idx + 1, priority_order: idx + 1 }));
 
-      // Persist new order to server
-      const orderPayload = reordered
+      // Persist new order to server — endpoint expects { taskOrder: [id, id, ...] }
+      const taskOrder = reordered
         .filter(t => !t.completed && !t.deleted)
-        .map(t => ({ id: t.id, priorityOrder: t.priorityOrder }));
-      await apiCall('/tasks/reorder', 'POST', { tasks: orderPayload });
+        .map(t => t.id);
+      await apiCall('/tasks/reorder', 'POST', { taskOrder });
 
       setTasks(reordered);
       setNewTasks([]);
