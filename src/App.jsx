@@ -1056,7 +1056,9 @@ const fetchCanvasTasks = async () => {
     }
     message += '.';
     
-    if (newTasksCount > 0) {
+    // Don't open sidebar on first sync — server auto-accepts all tasks directly to list
+    const isFirstSync = saveResult.stats.firstSync === true;
+    if (newTasksCount > 0 && !isFirstSync) {
       setNewTasksSidebarOpen(true);
       setHasUnsavedChanges(true);
     }
@@ -2039,7 +2041,16 @@ const fetchCanvasTasks = async () => {
     setCheckingTask(taskId);
     try {
       await apiCall(`/tasks/${taskId}/complete`, 'PATCH'); // marks deleted=true
-      setTasks(prev => prev.filter(t => t.id !== taskId));
+      // Remove task and immediately reassign sequential priorityOrder so
+      // Calendar doesn't show stale numbers before normalizePriority completes
+      setTasks(prev => {
+        const remaining = prev.filter(t => t.id !== taskId);
+        return remaining.map((t, idx) => ({
+          ...t,
+          priorityOrder: idx + 1,
+          priority_order: idx + 1,
+        }));
+      });
       setSessionTasks(prev => prev.filter(t => t.id !== taskId));
       // Remove from any agendas in state
       setAgendas(prev => prev.map(a => ({
