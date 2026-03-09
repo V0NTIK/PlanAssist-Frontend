@@ -2045,11 +2045,13 @@ const fetchCanvasTasks = async () => {
       // Calendar doesn't show stale numbers before normalizePriority completes
       setTasks(prev => {
         const remaining = prev.filter(t => t.id !== taskId);
-        return remaining.map((t, idx) => ({
-          ...t,
-          priorityOrder: idx + 1,
-          priority_order: idx + 1,
-        }));
+        // Only reassign priorityOrder for active (non-completed, non-deleted) tasks
+        let activeIdx = 0;
+        return remaining.map(t => {
+          if (t.completed || t.deleted) return t;
+          activeIdx++;
+          return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
+        });
       });
       setSessionTasks(prev => prev.filter(t => t.id !== taskId));
       // Remove from any agendas in state
