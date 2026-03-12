@@ -138,9 +138,10 @@ const PlanAssist = () => {
   const [resolvedLoading, setResolvedLoading] = useState(false);
   const [editingActualTime, setEditingActualTime] = useState(null);
   const [editingActualTimeVal, setEditingActualTimeVal] = useState('');
-  const [gradedSubmissions, setGradedSubmissions] = useState([]);
-  const [gradedLoading, setGradedLoading] = useState(false);
-  const [gradedPollingRef, setGradedPollingRef] = useState(null);
+  const [activityItems, setActivityItems] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityPollingRef, setActivityPollingRef] = useState(null);
+  const [activityFilter, setActivityFilter] = useState('all');
   const [helpContent, setHelpContent] = useState('');
 
   const [isSavingEnhance, setIsSavingEnhance] = useState(false);
@@ -918,15 +919,15 @@ const PlanAssist = () => {
     }
   };
 
-  const loadGradedSubmissions = async () => {
-    setGradedLoading(true);
+  const loadActivityStream = async () => {
+    setActivityLoading(true);
     try {
-      const data = await apiCall('/canvas/graded');
-      setGradedSubmissions(data);
+      const data = await apiCall('/canvas/activity');
+      setActivityItems(Array.isArray(data) ? data : []);
     } catch (err) {
-      console.error('Failed to load graded submissions:', err);
+      console.error('Failed to load activity stream:', err);
     } finally {
-      setGradedLoading(false);
+      setActivityLoading(false);
     }
   };
 
@@ -964,11 +965,11 @@ const PlanAssist = () => {
     setAccountTab(tab);
     if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
     if (tab === 'grades') {
-      loadGradedSubmissions();
-      const interval = setInterval(loadGradedSubmissions, 300000);
-      setGradedPollingRef(prev => { if (prev) clearInterval(prev); return interval; });
+      loadActivityStream();
+      const interval = setInterval(loadActivityStream, 300000);
+      setActivityPollingRef(prev => { if (prev) clearInterval(prev); return interval; });
     } else {
-      setGradedPollingRef(prev => { if (prev) clearInterval(prev); return null; });
+      setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
     }
     if (tab === 'help') loadHelpContent();
   };
@@ -5268,7 +5269,7 @@ const fetchCanvasTasks = async () => {
                     { id: 'settings', label: 'Settings', icon: Settings },
                     { id: 'courses', label: 'Courses', icon: BookOpen },
                     { id: 'resolved', label: 'Resolved Tasks', icon: CheckCircle },
-                    { id: 'grades', label: 'Grades', icon: BarChart3 },
+                    { id: 'grades', label: 'Activity', icon: BarChart3 },
                     { id: 'schedule', label: 'Schedule', icon: ClipboardList },
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
@@ -5666,54 +5667,105 @@ const fetchCanvasTasks = async () => {
                   </div>
                 )}
 
-                {/* ── GRADES TAB ── */}
-                {accountTab === 'grades' && (
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                    <div className="flex items-center justify-between mb-1">
-                      <h2 className="text-lg font-bold text-gray-900">Recently Graded</h2>
-                      {gradedLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
-                    </div>
-                    <p className="text-sm text-gray-500 mb-5">Assignments graded in the last 10 days, most recent first. Refreshes every 5 minutes.</p>
-                    {gradedSubmissions.length === 0 && !gradedLoading ? (
-                      <p className="text-gray-400 text-sm text-center py-8">No recently graded assignments found.</p>
-                    ) : (
-                      <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
-                        {gradedSubmissions.map(sub => {
-                          const gradedDate = sub.gradedAt ? new Date(sub.gradedAt).toLocaleDateString() : null;
-                          const isPassFail = sub.gradingType === 'pass_fail' || sub.gradingType === 'complete_incomplete';
-                          const scoreDisplay = (() => {
-                            if (isPassFail) return sub.grade === 'complete' ? '✓ Complete' : sub.grade === 'pass' ? '✓ Pass' : sub.grade || '–';
-                            if (sub.score != null && sub.pointsPossible != null) return `${sub.score} / ${sub.pointsPossible}`;
-                            if (sub.grade) return sub.grade;
-                            return '–';
-                          })();
-                          const pct = sub.score != null && sub.pointsPossible > 0
-                            ? Math.round((sub.score / sub.pointsPossible) * 100) : null;
-                          const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
-                          const courseDisplayName = sub.courseName
-                            || courses.find(c => c.course_id === sub.courseId)?.name
-                            || `Course ${sub.courseId}`;
-                          return (
-                            <div key={sub.id} className="flex items-start gap-4 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                              <div className="flex-1 min-w-0">
-                                <a href={sub.htmlUrl} target="_blank" rel="noreferrer"
-                                  className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                  {sub.assignmentName}
-                                </a>
-                                <p className="text-xs text-gray-400 mt-0.5">{courseDisplayName}</p>
-                                {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Graded {gradedDate}</p>}
-                              </div>
-                              <div className="flex-shrink-0 text-right">
-                                <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
-                                {pct != null && <p className="text-xs text-gray-400">{pct}%</p>}
-                              </div>
-                            </div>
-                          );
-                        })}
+                {/* ── ACTIVITY TAB ── */}
+                {accountTab === 'grades' && (() => {
+                  const FILTERS = [
+                    { key: 'all', label: 'All' },
+                    { key: 'Grade', label: 'Grades' },
+                    { key: 'Announcement', label: 'Announcements' },
+                    { key: 'DiscussionTopic', label: 'Discussions' },
+                    { key: 'Submission', label: 'Submissions' },
+                    { key: 'Message', label: 'Messages' },
+                  ];
+                  const filtered = activityFilter === 'all'
+                    ? activityItems
+                    : activityItems.filter(i => i.type === activityFilter);
+
+                  const typeIcon = (type) => {
+                    if (type === 'Grade') return '📊';
+                    if (type === 'Announcement') return '📢';
+                    if (type === 'DiscussionTopic') return '💬';
+                    if (type === 'Submission') return '📝';
+                    if (type === 'Message') return '✉️';
+                    if (type === 'Conference') return '🎥';
+                    if (type === 'Collaboration') return '🤝';
+                    return '🔔';
+                  };
+
+                  return (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                      <div className="flex items-center justify-between mb-1">
+                        <h2 className="text-lg font-bold text-gray-900">Canvas Activity</h2>
+                        {activityLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
                       </div>
-                    )}
-                  </div>
-                )}
+                      <p className="text-sm text-gray-500 mb-4">Your recent Canvas activity. Refreshes every 5 minutes.</p>
+
+                      {/* Filter pills */}
+                      <div className="flex flex-wrap gap-2 mb-4">
+                        {FILTERS.map(f => (
+                          <button key={f.key} onClick={() => setActivityFilter(f.key)}
+                            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                              activityFilter === f.key
+                                ? 'bg-purple-600 text-white'
+                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }`}>
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {activityLoading && activityItems.length === 0 ? (
+                        <p className="text-gray-400 text-sm text-center py-8">Loading activity...</p>
+                      ) : filtered.length === 0 ? (
+                        <p className="text-gray-400 text-sm text-center py-8">No activity found.</p>
+                      ) : (
+                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                          {filtered.map(item => {
+                            const date = item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : null;
+                            const isPassFail = item.gradingType === 'pass_fail' || item.gradingType === 'complete_incomplete';
+                            const scoreDisplay = (() => {
+                              if (item.type !== 'Grade') return null;
+                              if (isPassFail) return item.grade === 'complete' ? '✓ Complete' : item.grade === 'pass' ? '✓ Pass' : item.grade || null;
+                              if (item.score != null && item.pointsPossible != null) return `${item.score} / ${item.pointsPossible}`;
+                              if (item.grade) return item.grade;
+                              return null;
+                            })();
+                            const pct = item.type === 'Grade' && item.score != null && item.pointsPossible > 0
+                              ? Math.round((item.score / item.pointsPossible) * 100) : null;
+                            const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
+
+                            return (
+                              <div key={item.id} className="flex items-start gap-3 p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                <span className="text-lg flex-shrink-0 mt-0.5">{typeIcon(item.type)}</span>
+                                <div className="flex-1 min-w-0">
+                                  {item.htmlUrl ? (
+                                    <a href={item.htmlUrl} target="_blank" rel="noreferrer"
+                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                      {item.title || item.assignmentName || `${item.type} activity`}
+                                    </a>
+                                  ) : (
+                                    <p className="font-medium text-sm text-gray-900 truncate">
+                                      {item.title || item.assignmentName || `${item.type} activity`}
+                                    </p>
+                                  )}
+                                  {item.courseName && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.courseName}</p>}
+                                  {item.body && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.body.replace(/<[^>]*>/g, '')}</p>}
+                                  {date && <p className="text-xs text-gray-300 mt-1">{date}</p>}
+                                </div>
+                                {scoreDisplay && (
+                                  <div className="flex-shrink-0 text-right">
+                                    <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
+                                    {pct != null && <p className="text-xs text-gray-400">{pct}%</p>}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── SCHEDULE TAB ── */}
                 {accountTab === 'schedule' && (
