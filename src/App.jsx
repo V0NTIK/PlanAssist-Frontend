@@ -138,10 +138,18 @@ const PlanAssist = () => {
   const [resolvedLoading, setResolvedLoading] = useState(false);
   const [editingActualTime, setEditingActualTime] = useState(null);
   const [editingActualTimeVal, setEditingActualTimeVal] = useState('');
+  const [activityFilter, setActivityFilter] = useState('grades');
+  // Activity sub-tab data
+  const [gradesItems, setGradesItems] = useState([]);
+  const [gradesLoading, setGradesLoading] = useState(false);
+  const [announcementItems, setAnnouncementItems] = useState([]);
+  const [announcementsLoading, setAnnouncementsLoading] = useState(false);
+  const [discussionItems, setDiscussionItems] = useState([]);
+  const [discussionsLoading, setDiscussionsLoading] = useState(false);
   const [activityItems, setActivityItems] = useState([]);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityPollingRef, setActivityPollingRef] = useState(null);
-  const [activityFilter, setActivityFilter] = useState('all');
+  const [gradeMiniSyncRef, setGradeMiniSyncRef] = useState(null);
   const [helpContent, setHelpContent] = useState('');
 
   const [isSavingEnhance, setIsSavingEnhance] = useState(false);
@@ -919,16 +927,45 @@ const PlanAssist = () => {
     }
   };
 
+  const loadCanvasGrades = async () => {
+    setGradesLoading(true);
+    try {
+      const data = await apiCall('/canvas/grades');
+      setGradesItems(Array.isArray(data) ? data : []);
+    } catch (err) { console.error('Failed to load grades:', err); }
+    finally { setGradesLoading(false); }
+  };
+
+  const loadCanvasAnnouncements = async () => {
+    setAnnouncementsLoading(true);
+    try {
+      const data = await apiCall('/canvas/announcements');
+      setAnnouncementItems(Array.isArray(data) ? data : []);
+    } catch (err) { console.error('Failed to load announcements:', err); }
+    finally { setAnnouncementsLoading(false); }
+  };
+
+  const loadCanvasDiscussions = async () => {
+    setDiscussionsLoading(true);
+    try {
+      const data = await apiCall('/canvas/discussions');
+      setDiscussionItems(Array.isArray(data) ? data : []);
+    } catch (err) { console.error('Failed to load discussions:', err); }
+    finally { setDiscussionsLoading(false); }
+  };
+
   const loadActivityStream = async () => {
     setActivityLoading(true);
     try {
       const data = await apiCall('/canvas/activity');
       setActivityItems(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error('Failed to load activity stream:', err);
-    } finally {
-      setActivityLoading(false);
-    }
+    } catch (err) { console.error('Failed to load activity stream:', err); }
+    finally { setActivityLoading(false); }
+  };
+
+  const runGradeMiniSync = async () => {
+    try { await apiCall('/canvas/grades/mini-sync', 'POST'); loadCanvasGrades(); }
+    catch (err) { console.error('Grade mini-sync failed:', err); }
   };
 
   const loadHelpContent = async () => {
@@ -965,11 +1002,20 @@ const PlanAssist = () => {
     setAccountTab(tab);
     if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
     if (tab === 'grades') {
+      // Load all sub-tabs upfront; default filter is 'grades'
+      loadCanvasGrades();
+      loadCanvasAnnouncements();
+      loadCanvasDiscussions();
       loadActivityStream();
-      const interval = setInterval(loadActivityStream, 300000);
-      setActivityPollingRef(prev => { if (prev) clearInterval(prev); return interval; });
+      // 5-min polling for activity stream
+      const actInterval = setInterval(loadActivityStream, 300000);
+      setActivityPollingRef(prev => { if (prev) clearInterval(prev); return actInterval; });
+      // 60-min grade mini-sync
+      const gradeInterval = setInterval(runGradeMiniSync, 3600000);
+      setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return gradeInterval; });
     } else {
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
+      setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
     if (tab === 'help') loadHelpContent();
   };
@@ -5670,41 +5716,36 @@ const fetchCanvasTasks = async () => {
                 {/* ── ACTIVITY TAB ── */}
                 {accountTab === 'grades' && (() => {
                   const FILTERS = [
-                    { key: 'all', label: 'All' },
-                    { key: 'Grade', label: 'Grades' },
-                    { key: 'Announcement', label: 'Announcements' },
-                    { key: 'DiscussionTopic', label: 'Discussions' },
-                    { key: 'Submission', label: 'Submissions' },
-                    { key: 'Message', label: 'Messages' },
+                    { key: 'grades', label: '📊 Grades' },
+                    { key: 'announcements', label: '📢 Announcements' },
+                    { key: 'discussions', label: '💬 Discussions' },
+                    { key: 'messages', label: '✉️ Messages' },
                   ];
-                  const filtered = activityFilter === 'all'
-                    ? activityItems
-                    : activityItems.filter(i => i.type === activityFilter);
 
-                  const typeIcon = (type) => {
-                    if (type === 'Grade') return '📊';
-                    if (type === 'Announcement') return '📢';
-                    if (type === 'DiscussionTopic') return '💬';
-                    if (type === 'Submission') return '📝';
-                    if (type === 'Message') return '✉️';
-                    if (type === 'Conference') return '🎥';
-                    if (type === 'Collaboration') return '🤝';
-                    return '🔔';
-                  };
+                  // Pick data + loading state based on active filter
+                  const isLoading = activityFilter === 'grades' ? gradesLoading
+                    : activityFilter === 'announcements' ? announcementsLoading
+                    : activityFilter === 'discussions' ? discussionsLoading
+                    : activityLoading;
+
+                  const items = activityFilter === 'grades' ? gradesItems
+                    : activityFilter === 'announcements' ? announcementItems
+                    : activityFilter === 'discussions' ? discussionItems
+                    : activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation');
 
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                       <div className="flex items-center justify-between mb-1">
                         <h2 className="text-lg font-bold text-gray-900">Canvas Activity</h2>
-                        {activityLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
+                        {isLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
                       </div>
-                      <p className="text-sm text-gray-500 mb-4">Your recent Canvas activity. Refreshes every 5 minutes.</p>
+                      <p className="text-sm text-gray-500 mb-4">Your recent Canvas activity.</p>
 
                       {/* Filter pills */}
-                      <div className="flex flex-wrap gap-2 mb-4">
+                      <div className="flex flex-wrap gap-2 mb-5">
                         {FILTERS.map(f => (
                           <button key={f.key} onClick={() => setActivityFilter(f.key)}
-                            className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                               activityFilter === f.key
                                 ? 'bg-purple-600 text-white'
                                 : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -5714,53 +5755,145 @@ const fetchCanvasTasks = async () => {
                         ))}
                       </div>
 
-                      {activityLoading && activityItems.length === 0 ? (
-                        <p className="text-gray-400 text-sm text-center py-8">Loading activity...</p>
-                      ) : filtered.length === 0 ? (
-                        <p className="text-gray-400 text-sm text-center py-8">No activity found.</p>
-                      ) : (
-                        <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                          {filtered.map(item => {
-                            const date = item.updatedAt ? new Date(item.updatedAt).toLocaleDateString() : null;
-                            const isPassFail = item.gradingType === 'pass_fail' || item.gradingType === 'complete_incomplete';
-                            const scoreDisplay = (() => {
-                              if (item.type !== 'Grade') return null;
-                              if (isPassFail) return item.grade === 'complete' ? '✓ Complete' : item.grade === 'pass' ? '✓ Pass' : item.grade || null;
-                              if (item.score != null && item.pointsPossible != null) return `${item.score} / ${item.pointsPossible}`;
-                              if (item.grade) return item.grade;
-                              return null;
-                            })();
-                            const pct = item.type === 'Grade' && item.score != null && item.pointsPossible > 0
-                              ? Math.round((item.score / item.pointsPossible) * 100) : null;
-                            const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
+                      {/* ── Grades sub-tab ── */}
+                      {activityFilter === 'grades' && (
+                        <div>
+                          {gradesLoading && gradesItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading grades...</p>
+                          ) : gradesItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No graded assignments found yet. Grades appear here after a Sync detects a score change.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                              {gradesItems.map(item => {
+                                const isPassFail = item.gradingType === 'pass_fail' || item.gradingType === 'complete_incomplete';
+                                const scoreDisplay = (() => {
+                                  if (isPassFail) return item.grade === 'complete' ? '✓ Complete' : item.grade === 'pass' ? '✓ Pass' : item.grade || '–';
+                                  if (item.score != null && item.pointsPossible != null) return `${item.score} / ${item.pointsPossible}`;
+                                  if (item.grade) return item.grade;
+                                  return '–';
+                                })();
+                                const pct = item.score != null && item.pointsPossible > 0
+                                  ? Math.round((item.score / item.pointsPossible) * 100) : null;
+                                const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
+                                const gradedDate = item.gradedAt ? new Date(item.gradedAt).toLocaleDateString() : null;
+                                return (
+                                  <div key={item.id} className="flex items-start gap-4 p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                    <div className="flex-1 min-w-0">
+                                      {item.htmlUrl ? (
+                                        <a href={item.htmlUrl} target="_blank" rel="noreferrer"
+                                          className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                          {item.assignmentName}
+                                        </a>
+                                      ) : (
+                                        <p className="font-medium text-sm text-gray-900 truncate">{item.assignmentName}</p>
+                                      )}
+                                      {item.courseName && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.courseName}</p>}
+                                      {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Submitted {gradedDate}</p>}
+                                    </div>
+                                    <div className="flex-shrink-0 text-right">
+                                      <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
+                                      {pct != null && <p className="text-xs text-gray-400">{pct}%</p>}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                            return (
-                              <div key={item.id} className="flex items-start gap-3 p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                                <span className="text-lg flex-shrink-0 mt-0.5">{typeIcon(item.type)}</span>
-                                <div className="flex-1 min-w-0">
+                      {/* ── Announcements sub-tab ── */}
+                      {activityFilter === 'announcements' && (
+                        <div>
+                          {announcementsLoading && announcementItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading announcements...</p>
+                          ) : announcementItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No recent announcements.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                              {announcementItems.map(item => (
+                                <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                  {item.htmlUrl ? (
+                                    <a href={item.htmlUrl} target="_blank" rel="noreferrer"
+                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block">
+                                      {item.title}
+                                    </a>
+                                  ) : (
+                                    <p className="font-medium text-sm text-gray-900">{item.title}</p>
+                                  )}
+                                  {item.courseName && <p className="text-xs text-purple-500 font-medium mt-0.5">{item.courseName}</p>}
+                                  {item.body && <p className="text-xs text-gray-500 mt-1.5 leading-relaxed line-clamp-3">{item.body}</p>}
+                                  {item.postedAt && <p className="text-xs text-gray-300 mt-1.5">{new Date(item.postedAt).toLocaleDateString()}</p>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Discussions sub-tab ── */}
+                      {activityFilter === 'discussions' && (
+                        <div>
+                          {discussionsLoading && discussionItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading discussions...</p>
+                          ) : discussionItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No recent discussions.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                              {discussionItems.map(item => (
+                                <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      {item.htmlUrl ? (
+                                        <a href={item.htmlUrl} target="_blank" rel="noreferrer"
+                                          className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                          {item.title}
+                                        </a>
+                                      ) : (
+                                        <p className="font-medium text-sm text-gray-900 truncate">{item.title}</p>
+                                      )}
+                                      {item.courseName && <p className="text-xs text-purple-500 font-medium mt-0.5">{item.courseName}</p>}
+                                      {item.body && <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{item.body}</p>}
+                                      {item.lastReplyAt && <p className="text-xs text-gray-300 mt-1">Last reply {new Date(item.lastReplyAt).toLocaleDateString()}</p>}
+                                    </div>
+                                    {item.unreadCount > 0 && (
+                                      <span className="flex-shrink-0 bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                                        {item.unreadCount} new
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Messages sub-tab (activity stream filter) ── */}
+                      {activityFilter === 'messages' && (
+                        <div>
+                          {activityLoading && activityItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading messages...</p>
+                          ) : items.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No recent messages.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                              {items.map(item => (
+                                <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
                                   {item.htmlUrl ? (
                                     <a href={item.htmlUrl} target="_blank" rel="noreferrer"
                                       className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                      {item.title || item.assignmentName || `${item.type} activity`}
+                                      {item.title || 'Message'}
                                     </a>
                                   ) : (
-                                    <p className="font-medium text-sm text-gray-900 truncate">
-                                      {item.title || item.assignmentName || `${item.type} activity`}
-                                    </p>
+                                    <p className="font-medium text-sm text-gray-900 truncate">{item.title || 'Message'}</p>
                                   )}
-                                  {item.courseName && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.courseName}</p>}
                                   {item.body && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.body.replace(/<[^>]*>/g, '')}</p>}
-                                  {date && <p className="text-xs text-gray-300 mt-1">{date}</p>}
+                                  {item.updatedAt && <p className="text-xs text-gray-300 mt-1">{new Date(item.updatedAt).toLocaleDateString()}</p>}
                                 </div>
-                                {scoreDisplay && (
-                                  <div className="flex-shrink-0 text-right">
-                                    <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
-                                    {pct != null && <p className="text-xs text-gray-400">{pct}%</p>}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
