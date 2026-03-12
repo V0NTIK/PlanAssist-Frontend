@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown , Timer, RefreshCw , LayoutList , Trash2 , Plus , ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -128,6 +128,20 @@ const PlanAssist = () => {
   const [banReason, setBanReason] = useState('');
   const [showBanDialog, setShowBanDialog] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
+  const [adminHelpContent, setAdminHelpContent] = useState('');
+  const [adminHelpSaving, setAdminHelpSaving] = useState(false);
+  // Account & Analytics page state
+  const [accountTab, setAccountTab] = useState('settings');
+  const [resolvedTasks, setResolvedTasks] = useState([]);
+  const [resolvedSearch, setResolvedSearch] = useState('');
+  const [resolvedSort, setResolvedSort] = useState('created_at');
+  const [resolvedLoading, setResolvedLoading] = useState(false);
+  const [editingActualTime, setEditingActualTime] = useState(null);
+  const [editingActualTimeVal, setEditingActualTimeVal] = useState('');
+  const [gradedSubmissions, setGradedSubmissions] = useState([]);
+  const [gradedLoading, setGradedLoading] = useState(false);
+  const [gradedPollingRef, setGradedPollingRef] = useState(null);
+  const [helpContent, setHelpContent] = useState('');
 
   const [isSavingEnhance, setIsSavingEnhance] = useState(false);
   const [isLoadingItinerary, setIsLoadingItinerary] = useState(false);
@@ -767,7 +781,8 @@ const PlanAssist = () => {
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
       if (data.user.isNewUser) {
-        setCurrentPage('settings');
+        setCurrentPage('account');
+        setAccountTab('initial-setup');
       } else {
         await loadUserData(data.token);
         loadAnnouncements(data.token);
@@ -801,7 +816,8 @@ const PlanAssist = () => {
       setUser(data.user);
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
-      setCurrentPage('settings');
+      setCurrentPage('account');
+      setAccountTab('initial-setup');
     } catch (error) {
       setAuthError(error.message);
     } finally {
@@ -866,7 +882,113 @@ const PlanAssist = () => {
     }
   };
 
-  const handleSendFeedback = async () => {
+  // ── Account & Analytics functions ────────────────────────────────────────
+  const loadResolvedTasks = async (search = resolvedSearch, sort = resolvedSort) => {
+    setResolvedLoading(true);
+    try {
+      const params = new URLSearchParams({ sort, search });
+      const data = await apiCall(`/tasks/resolved?${params}`);
+      setResolvedTasks(data);
+    } catch (err) {
+      console.error('Failed to load resolved tasks:', err);
+    } finally {
+      setResolvedLoading(false);
+    }
+  };
+
+  const restoreTask = async (taskId) => {
+    try {
+      await apiCall(`/tasks/${taskId}/restore`, 'POST');
+      await loadResolvedTasks();
+      await loadTasks();
+    } catch (err) {
+      alert('Failed to restore task: ' + err.message);
+    }
+  };
+
+  const saveActualTime = async (taskId, minutes) => {
+    try {
+      await apiCall(`/tasks/${taskId}/actual-time`, 'PATCH', { actualTime: parseInt(minutes) });
+      setResolvedTasks(prev => prev.map(t =>
+        t.id === taskId ? { ...t, session_actual_time: parseInt(minutes) } : t
+      ));
+      setEditingActualTime(null);
+    } catch (err) {
+      alert('Failed to update time: ' + err.message);
+    }
+  };
+
+  const loadGradedSubmissions = async () => {
+    setGradedLoading(true);
+    try {
+      const data = await apiCall('/canvas/graded');
+      setGradedSubmissions(data);
+    } catch (err) {
+      console.error('Failed to load graded submissions:', err);
+    } finally {
+      setGradedLoading(false);
+    }
+  };
+
+  const loadHelpContent = async () => {
+    try {
+      const data = await apiCall('/help');
+      setHelpContent(data.content || '');
+    } catch (err) {
+      console.error('Failed to load help:', err);
+    }
+  };
+
+  const saveAdminHelp = async () => {
+    setAdminHelpSaving(true);
+    try {
+      await apiCall('/admin/help', 'PUT', { content: adminHelpContent });
+      alert('Help content saved.');
+    } catch (err) {
+      alert('Failed to save: ' + err.message);
+    } finally {
+      setAdminHelpSaving(false);
+    }
+  };
+
+  const toggleCourseEnabled = async (courseId, enabled) => {
+    try {
+      await apiCall(`/courses/${courseId}/enabled`, 'PATCH', { enabled });
+      setCourses(prev => prev.map(c => c.id === courseId ? { ...c, enabled } : c));
+    } catch (err) {
+      alert('Failed to update course: ' + err.message);
+    }
+  };
+
+  const handleAccountTabChange = (tab) => {
+    setAccountTab(tab);
+    if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
+    if (tab === 'grades') {
+      loadGradedSubmissions();
+      const interval = setInterval(loadGradedSubmissions, 300000);
+      setGradedPollingRef(prev => { if (prev) clearInterval(prev); return interval; });
+    } else {
+      setGradedPollingRef(prev => { if (prev) clearInterval(prev); return null; });
+    }
+    if (tab === 'help') loadHelpContent();
+  };
+
+  const handleAccountPageOpen = () => {
+    setAccountTab('settings');
+    setCurrentPage('account');
+  };
+
+    // Returns true if task's course is enabled (or if we can't determine)
+  const isCourseEnabled = (task) => {
+    if (!task || !courses || courses.length === 0) return true;
+    const course = courses.find(c => 
+      c.course_id === task.course_id || c.name === task.class
+    );
+    if (!course) return true; // Unknown course — show by default
+    return course.enabled !== false;
+  };
+
+    const handleSendFeedback = async () => {
     if (!feedbackText.trim()) {
       alert('Please enter your feedback');
       return;
@@ -3081,8 +3203,8 @@ const fetchCanvasTasks = async () => {
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && setCurrentPage('settings')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'settings' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Settings className="w-5 h-5" />
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <UserCircle className="w-5 h-5" />
             </button>
             {user?.isAdmin && (
               <button
@@ -3530,7 +3652,7 @@ const fetchCanvasTasks = async () => {
                     {/* Task List */}
                     <div className="space-y-4">
                       {(() => {
-                        const incompleteTasks = tasks.filter(t => !t.deleted && !t.completed);
+                        const incompleteTasks = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t));
                         
                         if (incompleteTasks.length === 0) {
                           return (
@@ -4500,6 +4622,7 @@ const fetchCanvasTasks = async () => {
             return [...tasks, ...newTasks.filter(t => !t.deleted)].filter(t => {
               if (!t.dueDate) return false;
               if (toDayStr(t.dueDate) !== dayStr) return false;
+              if (!isCourseEnabled(t)) return false;
               const isHomeroom = (t.class || '').toLowerCase().includes('homeroom');
               if (isHomeroom && !accountSetup.calendarShowHomeroom) return false;
               const isDone = t.completed || t.deleted || !!t.submittedAt;
@@ -5123,467 +5246,587 @@ const fetchCanvasTasks = async () => {
             `}</style>
           </div>
         )}
-        {currentPage === 'settings' && (
-          <div className="max-w-4xl mx-auto p-6">
-            <div className="bg-white rounded-xl shadow-md p-8">
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Account Setup</h2>
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
-                  <input type="text" value={accountSetup.name || ''} className="w-full px-4 py-3 border border-gray-300 rounded-lg bg-gray-50" disabled />
-                  <p className="text-xs text-gray-500 mt-1">Extracted from your email</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Grade</label>
-                  <select 
-                    value={accountSetup.grade} 
-                    onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))} 
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
-                  >
-                    <option value="">Select your grade...</option>
-                    <option value="3">3</option>
-                    <option value="4">4</option>
-                    <option value="5">5</option>
-                    <option value="6">6</option>
-                    <option value="7">7</option>
-                    <option value="8">8</option>
-                    <option value="9">9</option>
-                    <option value="10">10</option>
-                    <option value="11">11</option>
-                    <option value="12">12</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Canvas API Token</label>
-                  <input 
-                    type="password" 
-                    value={accountSetup.canvasApiToken} 
-                    onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasApiToken: e.target.value }))} 
-                    placeholder="Paste your Canvas API token here..." 
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 font-mono text-sm" 
-                  />
-                  <div className="mt-2 text-xs space-y-1">
-                    <p className="text-gray-600">
-                      <strong>How to get your Canvas API token:</strong>
-                    </p>
-                    <ol className="list-decimal ml-5 space-y-1 text-gray-600">
-                      <li>Go to Canvas → Account (top left) → Settings</li>
-                      <li>Scroll to "Approved Integrations"</li>
-                      <li>Click "+ New Access Token"</li>
-                      <li>Set Purpose: "PlanAssist Integration"</li>
-                      <li>Leave Expires field blank (or set far future date)</li>
-                      <li>Click "Generate Token"</li>
-                      <li>Copy the token and paste it above</li>
-                    </ol>
-                    <p className="text-blue-600 font-medium mt-2">
-                      🔒 Your token is encrypted and stored securely
-                    </p>
-                    <p className="text-amber-600">
-                      ⚠️ Never share your API token with anyone else
-                    </p>
-                  </div>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Present Periods (Time Zone)</label>
-                  <select value={accountSetup.presentPeriods} onChange={(e) => setAccountSetup(prev => ({ ...prev, presentPeriods: e.target.value }))} className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500">
-                    <option value="1-5">Periods 1-5</option>
-                    <option value="2-6">Periods 2-6</option>
-                    <option value="3-7">Periods 3-7</option>
-                    <option value="4-8">Periods 4-8</option>
-                  </select>
-                </div>
+        {currentPage === 'account' && (
+          <div className="max-w-6xl mx-auto p-6">
+            {/* Header */}
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
+                <UserCircle className="w-7 h-7 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Account &amp; Analytics</h1>
+                <p className="text-sm text-gray-500">{accountSetup.name || user?.email}</p>
+              </div>
+            </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-3">
-                    Weekly Schedule
-                  </label>
-                  <div className="border border-gray-300 rounded-lg overflow-hidden">
-                    <table className="w-full">
-                      <thead className="bg-gray-50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
-                          {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
-                            <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">
-                              {day.slice(0, 3)}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedPeriods.map(period => (
-                          <tr key={period} className="border-t">
-                            <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
-                            {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
-                              <td key={day} className="px-4 py-3 text-center">
-                                <select
-                                  value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
-                                  onChange={(e) => {
-                                    const newSchedule = { ...accountSetup.schedule };
-                                    if (!newSchedule[day]) newSchedule[day] = {};
-                                    newSchedule[day][period] = e.target.value;
-                                    setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
-                                  }}
-                                  className={`px-3 py-2 rounded-lg font-medium ${
-                                    accountSetup.schedule[day]?.[String(period)] === 'Study'
-                                      ? 'bg-green-100 text-green-800'
-                                      : 'bg-blue-100 text-blue-800'
-                                  }`}
-                                >
-                                  <option value="Study">Study</option>
-                                  <option value="Lesson">Lesson</option>
-                                </select>
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Enhance Schedule — only shown after account setup (courses must exist) and grades 7-12 */}
-                {courses.length > 0 && !user?.isNewUser && parseInt(user?.grade || 0) >= 7 && (
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-sm font-medium text-gray-700">Enhanced Schedule</label>
-                      {scheduleEnhanced && (
-                        <span className="text-xs text-green-600 font-medium flex items-center gap-1">
-                          <Check className="w-3.5 h-3.5" /> Enhanced
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-gray-500 mb-3">
-                      Link your courses to your Lesson periods and add Zoom numbers to unlock the Itinerary page.
-                    </p>
+            <div className="flex gap-6">
+              {/* Left sidebar tabs — hidden during initial setup */}
+              {accountTab !== 'initial-setup' && (
+              <div className="w-48 flex-shrink-0">
+                <nav className="space-y-1">
+                  {[
+                    { id: 'settings', label: 'Settings', icon: Settings },
+                    { id: 'courses', label: 'Courses', icon: BookOpen },
+                    { id: 'resolved', label: 'Resolved Tasks', icon: CheckCircle },
+                    { id: 'grades', label: 'Grades', icon: BarChart3 },
+                    { id: 'schedule', label: 'Schedule', icon: ClipboardList },
+                    { id: 'help', label: 'Help', icon: HelpCircle },
+                  ].map(({ id, label, icon: Icon }) => (
                     <button
-                      id="enhance-schedule-btn"
-                      onClick={() => {
-                        // Pre-fill with existing lesson-course mappings
-                        const prefillLessons = {};
-                        scheduleLessons.forEach(sl => {
-                          if (sl.course_id) {
-                            prefillLessons[`${sl.day}-${sl.period}`] = { courseId: sl.course_id, courseName: sl.course_name };
-                          }
-                        });
-                        // Pre-fill zoom numbers from courses
-                        const prefillZoom = {};
-                        courses.forEach(c => { if (c.zoom_number) prefillZoom[c.id] = c.zoom_number; });
-                        setEnhanceLessons(prefillLessons);
-                        setEnhanceZoom(prefillZoom);
-                        setShowEnhanceDialog(true);
-                        setEnhanceStep(1);
-                      }}
-                      className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors"
+                      key={id}
+                      onClick={() => handleAccountTabChange(id)}
+                      className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left ${
+                        accountTab === id
+                          ? 'bg-purple-100 text-purple-700'
+                          : 'text-gray-600 hover:bg-gray-100'
+                      }`}
                     >
-                      <ClipboardList className="w-4 h-4" />
-                      {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
+                      <Icon className="w-4 h-4 flex-shrink-0" />
+                      {label}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+              )}
+
+              {/* Right content panel */}
+              <div className="flex-1 min-w-0">
+
+                {/* ── INITIAL SETUP TAB (new users only) ── */}
+                {accountTab === 'initial-setup' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8 space-y-6">
+                    <div>
+                      <h2 className="text-xl font-bold text-gray-900">Welcome to PlanAssist!</h2>
+                      <p className="text-sm text-gray-500 mt-1">Fill in a few details to get started. This only takes a minute.</p>
+                    </div>
+
+                    {/* Name (read only) */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                      <input type="text" value={accountSetup.name || ''} disabled
+                        className="w-full px-4 py-3 border border-gray-200 rounded-xl bg-gray-50 text-gray-500" />
+                      <p className="text-xs text-gray-400 mt-1">Extracted from your email</p>
+                    </div>
+
+                    {/* Grade */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Grade <span className="text-red-500">*</span></label>
+                      <select value={accountSetup.grade}
+                        onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                        <option value="">Select your grade...</option>
+                        {['3','4','5','6','7','8','9','10','11','12'].map(g => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Canvas API Token */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Canvas API Token <span className="text-red-500">*</span></label>
+                      <input type="password" value={accountSetup.canvasApiToken}
+                        onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasApiToken: e.target.value }))}
+                        placeholder="Paste your Canvas API token here..."
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 font-mono text-sm" />
+                      <div className="mt-2 text-xs space-y-1 text-gray-500">
+                        <p className="font-medium text-gray-700">How to get your Canvas API token:</p>
+                        <ol className="list-decimal ml-4 space-y-1">
+                          <li>Go to Canvas → Account (top left) → Settings</li>
+                          <li>Scroll to "Approved Integrations" → click "+ New Access Token"</li>
+                          <li>Set Purpose: "PlanAssist Integration" and leave Expires blank</li>
+                          <li>Click "Generate Token", copy it, and paste it above</li>
+                        </ol>
+                        <p className="text-purple-600 font-medium mt-1">🔒 Your token is encrypted and stored securely</p>
+                      </div>
+                    </div>
+
+                    {/* Present Periods */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Present Periods (Time Zone) <span className="text-red-500">*</span></label>
+                      <select value={accountSetup.presentPeriods}
+                        onChange={(e) => setAccountSetup(prev => ({ ...prev, presentPeriods: e.target.value }))}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                        <option value="1-5">Periods 1-5</option>
+                        <option value="2-6">Periods 2-6</option>
+                        <option value="3-7">Periods 3-7</option>
+                        <option value="4-8">Periods 4-8</option>
+                      </select>
+                    </div>
+
+                    {/* Weekly Schedule */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-3">Weekly Schedule <span className="text-red-500">*</span></label>
+                      <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
+                              {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">{day.slice(0,3)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedPeriods.map(period => (
+                              <tr key={period} className="border-t">
+                                <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
+                                {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                  <td key={day} className="px-4 py-3 text-center">
+                                    <select
+                                      value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
+                                      onChange={(e) => {
+                                        const newSchedule = { ...accountSetup.schedule };
+                                        if (!newSchedule[day]) newSchedule[day] = {};
+                                        newSchedule[day][period] = e.target.value;
+                                        setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
+                                      }}
+                                      className={`px-3 py-2 rounded-lg font-medium text-sm ${
+                                        (accountSetup.schedule[day]?.[String(period)] || 'Study') === 'Study'
+                                          ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                                      }`}>
+                                      <option value="Study">Study</option>
+                                      <option value="Lesson">Lesson</option>
+                                    </select>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Feedback */}
+                    <div className="border-t pt-4">
+                      <button onClick={() => setShowFeedbackForm(true)}
+                        className="w-full bg-blue-50 text-blue-700 py-2.5 rounded-xl font-medium hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
+                        <Send className="w-4 h-4" /> Submit Feedback or Bug Report
+                      </button>
+                    </div>
+
+                    <button
+                      onClick={saveAccountSetup}
+                      disabled={settingsSaving || !accountSetup.grade || !accountSetup.canvasApiToken}
+                      className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-4 rounded-xl font-bold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-base transition-all shadow-md"
+                    >
+                      {settingsSaving ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          Setting up your account...
+                        </span>
+                      ) : 'Save & Launch'}
                     </button>
                   </div>
                 )}
 
-                {/* Enhance Schedule Dialog */}
-                {showEnhanceDialog && (() => {
-                  const todayName = 'Monday'; // show all days, use Monday as reference
-                  const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-                  const range = accountSetup.presentPeriods || '2-6';
-                  const [start, end] = range.split('-').map(Number);
-                  const selectedPeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+                {/* ── SETTINGS TAB ── */}
+                {accountTab === 'settings' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
+                    <h2 className="text-lg font-bold text-gray-900">Settings</h2>
 
-                  // Collect all Lesson slots across all days
-                  // Note: schedule keys are strings (JSON serialisation), so use String(period)
-                  const lessonSlots = [];
-                  allDays.forEach(day => {
-                    selectedPeriods.forEach(period => {
-                      if ((accountSetup.schedule?.[day]?.[String(period)] || 'Study') === 'Lesson') {
-                        lessonSlots.push({ day, period });
-                      }
-                    });
-                  });
-
-                  // All unique course IDs that have been assigned a lesson
-                  const assignedCourseIds = new Set(
-                    Object.values(enhanceLessons).map(v => v.courseId).filter(Boolean)
-                  );
-                  const coursesForZoom = courses.filter(c => assignedCourseIds.has(c.id));
-
-                  const allLessonsAssigned = lessonSlots.every(({ day, period }) =>
-                    enhanceLessons[`${day}-${period}`]?.courseId
-                  );
-
-                  return (
-                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
-                        {/* Header */}
-                        <div className="p-6 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-                          <div>
-                            <h3 className="text-xl font-bold text-gray-900">Enhance Schedule</h3>
-                            <p className="text-sm text-gray-500 mt-0.5">Step {enhanceStep} of 2</p>
+                    {/* Calendar Settings */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Calendar Settings</h3>
+                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                        {[
+                          { key: 'calendarTodayCentered', label: 'Today-Centered View', desc: 'Today always appears in the middle column of the calendar.' },
+                          { key: 'calendarShowHomeroom', label: 'Show Homeroom Tasks', desc: 'Homeroom tasks appear on the calendar.' },
+                          { key: 'calendarShowCompleted', label: 'Show Completed Tasks', desc: 'Submitted and completed tasks appear with a strikethrough.' },
+                        ].map(({ key, label, desc }) => (
+                          <div key={key} className="flex items-start gap-3 p-4">
+                            <input type="checkbox" checked={accountSetup[key] || false}
+                              onChange={(e) => setAccountSetup(prev => ({ ...prev, [key]: e.target.checked }))}
+                              className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                            <div>
+                              <p className="font-medium text-gray-900">{label}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                            </div>
                           </div>
-                          <button onClick={() => setShowEnhanceDialog(false)} className="text-gray-400 hover:text-gray-600">
-                            <X className="w-5 h-5" />
-                          </button>
-                        </div>
-
-                        {/* Step 1: Assign courses to Lesson slots */}
-                        {enhanceStep === 1 && (
-                          <div className="flex-1 overflow-y-auto p-6">
-                            <p className="text-sm text-gray-600 mb-4">
-                              Select which course you have for each <span className="font-semibold text-blue-700">Lesson</span> period.
-                            </p>
-                            {lessonSlots.length === 0 ? (
-                              <p className="text-gray-400 italic text-sm">No Lesson periods found in your schedule. Add some in the Weekly Schedule above.</p>
-                            ) : (
-                              <div className="space-y-3">
-                                {lessonSlots.map(({ day, period }) => {
-                                  const key = `${day}-${period}`;
-                                  const selected = enhanceLessons[key];
-                                  return (
-                                    <div key={key} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
-                                      <div className="flex-shrink-0 text-sm font-medium text-gray-600 w-28">{day} P{period}</div>
-                                      <select
-                                        value={selected?.courseId || ''}
-                                        onChange={e => {
-                                          const courseId = parseInt(e.target.value);
-                                          const course = courses.find(c => c.id === courseId);
-                                          setEnhanceLessons(prev => ({
-                                            ...prev,
-                                            [key]: { courseId, courseName: course?.name || '' }
-                                          }));
-                                        }}
-                                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                      >
-                                        <option value="">— Select a course —</option>
-                                        {courses.map(c => (
-                                          <option key={c.id} value={c.id}>
-                                            {c.name}
-                                          </option>
-                                        ))}
-                                      </select>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Step 2: Zoom numbers */}
-                        {enhanceStep === 2 && (
-                          <div className="flex-1 overflow-y-auto p-6">
-                            <p className="text-sm text-gray-600 mb-4">
-                              Optionally add the Zoom meeting number for each course. Only fill in the ones you want.
-                            </p>
-                            {coursesForZoom.length === 0 ? (
-                              <p className="text-gray-400 italic text-sm">No courses assigned yet.</p>
-                            ) : (
-                              <div className="space-y-3">
-                                {coursesForZoom.map(c => {
-                                  const cid = c.id;
-                                  return (
-                                    <div key={cid} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
-                                      <div className="flex-shrink-0 text-sm font-medium text-gray-700 flex-1 min-w-0 truncate">{c.name}</div>
-                                      <input
-                                        type="text"
-                                        value={enhanceZoom[cid] || ''}
-                                        onChange={e => setEnhanceZoom(prev => ({ ...prev, [cid]: e.target.value.replace(/[^0-9]/g, '') }))}
-                                        placeholder="Zoom number (e.g. 74751073335)"
-                                        maxLength={15}
-                                        className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                      />
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Footer */}
-                        <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
-                          {enhanceStep === 1 ? (
-                            <>
-                              <button onClick={() => setShowEnhanceDialog(false)}
-                                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
-                                Cancel
-                              </button>
-                              <button
-                                onClick={() => setEnhanceStep(2)}
-                                disabled={!allLessonsAssigned || lessonSlots.length === 0}
-                                className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed"
-                              >
-                                Next →
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button onClick={() => setEnhanceStep(1)}
-                                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
-                                ← Back
-                              </button>
-                              <button
-                                onClick={submitEnhanceSchedule}
-                                disabled={isSavingEnhance}
-                                className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-2"
-                              >
-                                {isSavingEnhance ? (
-                                  <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</>
-                                ) : 'Save & Enhance'}
-                              </button>
-                            </>
-                          )}
-                        </div>
+                        ))}
                       </div>
                     </div>
-                  );
-                })()}
 
-                {tasks.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      Class Colors (Optional)
-                    </label>
-                    <p className="text-xs text-gray-500 mb-3">Customize colors for your classes. Changes save automatically.</p>
-                    <div className="space-y-2">
-                      {Array.from(new Set(
-                        tasks
-                          .filter(t => t && (t.title || t.class)) // Filter out invalid tasks
-                          .map(t => extractClassName(t))
-                      )).map(className => (
-                        <div key={className} className="flex items-center gap-3 p-2 border border-gray-200 rounded-lg">
-                          <input 
-                            type="color" 
-                            value={accountSetup.classColors[className] || getClassColor(className)}
-                            onChange={(e) => {
-                              const newColors = { ...accountSetup.classColors };
-                              newColors[className] = e.target.value;
-                              setAccountSetup(prev => ({ ...prev, classColors: newColors }));
-                              // Save immediately to localStorage
-                              localStorage.setItem('classColors', JSON.stringify(newColors));
+                    {/* Privacy Settings */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy Settings</h3>
+                      <div className="border border-gray-200 rounded-xl p-4">
+                        <div className="flex items-start gap-3">
+                          <input type="checkbox" checked={user?.showInFeed !== false}
+                            onChange={async (e) => {
+                              try {
+                                await apiCall('/user/feed-preference', 'PUT', { showInFeed: e.target.checked });
+                                setUser(prev => ({ ...prev, showInFeed: e.target.checked }));
+                              } catch (err) { console.error(err); }
                             }}
-                            className="w-10 h-10 rounded cursor-pointer"
-                          />
-                          <span className="flex-1 font-medium text-gray-700">{className}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Calendar Settings */}
-                {isAuthenticated && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      Calendar Settings
-                    </label>
-                    <div className="border border-gray-200 rounded-lg divide-y divide-gray-100">
-                      {[
-                        {
-                          key: 'calendarTodayCentered',
-                          label: 'Today-Centered View',
-                          desc: 'When on, today always appears in the middle column of the calendar. When off, the week runs Sun → Sat.'
-                        },
-                        {
-                          key: 'calendarShowHomeroom',
-                          label: 'Show Homeroom Tasks',
-                          desc: 'When on, Homeroom tasks appear on the calendar.'
-                        },
-                        {
-                          key: 'calendarShowCompleted',
-                          label: 'Show Completed Tasks',
-                          desc: 'When on, submitted and completed tasks appear with a strikethrough. When off, they are hidden.'
-                        }
-                      ].map(({ key, label, desc }) => (
-                        <div key={key} className="flex items-start gap-3 p-4">
-                          <input
-                            type="checkbox"
-                            checked={accountSetup[key] || false}
-                            onChange={(e) => setAccountSetup(prev => ({ ...prev, [key]: e.target.checked }))}
-                            className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                          />
-                          <div className="flex-1">
-                            <p className="font-medium text-gray-900">{label}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                            className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                          <div>
+                            <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
+                            <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Completion Feed Preference - Only shown after initial setup */}
-                {isAuthenticated && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-3">
-                      Privacy Settings
-                    </label>
-                    <div className="border border-gray-200 rounded-lg p-4">
-                      <div className="flex items-start gap-3">
-                        <input 
-                          type="checkbox"
-                          checked={user?.showInFeed !== false}
-                          onChange={async (e) => {
-                            try {
-                              await apiCall('/user/feed-preference', 'PUT', { 
-                                showInFeed: e.target.checked 
-                              });
-                              setUser(prev => ({ ...prev, showInFeed: e.target.checked }));
-                            } catch (error) {
-                              console.error('Failed to update feed preference:', error);
-                            }
-                          }}
-                          className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500"
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
-                          <p className="text-xs text-gray-500 mt-1">
-                            When enabled, other students will see when you complete tasks on the Hub page. 
-                            Only your name and grade are shown.
-                          </p>
                         </div>
                       </div>
                     </div>
+
+                    {/* Canvas Token */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Canvas API Token</h3>
+                      <input type="password" value={accountSetup.canvasApiToken}
+                        onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasApiToken: e.target.value }))}
+                        placeholder="Paste your Canvas API token here..."
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 font-mono text-sm" />
+                      <p className="text-xs text-gray-500 mt-1">🔒 Encrypted and stored securely. Never share your token with anyone.</p>
+                    </div>
+
+                    {/* Grade */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Grade</h3>
+                      <select value={accountSetup.grade}
+                        onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                        <option value="">Select your grade...</option>
+                        {['3','4','5','6','7','8','9','10','11','12'].map(g => <option key={g} value={g}>{g}</option>)}
+                      </select>
+                    </div>
+
+                    {/* Present Periods */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Present Periods (Time Zone)</h3>
+                      <select value={accountSetup.presentPeriods}
+                        onChange={(e) => setAccountSetup(prev => ({ ...prev, presentPeriods: e.target.value }))}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                        <option value="1-5">Periods 1-5</option>
+                        <option value="2-6">Periods 2-6</option>
+                        <option value="3-7">Periods 3-7</option>
+                        <option value="4-8">Periods 4-8</option>
+                      </select>
+                    </div>
+
+                    {/* Feedback */}
+                    <div className="border-t pt-4">
+                      <button onClick={() => setShowFeedbackForm(true)}
+                        className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
+                        <Send className="w-4 h-4" /> Submit Feedback or Bug Report
+                      </button>
+                    </div>
+
+                    <div className="flex gap-3">
+                      <button onClick={() => setCurrentPage('hub')}
+                        className="flex-1 border-2 border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 text-sm">
+                        Cancel
+                      </button>
+                      <button onClick={saveAccountSetup} disabled={settingsSaving}
+                        className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 text-white py-3 rounded-xl font-semibold hover:from-purple-700 hover:to-purple-800 disabled:opacity-50 text-sm">
+                        {settingsSaving ? 'Saving...' : 'Save Settings'}
+                      </button>
+                    </div>
                   </div>
                 )}
 
-                <div className="border-t pt-6">
-                  <button
-                    onClick={() => setShowFeedbackForm(true)}
-                    className="w-full bg-blue-100 text-blue-700 py-3 rounded-lg font-semibold hover:bg-blue-200 flex items-center justify-center gap-2"
-                  >
-                    <Send className="w-5 h-5" />
-                    Submit Feedback or Bug Report
-                  </button>
-                </div>
-
-                <div className="flex gap-4 pt-4">
-                  <button
-                    onClick={() => setCurrentPage('hub')}
-                    className="flex-1 border-2 border-gray-300 text-gray-700 py-3 rounded-lg font-semibold hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={saveAccountSetup}
-                    disabled={settingsSaving}
-                    className="flex-1 bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-                  >
-                    {settingsSaving ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                        Please Wait...
-                      </span>
+                {/* ── COURSES TAB ── */}
+                {accountTab === 'courses' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <h2 className="text-lg font-bold text-gray-900 mb-1">Course Management</h2>
+                    <p className="text-sm text-gray-500 mb-5">Toggle courses on or off to show or hide their tasks everywhere in PlanAssist. Customize colors per course.</p>
+                    {courses.length === 0 ? (
+                      <p className="text-gray-400 text-sm">No courses found. Sync Canvas to load your courses.</p>
                     ) : (
-                      'Save Settings'
+                      <div className="space-y-2">
+                        {courses.map(course => {
+                          const className = course.name;
+                          const color = (JSON.parse(localStorage.getItem('classColors') || '{}')?.[className]) || getClassColor(className);
+                          return (
+                            <div key={course.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${course.enabled !== false ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
+                              {/* Enable toggle */}
+                              <div className="flex items-center">
+                                <input type="checkbox" checked={course.enabled !== false}
+                                  onChange={(e) => toggleCourseEnabled(course.id, e.target.checked)}
+                                  className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer" />
+                              </div>
+                              {/* Color swatch */}
+                              <input type="color" value={color}
+                                onChange={(e) => {
+                                  const stored = JSON.parse(localStorage.getItem('classColors') || '{}');
+                                  stored[className] = e.target.value;
+                                  localStorage.setItem('classColors', JSON.stringify(stored));
+                                  setAccountSetup(prev => ({ ...prev, classColors: stored }));
+                                }}
+                                className="w-8 h-8 rounded-lg cursor-pointer border-0 p-0" title="Change color" />
+                              {/* Course name */}
+                              <div className="flex-1 min-w-0">
+                                <p className={`font-medium text-sm truncate ${course.enabled !== false ? 'text-gray-900' : 'text-gray-400'}`}>{course.name}</p>
+                                {course.current_period_score != null ? (
+                                  <p className="text-xs text-gray-400">{course.current_period_score}% · {course.current_period_grade || course.current_grade || '–'}</p>
+                                ) : course.current_score != null ? (
+                                  <p className="text-xs text-gray-400">{course.current_score}% · {course.current_grade || '–'}</p>
+                                ) : null}
+                              </div>
+                              {course.enabled === false && (
+                                <span className="text-xs text-gray-400 font-medium flex-shrink-0">Hidden</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     )}
-                  </button>
-                </div>
+                  </div>
+                )}
+
+                {/* ── RESOLVED TASKS TAB ── */}
+                {accountTab === 'resolved' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <h2 className="text-lg font-bold text-gray-900 mb-1">Resolved Tasks</h2>
+                    <p className="text-sm text-gray-500 mb-4">Completed and dismissed tasks. Restore any task to send it back to your Task List.</p>
+
+                    {/* Search + Sort */}
+                    <div className="flex gap-3 mb-4">
+                      <div className="relative flex-1">
+                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                        <input value={resolvedSearch}
+                          onChange={(e) => { setResolvedSearch(e.target.value); loadResolvedTasks(e.target.value, resolvedSort); }}
+                          placeholder="Search resolved tasks..."
+                          className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500" />
+                      </div>
+                      <select value={resolvedSort}
+                        onChange={(e) => { setResolvedSort(e.target.value); loadResolvedTasks(resolvedSearch, e.target.value); }}
+                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
+                        <option value="created_at">Sort: Sync Date</option>
+                        <option value="deadline">Sort: Deadline</option>
+                      </select>
+                    </div>
+
+                    {resolvedLoading ? (
+                      <div className="flex items-center justify-center py-12">
+                        <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                      </div>
+                    ) : resolvedTasks.length === 0 ? (
+                      <p className="text-gray-400 text-sm text-center py-8">No resolved tasks found.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                        {resolvedTasks.map(task => {
+                          const deadlineStr = (() => {
+                            if (!task.deadline_date) return null;
+                            const dp = task.deadline_date.includes('T') ? task.deadline_date.split('T')[0] : task.deadline_date;
+                            const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
+                            return d.toLocaleDateString();
+                          })();
+                          const isCompleted = task.completed;
+                          const hasSession = task.session_actual_time != null;
+                          return (
+                            <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                              <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-400' : 'bg-gray-300'}`} />
+                              <div className="flex-1 min-w-0">
+                                <a href={task.url} target="_blank" rel="noreferrer"
+                                  className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                  {task.title}{task.segment ? ` · ${task.segment}` : ''}
+                                </a>
+                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                  <span className="text-xs text-gray-400">{task.class}</span>
+                                  {deadlineStr && <span className="text-xs text-gray-300">·</span>}
+                                  {deadlineStr && <span className="text-xs text-gray-400">Due {deadlineStr}</span>}
+                                  <span className="text-xs text-gray-300">·</span>
+                                  <span className={`text-xs font-medium ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                                    {isCompleted ? 'Completed' : 'Dismissed'}
+                                  </span>
+                                </div>
+                                {hasSession && (
+                                  <div className="flex items-center gap-2 mt-1.5">
+                                    <Clock className="w-3 h-3 text-gray-300" />
+                                    {editingActualTime === task.id ? (
+                                      <div className="flex items-center gap-1">
+                                        <input type="number" value={editingActualTimeVal} min="0"
+                                          onChange={(e) => setEditingActualTimeVal(e.target.value)}
+                                          className="w-16 px-2 py-0.5 border border-purple-300 rounded text-xs focus:ring-1 focus:ring-purple-500" />
+                                        <span className="text-xs text-gray-400">min</span>
+                                        <button onClick={() => saveActualTime(task.id, editingActualTimeVal)}
+                                          className="text-xs text-green-600 font-medium hover:text-green-700 px-1">Save</button>
+                                        <button onClick={() => setEditingActualTime(null)}
+                                          className="text-xs text-gray-400 hover:text-gray-600 px-1">×</button>
+                                      </div>
+                                    ) : (
+                                      <button onClick={() => { setEditingActualTime(task.id); setEditingActualTimeVal(String(task.session_actual_time)); }}
+                                        className="text-xs text-gray-400 hover:text-purple-600 transition-colors">
+                                        {task.session_actual_time} min <span className="text-gray-300">(tap to edit)</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {task.completed_at && (
+                                  <p className="text-xs text-gray-300 mt-0.5">
+                                    {isCompleted ? 'Completed' : 'Resolved'} {new Date(task.completed_at).toLocaleDateString()}
+                                  </p>
+                                )}
+                              </div>
+                              <button onClick={() => restoreTask(task.id)}
+                                className="flex-shrink-0 text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 font-medium transition-colors">
+                                Restore
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── GRADES TAB ── */}
+                {accountTab === 'grades' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <div className="flex items-center justify-between mb-1">
+                      <h2 className="text-lg font-bold text-gray-900">Recently Graded</h2>
+                      {gradedLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
+                    </div>
+                    <p className="text-sm text-gray-500 mb-5">Assignments graded in the last 10 days, most recent first. Refreshes every 5 minutes.</p>
+                    {gradedSubmissions.length === 0 && !gradedLoading ? (
+                      <p className="text-gray-400 text-sm text-center py-8">No recently graded assignments found.</p>
+                    ) : (
+                      <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                        {gradedSubmissions.map(sub => {
+                          const gradedDate = sub.gradedAt ? new Date(sub.gradedAt).toLocaleDateString() : null;
+                          const isPassFail = sub.gradingType === 'pass_fail' || sub.gradingType === 'complete_incomplete';
+                          const scoreDisplay = (() => {
+                            if (isPassFail) return sub.grade === 'complete' ? '✓ Complete' : sub.grade === 'pass' ? '✓ Pass' : sub.grade || '–';
+                            if (sub.score != null && sub.pointsPossible != null) return `${sub.score} / ${sub.pointsPossible}`;
+                            if (sub.grade) return sub.grade;
+                            return '–';
+                          })();
+                          const pct = sub.score != null && sub.pointsPossible > 0
+                            ? Math.round((sub.score / sub.pointsPossible) * 100) : null;
+                          const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
+                          // Find matching course name
+                          const course = courses.find(c => c.course_id === sub.courseId);
+                          return (
+                            <div key={sub.id} className="flex items-start gap-4 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <a href={sub.htmlUrl} target="_blank" rel="noreferrer"
+                                  className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                  {sub.assignmentName}
+                                </a>
+                                <p className="text-xs text-gray-400 mt-0.5">{course?.name || `Course ${sub.courseId}`}</p>
+                                {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Graded {gradedDate}</p>}
+                              </div>
+                              <div className="flex-shrink-0 text-right">
+                                <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
+                                {pct != null && <p className="text-xs text-gray-400">{pct}%</p>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── SCHEDULE TAB ── */}
+                {accountTab === 'schedule' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
+                    <h2 className="text-lg font-bold text-gray-900">Schedule Management</h2>
+
+                    {/* Weekly Schedule grid */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Weekly Schedule</h3>
+                      <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <table className="w-full">
+                          <thead className="bg-gray-50">
+                            <tr>
+                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
+                              {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">{day.slice(0,3)}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedPeriods.map(period => (
+                              <tr key={period} className="border-t">
+                                <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
+                                {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                  <td key={day} className="px-4 py-3 text-center">
+                                    <select
+                                      value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
+                                      onChange={(e) => {
+                                        const newSchedule = { ...accountSetup.schedule };
+                                        if (!newSchedule[day]) newSchedule[day] = {};
+                                        newSchedule[day][period] = e.target.value;
+                                        setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
+                                      }}
+                                      className={`px-3 py-2 rounded-lg font-medium text-sm ${
+                                        (accountSetup.schedule[day]?.[String(period)] || 'Study') === 'Study'
+                                          ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                                      }`}>
+                                      <option value="Study">Study</option>
+                                      <option value="Lesson">Lesson</option>
+                                    </select>
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* Enhance / Re-enhance */}
+                    {courses.length > 0 && parseInt(user?.grade || 0) >= 7 && (
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 mb-1">
+                          {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
+                        </h3>
+                        <p className="text-xs text-gray-500 mb-3">
+                          {scheduleEnhanced
+                            ? 'Update your course-to-period assignments or Zoom numbers. Changes merge with your existing schedule.'
+                            : 'Link your courses to Lesson periods and add Zoom numbers to unlock the Itinerary page.'}
+                        </p>
+                        <button
+                          onClick={() => {
+                            const prefillLessons = {};
+                            scheduleLessons.forEach(sl => {
+                              if (sl.course_id) prefillLessons[`${sl.day}-${sl.period}`] = { courseId: sl.course_id, courseName: sl.course_name };
+                            });
+                            const prefillZoom = {};
+                            courses.forEach(c => { if (c.zoom_number) prefillZoom[c.id] = c.zoom_number; });
+                            setEnhanceLessons(prefillLessons);
+                            setEnhanceZoom(prefillZoom);
+                            setShowEnhanceDialog(true);
+                            setEnhanceStep(1);
+                          }}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm transition-colors"
+                        >
+                          <ClipboardList className="w-4 h-4" />
+                          {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
+                          {scheduleEnhanced && <span className="ml-1 text-xs bg-green-400 text-white px-1.5 py-0.5 rounded-full">Enhanced</span>}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="flex gap-3 pt-2">
+                      <button onClick={() => setCurrentPage('hub')}
+                        className="flex-1 border-2 border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 text-sm">
+                        Cancel
+                      </button>
+                      <button onClick={saveAccountSetup} disabled={settingsSaving}
+                        className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 text-white py-3 rounded-xl font-semibold hover:from-purple-700 hover:to-purple-800 disabled:opacity-50 text-sm">
+                        {settingsSaving ? 'Saving...' : 'Save Schedule'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── HELP TAB ── */}
+                {accountTab === 'help' && (
+                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <h2 className="text-lg font-bold text-gray-900 mb-1">Help</h2>
+                    <p className="text-sm text-gray-500 mb-5">Guidance on using PlanAssist.</p>
+                    {helpContent ? (
+                      <div className="prose prose-sm max-w-none text-gray-700 whitespace-pre-wrap leading-relaxed">
+                        {helpContent}
+                      </div>
+                    ) : (
+                      <p className="text-gray-400 text-sm text-center py-8">No help content has been added yet. Check back later.</p>
+                    )}
+                  </div>
+                )}
+
               </div>
             </div>
           </div>
         )}
-      </div>
-      
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
@@ -5605,6 +5848,7 @@ const fetchCanvasTasks = async () => {
                 { id: 'announcements', label: 'Banners', icon: Bell },
                 { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
                 { id: 'audit', label: 'Audit Log', icon: FileText },
+                { id: 'help', label: 'Help Page', icon: HelpCircle },
               ].map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
@@ -5614,6 +5858,7 @@ const fetchCanvasTasks = async () => {
                     if (id === 'diagnostics' && !adminDiagnostics) loadAdminDiagnostics();
                     if (id === 'audit') loadAdminAuditLog();
                     if (id === 'announcements') loadAdminAnnouncements();
+                    if (id === 'help') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); }
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
@@ -6019,6 +6264,33 @@ const fetchCanvasTasks = async () => {
                       <span className="text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── HELP PAGE EDITOR ── */}
+            {adminSection === 'help' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900">Help Page Content</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">This content is shown to all users on their Help tab. Plain text is supported.</p>
+                  </div>
+                </div>
+                <textarea
+                  value={adminHelpContent}
+                  onChange={e => setAdminHelpContent(e.target.value)}
+                  placeholder="Write help content here... Explain how PlanAssist works, how to sync, how sessions work, etc."
+                  className="w-full h-96 px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:ring-2 focus:ring-red-500 font-mono"
+                />
+                <div className="flex justify-end mt-3">
+                  <button
+                    onClick={saveAdminHelp}
+                    disabled={adminHelpSaving}
+                    className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {adminHelpSaving ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : 'Save Help Content'}
+                  </button>
                 </div>
               </div>
             )}
