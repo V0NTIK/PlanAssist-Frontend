@@ -5690,8 +5690,9 @@ const fetchCanvasTasks = async () => {
                           const pct = sub.score != null && sub.pointsPossible > 0
                             ? Math.round((sub.score / sub.pointsPossible) * 100) : null;
                           const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
-                          // Find matching course name
-                          const course = courses.find(c => c.course_id === sub.courseId);
+                          const courseDisplayName = sub.courseName
+                            || courses.find(c => c.course_id === sub.courseId)?.name
+                            || `Course ${sub.courseId}`;
                           return (
                             <div key={sub.id} className="flex items-start gap-4 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
                               <div className="flex-1 min-w-0">
@@ -5699,7 +5700,7 @@ const fetchCanvasTasks = async () => {
                                   className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
                                   {sub.assignmentName}
                                 </a>
-                                <p className="text-xs text-gray-400 mt-0.5">{course?.name || `Course ${sub.courseId}`}</p>
+                                <p className="text-xs text-gray-400 mt-0.5">{courseDisplayName}</p>
                                 {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Graded {gradedDate}</p>}
                               </div>
                               <div className="flex-shrink-0 text-right">
@@ -6323,6 +6324,148 @@ const fetchCanvasTasks = async () => {
         )}
 
       </div>{/* ── closes <div className="py-6"> ── */}
+
+      {/* ── Enhance Schedule Dialog ─────────────────────────────────────────── */}
+      {showEnhanceDialog && (() => {
+        const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
+        const range = accountSetup.presentPeriods || '2-6';
+        const [start, end] = range.split('-').map(Number);
+        const enhancePeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
+
+        const lessonSlots = [];
+        allDays.forEach(day => {
+          enhancePeriods.forEach(period => {
+            if ((accountSetup.schedule?.[day]?.[String(period)] || 'Study') === 'Lesson') {
+              lessonSlots.push({ day, period });
+            }
+          });
+        });
+
+        const assignedCourseIds = new Set(
+          Object.values(enhanceLessons).map(v => v.courseId).filter(Boolean)
+        );
+        const coursesForZoom = courses.filter(c => assignedCourseIds.has(c.id));
+        const allLessonsAssigned = lessonSlots.length > 0 && lessonSlots.every(({ day, period }) =>
+          enhanceLessons[`${day}-${period}`]?.courseId
+        );
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col">
+              <div className="p-6 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-900">Enhance Schedule</h3>
+                  <p className="text-sm text-gray-500 mt-0.5">Step {enhanceStep} of 2</p>
+                </div>
+                <button onClick={() => setShowEnhanceDialog(false)} className="text-gray-400 hover:text-gray-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {enhanceStep === 1 && (
+                <div className="flex-1 overflow-y-auto p-6">
+                  <p className="text-sm text-gray-600 mb-4">
+                    Select which course you have for each <span className="font-semibold text-blue-700">Lesson</span> period.
+                  </p>
+                  {lessonSlots.length === 0 ? (
+                    <p className="text-gray-400 italic text-sm">No Lesson periods found in your schedule. Go to the Schedule tab and mark some periods as Lesson first.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {lessonSlots.map(({ day, period }) => {
+                        const key = `${day}-${period}`;
+                        const selected = enhanceLessons[key];
+                        return (
+                          <div key={key} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                            <div className="flex-shrink-0 text-sm font-medium text-gray-600 w-28">{day} P{period}</div>
+                            <select
+                              value={selected?.courseId || ''}
+                              onChange={e => {
+                                const courseId = parseInt(e.target.value);
+                                const course = courses.find(c => c.id === courseId);
+                                setEnhanceLessons(prev => ({
+                                  ...prev,
+                                  [key]: { courseId, courseName: course?.name || '' }
+                                }));
+                              }}
+                              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                            >
+                              <option value="">— Select a course —</option>
+                              {courses.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {enhanceStep === 2 && (
+                <div className="flex-1 overflow-y-auto p-6">
+                  <p className="text-sm text-gray-600 mb-4">
+                    Optionally add the Zoom meeting number for each course.
+                  </p>
+                  {coursesForZoom.length === 0 ? (
+                    <p className="text-gray-400 italic text-sm">No courses assigned yet.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {coursesForZoom.map(c => (
+                        <div key={c.id} className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg">
+                          <div className="flex-shrink-0 text-sm font-medium text-gray-700 flex-1 min-w-0 truncate">{c.name}</div>
+                          <input
+                            type="text"
+                            value={enhanceZoom[c.id] || ''}
+                            onChange={e => setEnhanceZoom(prev => ({ ...prev, [c.id]: e.target.value.replace(/[^0-9]/g, '') }))}
+                            placeholder="Zoom number (e.g. 74751073335)"
+                            maxLength={15}
+                            className="w-48 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
+                {enhanceStep === 1 ? (
+                  <>
+                    <button onClick={() => setShowEnhanceDialog(false)}
+                      className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => setEnhanceStep(2)}
+                      disabled={!allLessonsAssigned}
+                      className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      Next →
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => setEnhanceStep(1)}
+                      className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">
+                      ← Back
+                    </button>
+                    <button
+                      onClick={submitEnhanceSchedule}
+                      disabled={isSavingEnhance}
+                      className="flex-1 px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 disabled:opacity-60 flex items-center justify-center gap-2"
+                    >
+                      {isSavingEnhance ? (
+                        <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</>
+                      ) : 'Save & Enhance'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {showFeedbackForm && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
