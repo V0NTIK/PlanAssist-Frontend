@@ -3054,6 +3054,7 @@ const fetchCanvasTasks = async () => {
     }
     if (currentPage === 'agendas') {
       loadAgendas();
+      loadSessionTasks();
     }
     if (currentPage === 'itinerary') {
       const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
@@ -4355,7 +4356,7 @@ const fetchCanvasTasks = async () => {
                           prev.map((r, i) => i === idx ? { ...r, [field]: val } : r)
                         );
                         const setRowTask = (idx, taskId) => {
-                          const task = tasks.find(t => t.id === taskId);
+                          const task = sessionTasks.find(t => t.id === taskId);
                           const defaultTime = task ? (task.userEstimate || task.user_estimated_time || task.estimatedTime || task.estimated_time || 25) : 25;
                           setBuildAgendaRows(prev => prev.map((r, i) =>
                             i === idx ? { ...r, taskId, timeMins: defaultTime } : r
@@ -4396,7 +4397,7 @@ const fetchCanvasTasks = async () => {
                                       </div>
                                       {/* Rows */}
                                       {buildAgendaRows.map((row, idx) => {
-                                        const rowTask = row.taskId ? tasks.find(t => t.id === row.taskId) : null;
+                                        const rowTask = row.taskId ? (sessionTasks.find(t => t.id === row.taskId) || tasks.find(t => t.id === row.taskId)) : null;
                                         const classColor = rowTask ? getClassColor(rowTask.class) : '#d1d5db';
                                         const dueDate = rowTask ? (tasks.find(t => t.id === rowTask.id)?.dueDate) : null;
                                         return (
@@ -4413,7 +4414,7 @@ const fetchCanvasTasks = async () => {
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
                                               >
                                                 <option value="">— pick task —</option>
-                                                {tasks.filter(t => !t.completed && !t.deleted && t.priorityOrder).sort((a,b) => a.priorityOrder - b.priorityOrder).map(t => (
+                                                {sessionTasks.map(t => (
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                                 ))}
                                               </select>
@@ -4495,7 +4496,7 @@ const fetchCanvasTasks = async () => {
                           prev.map((r, i) => i === idx ? { ...r, [field]: val } : r)
                         );
                         const setEditRowTask = (idx, taskId) => {
-                          const task = tasks.find(t => t.id === taskId);
+                          const task = sessionTasks.find(t => t.id === taskId);
                           const defaultTime = task ? (task.userEstimate || task.user_estimated_time || task.estimatedTime || task.estimated_time || 25) : 25;
                           setEditAgendaRows(prev => prev.map((r, i) =>
                             i === idx ? { ...r, taskId, timeMins: defaultTime } : r
@@ -4542,7 +4543,7 @@ const fetchCanvasTasks = async () => {
                                       <div />
                                     </div>
                                     {editAgendaRows.map((row, idx) => {
-                                      const rowTask = row.taskId ? tasks.find(t => t.id === row.taskId) : null;
+                                      const rowTask = row.taskId ? (sessionTasks.find(t => t.id === row.taskId) || tasks.find(t => t.id === row.taskId)) : null;
                                       const classColor = rowTask ? getClassColor(rowTask.class) : '#d1d5db';
                                       return (
                                         <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_130px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
@@ -4553,7 +4554,7 @@ const fetchCanvasTasks = async () => {
                                             <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
-                                              {tasks.filter(t => !t.completed && !t.deleted && t.priorityOrder).sort((a,b) => a.priorityOrder - b.priorityOrder).map(t => (
+                                              {sessionTasks.map(t => (
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                               ))}
                                             </select>
