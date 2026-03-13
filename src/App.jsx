@@ -4796,9 +4796,11 @@ const fetchCanvasTasks = async () => {
                           {/* In-session elapsed timer */}
                           <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(agendaElapsed)}</div>
                           {(() => {
-                            const prevMins = rowTask?.accumulated_time || 0;
+                            // accumulated_time from server hydration is in minutes (snake_case);
+                            // fallback tasks state uses accumulatedTime in minutes too (stored as minutes in DB)
+                            const prevMins = rowTask?.accumulated_time ?? rowTask?.accumulatedTime ?? 0;
                             return prevMins > 0
-                              ? <p className="text-purple-200 text-xs mb-6">{prevMins < 1 ? '&lt; 1' : prevMins} min previously</p>
+                              ? <p className="text-purple-200 text-xs mb-6">{prevMins < 1 ? '&lt; 1' : Math.floor(prevMins)} min previously</p>
                               : <p className="text-purple-200 text-xs mb-6">Time on this row</p>;
                           })()}
                           {/* Start/pause button */}
