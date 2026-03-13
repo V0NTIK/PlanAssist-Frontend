@@ -1848,6 +1848,52 @@ const fetchCanvasTasks = async () => {
     }
   };
 
+  const agendaMarkComplete = async () => {
+    const rows = currentAgenda?.rows || [];
+    const currentRow = rows[agendaCurrentRow];
+    if (!currentRow?.taskId) return;
+    setAgendaProceedLoading(true);
+    const { snappedElapsed } = agendaStopTimer();
+    try {
+      // Complete the task (marks it done, saves time)
+      await apiCall(`/tasks/${currentRow.taskId}/complete`, 'POST', {
+        timeSpent: Math.round(snappedElapsed / 60)
+      });
+      await normalizePriority();
+      setTasks(prev => prev.map(t => t.id === currentRow.taskId ? { ...t, completed: true, deleted: true } : t));
+      setAgendaTotalElapsed(prev => prev + snappedElapsed);
+      // Now advance — same as Save & Proceed but task is already saved
+      const isLastRow = agendaCurrentRow >= rows.length - 1;
+      if (isLastRow) {
+        const totalSecs = agendaTotalElapsed + snappedElapsed;
+        await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
+        setAgendaFinishedSummary({ name: currentAgenda.name, totalSecs, rowCount: rows.length });
+        setCurrentAgenda(null);
+        setCurrentPage('agenda-summary');
+        loadAgendas();
+      } else {
+        const nextRow = agendaCurrentRow + 1;
+        // Update DB row pointer (elapsedSeconds=0 since task was completed, not just proceeded)
+        await apiCall(`/agendas/${currentAgenda.id}/proceed`, 'POST', {
+          taskId: null, // already saved via complete endpoint
+          elapsedSeconds: 0,
+        });
+        const nextRowData = rows[nextRow];
+        const nextCountdown = (nextRowData?.timeMins || 25) * 60;
+        setAgendaCurrentRow(nextRow);
+        setAgendaElapsed(0);
+        setAgendaCountdown(nextCountdown);
+        setAgendaCountdownFlash(false);
+        setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
+      }
+    } catch (err) {
+      console.error('Mark complete failed:', err);
+      alert('Failed to mark complete: ' + err.message);
+    } finally {
+      setAgendaProceedLoading(false);
+    }
+  };
+
   // ── Itinerary functions ─────────────────────────────────────────────────────
 
   const loadScheduleLessons = async () => {
@@ -4284,12 +4330,17 @@ const fetchCanvasTasks = async () => {
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
-                        <button
-                          onClick={() => { setShowBuildAgenda(true); setBuildAgendaName(''); setBuildAgendaRows([]); }}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
-                        >
-                          <Plus className="w-4 h-4" /> Build an Agenda
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={loadAgendas} className="p-2 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors" title="Refresh agendas">
+                            <RefreshCw className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => { setShowBuildAgenda(true); setBuildAgendaName(''); setBuildAgendaRows([]); }}
+                            className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
+                          >
+                            <Plus className="w-4 h-4" /> Build an Agenda
+                          </button>
+                        </div>
                       </div>
 
                       {/* ── BUILD AGENDA PANEL ── */}
@@ -4304,7 +4355,7 @@ const fetchCanvasTasks = async () => {
                           prev.map((r, i) => i === idx ? { ...r, [field]: val } : r)
                         );
                         const setRowTask = (idx, taskId) => {
-                          const task = sessionTasks.find(t => t.id === taskId) || tasks.find(t => t.id === taskId);
+                          const task = tasks.find(t => t.id === taskId);
                           const defaultTime = task ? (task.userEstimate || task.user_estimated_time || task.estimatedTime || task.estimated_time || 25) : 25;
                           setBuildAgendaRows(prev => prev.map((r, i) =>
                             i === idx ? { ...r, taskId, timeMins: defaultTime } : r
@@ -4335,20 +4386,21 @@ const fetchCanvasTasks = async () => {
                                   {buildAgendaRows.length > 0 && (
                                     <div className="border border-gray-200 rounded-xl overflow-hidden mb-3">
                                       {/* Header */}
-                                      <div className="grid grid-cols-[32px_1fr_2fr_90px_32px] gap-0 bg-gray-50 border-b border-gray-200">
+                                      <div className="grid grid-cols-[32px_1fr_2fr_90px_130px_32px] gap-0 bg-gray-50 border-b border-gray-200">
                                         <div className="px-2 py-2.5 text-xs font-semibold text-gray-500 text-center">#</div>
                                         <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Task</div>
                                         <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Action</div>
                                         <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Time (min)</div>
+                                        <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Zone</div>
                                         <div />
                                       </div>
                                       {/* Rows */}
                                       {buildAgendaRows.map((row, idx) => {
-                                        const rowTask = row.taskId ? (sessionTasks.find(t => t.id === row.taskId) || tasks.find(t => t.id === row.taskId)) : null;
+                                        const rowTask = row.taskId ? tasks.find(t => t.id === row.taskId) : null;
                                         const classColor = rowTask ? getClassColor(rowTask.class) : '#d1d5db';
                                         const dueDate = rowTask ? (tasks.find(t => t.id === rowTask.id)?.dueDate) : null;
                                         return (
-                                          <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
+                                          <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_130px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
                                             {/* Row number */}
                                             <div className="flex items-center justify-center py-3">
                                               <span className="w-5 h-5 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">{idx + 1}</span>
@@ -4361,7 +4413,7 @@ const fetchCanvasTasks = async () => {
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
                                               >
                                                 <option value="">— pick task —</option>
-                                                {sessionTasks.map(t => (
+                                                {tasks.filter(t => !t.completed && !t.deleted && t.priorityOrder).sort((a,b) => a.priorityOrder - b.priorityOrder).map(t => (
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                                 ))}
                                               </select>
@@ -4385,6 +4437,16 @@ const fetchCanvasTasks = async () => {
                                               <input type="number" min={1} max={300} value={row.timeMins}
                                                 onChange={e => updateRow(idx, 'timeMins', parseInt(e.target.value) || 1)}
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 text-center" />
+                                            </div>
+                                            {/* Zone */}
+                                            <div className="px-2 py-2">
+                                              <select value={row.zone || ''} onChange={e => updateRow(idx, 'zone', e.target.value || null)}
+                                                className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
+                                                <option value="">— none —</option>
+                                                <option value="focus">Focus Zone</option>
+                                                <option value="semi">Semi-Collaborative</option>
+                                                <option value="collab">Collaborative Zone</option>
+                                              </select>
                                             </div>
                                             {/* Remove */}
                                             <div className="flex items-center justify-center">
@@ -4433,7 +4495,7 @@ const fetchCanvasTasks = async () => {
                           prev.map((r, i) => i === idx ? { ...r, [field]: val } : r)
                         );
                         const setEditRowTask = (idx, taskId) => {
-                          const task = sessionTasks.find(t => t.id === taskId) || tasks.find(t => t.id === taskId);
+                          const task = tasks.find(t => t.id === taskId);
                           const defaultTime = task ? (task.userEstimate || task.user_estimated_time || task.estimatedTime || task.estimated_time || 25) : 25;
                           setEditAgendaRows(prev => prev.map((r, i) =>
                             i === idx ? { ...r, taskId, timeMins: defaultTime } : r
@@ -4471,18 +4533,19 @@ const fetchCanvasTasks = async () => {
                                 {/* Editable rows */}
                                 {editAgendaRows.length > 0 && (
                                   <div className="border border-gray-200 rounded-xl overflow-hidden">
-                                    <div className="grid grid-cols-[32px_1fr_2fr_90px_32px] bg-gray-50 border-b border-gray-200">
+                                    <div className="grid grid-cols-[32px_1fr_2fr_90px_130px_32px] bg-gray-50 border-b border-gray-200">
                                       <div className="px-2 py-2.5 text-xs font-semibold text-gray-500 text-center">#</div>
                                       <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Task</div>
                                       <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Action</div>
                                       <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Time (min)</div>
+                                      <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Zone</div>
                                       <div />
                                     </div>
                                     {editAgendaRows.map((row, idx) => {
-                                      const rowTask = row.taskId ? (sessionTasks.find(t => t.id === row.taskId) || tasks.find(t => t.id === row.taskId)) : null;
+                                      const rowTask = row.taskId ? tasks.find(t => t.id === row.taskId) : null;
                                       const classColor = rowTask ? getClassColor(rowTask.class) : '#d1d5db';
                                       return (
-                                        <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
+                                        <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_130px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
                                           <div className="flex items-center justify-center py-3">
                                             <span className="w-5 h-5 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">{lockedCount + idx + 1}</span>
                                           </div>
@@ -4490,7 +4553,7 @@ const fetchCanvasTasks = async () => {
                                             <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
-                                              {sessionTasks.map(t => (
+                                              {tasks.filter(t => !t.completed && !t.deleted && t.priorityOrder).sort((a,b) => a.priorityOrder - b.priorityOrder).map(t => (
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                               ))}
                                             </select>
@@ -4509,6 +4572,15 @@ const fetchCanvasTasks = async () => {
                                           <div className="px-2 py-2">
                                             <input type="number" min={1} max={300} value={row.timeMins} onChange={e => updateEditRow(idx, 'timeMins', parseInt(e.target.value) || 1)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 text-center" />
+                                          </div>
+                                          <div className="px-2 py-2">
+                                            <select value={row.zone || ''} onChange={e => updateEditRow(idx, 'zone', e.target.value || null)}
+                                              className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
+                                              <option value="">— none —</option>
+                                              <option value="focus">Focus Zone</option>
+                                              <option value="semi">Semi-Collaborative</option>
+                                              <option value="collab">Collaborative Zone</option>
+                                            </select>
                                           </div>
                                           <div className="flex items-center justify-center">
                                             <button onClick={() => removeEditRow(idx)} className="text-gray-300 hover:text-red-400 transition-colors p-1">
@@ -4683,7 +4755,7 @@ const fetchCanvasTasks = async () => {
                               <p className={`text-xs font-medium truncate ${isCurrentRow ? 'text-purple-900' : 'text-gray-700'}`}>
                                 {rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}
                               </p>
-                              <p className="text-xs text-gray-400 truncate">{row.action || 'Work on Task'} · {row.timeMins}m</p>
+                              <p className="text-xs text-gray-400 truncate">{row.action || 'Work on Task'} · {row.timeMins}m{row.zone ? ` · ${row.zone === 'focus' ? '🎯' : row.zone === 'semi' ? '🤝' : '👥'}` : ''}</p>
                             </div>
                             {isPast && <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
                           </div>
@@ -4717,7 +4789,20 @@ const fetchCanvasTasks = async () => {
                             </p>
                           )}
                           {/* Action label */}
-                          <p className="text-purple-200 text-sm mb-5 italic">"{currentRow.action || 'Work on Task'}"</p>
+                          <p className="text-purple-200 text-sm mb-2 italic">"{currentRow.action || 'Work on Task'}"</p>
+                          {/* Zone badge */}
+                          {currentRow.zone && (() => {
+                            const zoneMap = {
+                              focus: { label: 'Focus Zone', bg: 'bg-indigo-500 bg-opacity-40', text: 'text-indigo-100' },
+                              semi:  { label: 'Semi-Collaborative Zone', bg: 'bg-yellow-500 bg-opacity-30', text: 'text-yellow-100' },
+                              collab:{ label: 'Collaborative Zone', bg: 'bg-green-500 bg-opacity-30', text: 'text-green-100' },
+                            };
+                            const z = zoneMap[currentRow.zone];
+                            return z ? (
+                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full mb-4 ${z.bg} ${z.text}`}>{z.label}</span>
+                            ) : null;
+                          })()}
+                          {!currentRow.zone && <div className="mb-3" />}
                           {/* In-session elapsed timer */}
                           <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(agendaElapsed)}</div>
                           <p className="text-purple-200 text-xs mb-6">Time on this row</p>
@@ -4749,6 +4834,11 @@ const fetchCanvasTasks = async () => {
                               <span>Row {agendaCurrentRow + 1} of {rows.length}</span>
                             </span>
                           </div>
+                          <button onClick={agendaMarkComplete} disabled={agendaProceedLoading}
+                            className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm transition-colors disabled:opacity-60">
+                            {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                            Mark Complete
+                          </button>
                           <button onClick={() => openWorkspace(rowTask)}
                             className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
                             <BookOpen className="w-3.5 h-3.5" /> Open Workspace
