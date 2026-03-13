@@ -4795,7 +4795,12 @@ const fetchCanvasTasks = async () => {
                           {!currentRow.zone && <div className="mb-3" />}
                           {/* In-session elapsed timer */}
                           <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(agendaElapsed)}</div>
-                          <p className="text-purple-200 text-xs mb-6">Time on this row</p>
+                          {(() => {
+                            const prevMins = rowTask?.accumulated_time || 0;
+                            return prevMins > 0
+                              ? <p className="text-purple-200 text-xs mb-6">{prevMins < 1 ? '&lt; 1' : prevMins} min previously</p>
+                              : <p className="text-purple-200 text-xs mb-6">Time on this row</p>;
+                          })()}
                           {/* Start/pause button */}
                           <button
                             onClick={() => {
