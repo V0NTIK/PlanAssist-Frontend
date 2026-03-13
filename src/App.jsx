@@ -4418,13 +4418,7 @@ const fetchCanvasTasks = async () => {
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                                 ))}
                                               </select>
-                                              {rowTask && (
-                                                <div className="flex items-center gap-1.5 mt-1">
-                                                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                                  <span className="text-xs text-gray-400 truncate">{rowTask.class?.replace(/[\[\]]/g,'')}</span>
-                                                  {dueDate && <span className="text-xs text-gray-300">· Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>}
-                                                </div>
-                                              )}
+
                                             </div>
                                             {/* Action */}
                                             <div className="px-2 py-2">
@@ -4558,12 +4552,7 @@ const fetchCanvasTasks = async () => {
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                               ))}
                                             </select>
-                                            {rowTask && (
-                                              <div className="flex items-center gap-1.5 mt-1">
-                                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                                <span className="text-xs text-gray-400 truncate">{rowTask.class?.replace(/[\[\]]/g,'')}</span>
-                                              </div>
-                                            )}
+
                                           </div>
                                           <div className="px-2 py-2">
                                             <input type="text" value={row.action} maxLength={100} onChange={e => updateEditRow(idx, 'action', e.target.value)}
