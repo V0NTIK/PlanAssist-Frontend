@@ -164,6 +164,7 @@ const PlanAssist = () => {
   const [agendaElapsed, setAgendaElapsed] = useState(0);         // seconds on in-session timer
   const [agendaCountdown, setAgendaCountdown] = useState(null);  // seconds remaining on countdown
   const [agendaCountdownFlash, setAgendaCountdownFlash] = useState(false);
+  const [agendaBaseElapsed, setAgendaBaseElapsed] = useState(0); // task's accumulated_time in secs at row open
   const [agendaRunning, setAgendaRunning] = useState(false);
   const agendaTimerRef = React.useRef(null);    // { intervalRef, wallRef, baseElapsed, baseCountdown }
   const [agendaProceedLoading, setAgendaProceedLoading] = useState(false);
@@ -1763,13 +1764,15 @@ const fetchCanvasTasks = async () => {
 
   const openAgenda = (agenda) => {
     const row = agenda.current_row || 0;
-    const savedElapsed = agenda.current_row_elapsed || 0;
     const rowData = (agenda.rows || [])[row];
+    // Start elapsed from the task's total accumulated time (minutes → seconds), like Sessions
+    const taskAccumSecs = ((rowData?.task?.accumulated_time) || 0) * 60;
     const fullCountdown = (rowData?.timeMins || 25) * 60;
     const savedCountdown = agenda.current_row_countdown ?? fullCountdown;
     setCurrentAgenda(agenda);
     setAgendaCurrentRow(row);
-    setAgendaElapsed(savedElapsed);
+    setAgendaElapsed(taskAccumSecs);
+    setAgendaBaseElapsed(taskAccumSecs);
     setAgendaCountdown(savedCountdown);
     setAgendaCountdownFlash(savedCountdown <= 0);
     setAgendaRunning(false);
@@ -1784,7 +1787,7 @@ const fetchCanvasTasks = async () => {
     try {
       await apiCall(`/agendas/${currentAgenda.id}/save-exit`, 'POST', {
         taskId: row?.taskId ?? null,
-        elapsedSeconds: snappedElapsed,
+        elapsedSeconds: Math.max(0, snappedElapsed - agendaBaseElapsed),
         countdownSecondsRemaining: snappedCountdown,
       });
     } catch (err) {
@@ -1804,7 +1807,7 @@ const fetchCanvasTasks = async () => {
     try {
       const result = await apiCall(`/agendas/${currentAgenda.id}/proceed`, 'POST', {
         taskId: row?.taskId ?? null,
-        elapsedSeconds: snappedElapsed,
+        elapsedSeconds: Math.max(0, snappedElapsed - agendaBaseElapsed),
       });
       setAgendaTotalElapsed(prev => prev + snappedElapsed);
       if (result.finished) {
@@ -1817,8 +1820,9 @@ const fetchCanvasTasks = async () => {
         const nextRow = result.nextRow;
         const nextRowData = rows[nextRow];
         const nextCountdown = (nextRowData?.timeMins || 25) * 60;
+        const nextTaskAccumSecs = ((nextRowData?.task?.accumulated_time) || 0) * 60;
         setAgendaCurrentRow(nextRow);
-        setAgendaElapsed(0);
+        setAgendaElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
         // Update local agenda current_row
@@ -1857,7 +1861,7 @@ const fetchCanvasTasks = async () => {
     try {
       // Complete the task (marks it done, saves time)
       await apiCall(`/tasks/${currentRow.taskId}/complete`, 'POST', {
-        timeSpent: Math.round(snappedElapsed / 60)
+        timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60)
       });
       await normalizePriority();
       setTasks(prev => prev.map(t => t.id === currentRow.taskId ? { ...t, completed: true, deleted: true } : t));
@@ -1880,8 +1884,10 @@ const fetchCanvasTasks = async () => {
         });
         const nextRowData = rows[nextRow];
         const nextCountdown = (nextRowData?.timeMins || 25) * 60;
+        const nextTaskAccumSecs = ((nextRowData?.task?.accumulated_time) || 0) * 60;
         setAgendaCurrentRow(nextRow);
-        setAgendaElapsed(0);
+        setAgendaElapsed(nextTaskAccumSecs);
+        setAgendaBaseElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
@@ -4795,14 +4801,7 @@ const fetchCanvasTasks = async () => {
                           {!currentRow.zone && <div className="mb-3" />}
                           {/* In-session elapsed timer */}
                           <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(agendaElapsed)}</div>
-                          {(() => {
-                            // accumulated_time from server hydration is in minutes (snake_case);
-                            // fallback tasks state uses accumulatedTime in minutes too (stored as minutes in DB)
-                            const prevMins = rowTask?.accumulated_time ?? rowTask?.accumulatedTime ?? 0;
-                            return prevMins > 0
-                              ? <p className="text-purple-200 text-xs mb-6">{prevMins < 1 ? '&lt; 1' : Math.floor(prevMins)} min previously</p>
-                              : <p className="text-purple-200 text-xs mb-6">Time on this row</p>;
-                          })()}
+                          <p className="text-purple-200 text-xs mb-6">Time on this task</p>
                           {/* Start/pause button */}
                           <button
                             onClick={() => {
