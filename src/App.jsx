@@ -1172,101 +1172,109 @@ const PlanAssist = () => {
     }
   };
 
-const fetchCanvasTasks = async () => {
-  if (!accountSetup.canvasApiToken) {
-    alert('Please enter your Canvas API Token first');
-    return;
-  }
-  setIsLoadingTasks(true);
-  try {
-    // Fetch from Canvas API (replaces ICS calendar fetch)
-    const data = await apiCall('/canvas/sync', 'POST', {});
-    
-    // Format tasks properly for saving to database
-    // Backend expects camelCase fields
-    const formattedTasks = data.tasks.map(t => ({
-      title: t.title,
-      segment: t.segment,
-      class: t.class,
-      description: t.description,
-      url: t.url,
-      deadlineDate: t.deadlineDate,
-      deadlineTime: t.deadlineTime,
-      estimatedTime: t.estimatedTime,
-      // New Canvas API fields
-      courseId: t.courseId ?? null,
-      assignmentId: t.assignmentId ?? null,
-      pointsPossible: t.pointsPossible ?? null,
-      assignmentGroupId: t.assignmentGroupId ?? null,
-      currentScore: t.currentScore ?? null,
-      currentGrade: t.currentGrade ?? null,
-      gradingType: t.gradingType ?? 'points',
-      unlockAt: t.unlockAt ?? null,
-      lockAt: t.lockAt ?? null,
-      submittedAt: t.submittedAt ?? null,
-      isMissing: t.isMissing ?? false,
-      isLate: t.isLate ?? false,
-      completed: t.completed ?? false,
-      // Module fields
-      moduleId: t.moduleId ?? null,
-      moduleName: t.moduleName ?? null,
-      modulePosition: t.modulePosition ?? null,
-    }));
-    
-    // Save to database - this updates existing tasks and creates new ones
-    const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
-    
-    console.log(`✓ Sync complete: ${saveResult.stats.updated} updated, ${saveResult.stats.new} new, ${saveResult.stats.cleaned || 0} cleaned`);
-    
-    // CRITICAL FIX: Don't use saveResult.tasks directly as it includes deleted tasks
-    // Instead, reload from GET endpoint which properly filters deleted=false
-    await loadTasks();
-    await loadCourses(); // Refresh course grades after sync
-    
-    // Check how many new tasks we got
-    const newTasksCount = saveResult.stats.new || 0;
-    const cleanedCount = saveResult.stats.cleaned || 0;
-    
-    // Build notification message
-    let message = `Sync complete! ${saveResult.stats.updated} tasks updated`;
-    if (newTasksCount > 0) {
-      message += `, ${newTasksCount} new tasks in sidebar`;
+  const fetchCanvasTasks = async () => {
+    if (!accountSetup.canvasApiToken) {
+      alert('Please enter your Canvas API Token first');
+      return;
     }
-    if (cleanedCount > 0) {
-      message += `, ${cleanedCount} past-due tasks removed`;
+    setIsLoadingTasks(true);
+    try {
+      // Fetch from Canvas API (replaces ICS calendar fetch)
+      const data = await apiCall('/canvas/sync', 'POST', {});
+      
+      // Format tasks properly for saving to database
+      // Backend expects camelCase fields
+      if (!data || !Array.isArray(data.tasks)) {
+        throw new Error('Canvas sync returned unexpected data. Please try again.');
+      }
+      const formattedTasks = data.tasks.map(t => ({
+        title: t.title,
+        segment: t.segment,
+        class: t.class,
+        description: t.description,
+        url: t.url,
+        deadlineDate: t.deadlineDate,
+        deadlineTime: t.deadlineTime,
+        estimatedTime: t.estimatedTime,
+        // New Canvas API fields
+        courseId: t.courseId ?? null,
+        assignmentId: t.assignmentId ?? null,
+        pointsPossible: t.pointsPossible ?? null,
+        assignmentGroupId: t.assignmentGroupId ?? null,
+        currentScore: t.currentScore ?? null,
+        currentGrade: t.currentGrade ?? null,
+        gradingType: t.gradingType ?? 'points',
+        unlockAt: t.unlockAt ?? null,
+        lockAt: t.lockAt ?? null,
+        submittedAt: t.submittedAt ?? null,
+        isMissing: t.isMissing ?? false,
+        isLate: t.isLate ?? false,
+        completed: t.completed ?? false,
+        // Module fields
+        moduleId: t.moduleId ?? null,
+        moduleName: t.moduleName ?? null,
+        modulePosition: t.modulePosition ?? null,
+      }));
+      
+      // Save to database - this updates existing tasks and creates new ones
+      const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
+      
+      if (!saveResult || !saveResult.stats) {
+        throw new Error('Failed to save synced tasks. Please try again.');
+      }
+      console.log(`✓ Sync complete: ${saveResult.stats.updated} updated, ${saveResult.stats.new} new, ${saveResult.stats.cleaned || 0} cleaned`);
+      
+      // CRITICAL FIX: Don't use saveResult.tasks directly as it includes deleted tasks
+      // Instead, reload from GET endpoint which properly filters deleted=false
+      await loadTasks();
+      await loadCourses(); // Refresh course grades after sync
+      
+      // Check how many new tasks we got
+      const newTasksCount = saveResult.stats.new || 0;
+      const cleanedCount = saveResult.stats.cleaned || 0;
+      
+      // Build notification message
+      let message = `Sync complete! ${saveResult.stats.updated} tasks updated`;
+      if (newTasksCount > 0) {
+        message += `, ${newTasksCount} new tasks in sidebar`;
+      }
+      if (cleanedCount > 0) {
+        message += `, ${cleanedCount} past-due tasks removed`;
+      }
+      message += '.';
+      
+      // Don't open sidebar on first sync — server auto-accepts all tasks directly to list
+      const isFirstSync = saveResult.stats.firstSync === true;
+      if (newTasksCount > 0 && !isFirstSync) {
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true);
+      }
+      
+      alert(message);
+    } catch (error) {
+      console.error('Failed to fetch Canvas calendar:', error);
+      
+      let errorMessage = 'Sync failed.';
+      
+      if (error.message.includes('unexpected data') || error.message.includes('Failed to save')) {
+        errorMessage = error.message;
+      } else if (error.message.includes('401') || error.message.includes('invalid or expired')) {
+        errorMessage = 'Canvas API token is invalid or expired. Please update your token in Settings.';
+      } else if (error.message.includes('400')) {
+        errorMessage = 'Invalid request. Please check your Canvas API token and try again.';
+      } else if (error.message.includes('404')) {
+        errorMessage = 'Canvas data not found. Please verify your API token is correct.';
+      } else if (error.message.includes('timeout') || error.message.includes('408')) {
+        errorMessage = 'Request timeout. Please check your connection and try again.';
+      } else if (error.message) {
+        errorMessage = 'Sync failed: ' + error.message;
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setIsLoadingTasks(false);
     }
-    message += '.';
-    
-    // Don't open sidebar on first sync — server auto-accepts all tasks directly to list
-    const isFirstSync = saveResult.stats.firstSync === true;
-    if (newTasksCount > 0 && !isFirstSync) {
-      setNewTasksSidebarOpen(true);
-      setHasUnsavedChanges(true);
-    }
-    
-    alert(message);
-  } catch (error) {
-    console.error('Failed to fetch Canvas calendar:', error);
-    
-    let errorMessage = 'Failed to fetch Canvas calendar.';
-    
-    if (error.message.includes('Invalid Canvas URL')) {
-      errorMessage = 'Invalid Canvas URL. Please use the format: https://canvas.oneschoolglobal.com/feeds/calendars/user_...';
-    } else if (error.message.includes('400')) {
-      errorMessage = 'Invalid request. Please check your Canvas URL format and try again.';
-    } else if (error.message.includes('404')) {
-      errorMessage = 'Canvas calendar not found. Please verify your URL is correct.';
-    } else if (error.message.includes('timeout') || error.message.includes('408')) {
-      errorMessage = 'Request timeout. Please check your Canvas URL and try again.';
-    } else if (error.message) {
-      errorMessage = 'Failed to fetch Canvas calendar: ' + error.message;
-    }
-    
-    alert(errorMessage);
-  } finally {
-    setIsLoadingTasks(false);
-  }
-};
+  };
 
   const detectTaskType = (title) => {
     const lower = title.toLowerCase();
