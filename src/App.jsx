@@ -158,12 +158,23 @@ const PlanAssist = () => {
   // ── Agendas state ──────────────────────────────────────────────────────────
   const [agendas, setAgendas] = useState([]);
   const [agendasLoading, setAgendasLoading] = useState(false);
-  const [currentAgenda, setCurrentAgenda] = useState(null);    // agenda being worked on
-  const [agendaTaskStates, setAgendaTaskStates] = useState({}); // { taskId: { elapsed, isRunning, completed, timeSpent } }
-  const agendaTimerRefsMap = React.useRef({});                  // { taskId: { baseRef, wallRef, intervalRef } }
+  const [currentAgenda, setCurrentAgenda] = useState(null);
+  // Active agenda runtime state
+  const [agendaCurrentRow, setAgendaCurrentRow] = useState(0);
+  const [agendaElapsed, setAgendaElapsed] = useState(0);         // seconds on in-session timer
+  const [agendaCountdown, setAgendaCountdown] = useState(null);  // seconds remaining on countdown
+  const [agendaCountdownFlash, setAgendaCountdownFlash] = useState(false);
+  const [agendaRunning, setAgendaRunning] = useState(false);
+  const agendaTimerRef = React.useRef(null);    // { intervalRef, wallRef, baseElapsed, baseCountdown }
+  const [agendaProceedLoading, setAgendaProceedLoading] = useState(false);
+  const [agendaTotalElapsed, setAgendaTotalElapsed] = useState(0); // accumulated across all rows
+  const [agendaFinishedSummary, setAgendaFinishedSummary] = useState(null); // { name, totalSecs }
+  // Build / edit agenda
   const [showBuildAgenda, setShowBuildAgenda] = useState(false);
   const [buildAgendaName, setBuildAgendaName] = useState('');
-  const [buildAgendaTaskIds, setBuildAgendaTaskIds] = useState([]);
+  const [buildAgendaRows, setBuildAgendaRows] = useState([]);    // [{taskId, action, timeMins}]
+  const [editingAgenda, setEditingAgenda] = useState(null);      // agenda being edited
+  const [editAgendaRows, setEditAgendaRows] = useState([]);
   const [completionHistory, setCompletionHistory] = useState([]);
 
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
@@ -1681,34 +1692,7 @@ const fetchCanvasTasks = async () => {
     setAgendasLoading(true);
     try {
       const data = await apiCall('/agendas', 'GET');
-      // Hydrate tasks with in-memory seconds for accumulated_time
-      const hydrated = data.map(agenda => ({
-        ...agenda,
-        tasks: (agenda.tasks || []).map(t => {
-          const deadlineDateRaw = t.deadline_date
-            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
-            : null;
-          // Reconstruct dueDate the same way loadTasks does (UTC-correct)
-          let dueDate = null;
-          if (deadlineDateRaw) {
-            if (t.deadline_time !== null && t.deadline_time !== undefined) {
-              dueDate = new Date(`${deadlineDateRaw}T${t.deadline_time}Z`);
-            } else {
-              dueDate = new Date(`${deadlineDateRaw}T23:59:00`); // local time, no shift needed
-            }
-          }
-          return {
-            ...t,
-            accumulatedTime: (t.accumulated_time || 0) * 60,
-            estimatedTime: t.estimated_time,
-            userEstimate: t.user_estimated_time,
-            deadlineDateRaw,
-            dueDate,
-            sessionActive: t.session_active || false,
-          };
-        })
-      }));
-      setAgendas(hydrated);
+      setAgendas(data || []);
     } catch (err) {
       console.error('Failed to load agendas:', err);
     } finally {
@@ -1717,18 +1701,17 @@ const fetchCanvasTasks = async () => {
   };
 
   const createAgenda = async () => {
-    if (!buildAgendaName.trim() || buildAgendaTaskIds.length === 0) return;
+    if (!buildAgendaName.trim() || buildAgendaRows.length === 0) return;
     try {
-      const data = await apiCall('/agendas', 'POST', {
+      await apiCall('/agendas', 'POST', {
         name: buildAgendaName.trim(),
-        taskIds: buildAgendaTaskIds,
+        rows: buildAgendaRows,
       });
       setShowBuildAgenda(false);
       setBuildAgendaName('');
-      setBuildAgendaTaskIds([]);
+      setBuildAgendaRows([]);
       await loadAgendas();
     } catch (err) {
-      console.error('Failed to create agenda:', err);
       alert('Failed to create agenda: ' + err.message);
     }
   };
@@ -1742,169 +1725,128 @@ const fetchCanvasTasks = async () => {
     }
   };
 
+  // ── Active agenda timer logic ──────────────────────────────────────────────
+  const agendaStartTimer = (baseElapsed, baseCountdown) => {
+    if (agendaTimerRef.current) clearInterval(agendaTimerRef.current.intervalRef);
+    const wallStart = Date.now();
+    const intervalId = setInterval(() => {
+      const wallSecs = Math.floor((Date.now() - wallStart) / 1000);
+      setAgendaElapsed(baseElapsed + wallSecs);
+      const remaining = baseCountdown - wallSecs;
+      if (remaining <= 0) {
+        setAgendaCountdown(0);
+        setAgendaCountdownFlash(true);
+      } else {
+        setAgendaCountdown(remaining);
+        setAgendaCountdownFlash(false);
+      }
+    }, 500);
+    agendaTimerRef.current = { intervalRef: intervalId, wallRef: wallStart, baseElapsed, baseCountdown };
+    setAgendaRunning(true);
+  };
+
+  const agendaStopTimer = () => {
+    if (agendaTimerRef.current) {
+      clearInterval(agendaTimerRef.current.intervalRef);
+      const wallSecs = Math.floor((Date.now() - agendaTimerRef.current.wallRef) / 1000);
+      const snappedElapsed = agendaTimerRef.current.baseElapsed + wallSecs;
+      const snappedCountdown = Math.max(0, agendaTimerRef.current.baseCountdown - wallSecs);
+      agendaTimerRef.current = null;
+      setAgendaElapsed(snappedElapsed);
+      setAgendaCountdown(snappedCountdown);
+      setAgendaRunning(false);
+      return { snappedElapsed, snappedCountdown };
+    }
+    setAgendaRunning(false);
+    return { snappedElapsed: agendaElapsed, snappedCountdown: agendaCountdown };
+  };
+
   const openAgenda = (agenda) => {
-    // Build initial task states — treat deleted/completed tasks as already done
-    const initialStates = {};
-    agenda.tasks.forEach(task => {
-      const alreadyDone = task.completed || task.deleted || false;
-      initialStates[task.id] = {
-        elapsed: task.accumulatedTime || 0,
-        isRunning: false,
-        completed: alreadyDone,
-        timeSpent: alreadyDone ? (task.accumulatedTime || 0) : null,
-      };
-    });
-    setAgendaTaskStates(initialStates);
-    agendaTimerRefsMap.current = {};
+    const row = agenda.current_row || 0;
+    const savedElapsed = agenda.current_row_elapsed || 0;
+    const rowData = (agenda.rows || [])[row];
+    const fullCountdown = (rowData?.timeMins || 25) * 60;
+    const savedCountdown = agenda.current_row_countdown ?? fullCountdown;
     setCurrentAgenda(agenda);
+    setAgendaCurrentRow(row);
+    setAgendaElapsed(savedElapsed);
+    setAgendaCountdown(savedCountdown);
+    setAgendaCountdownFlash(savedCountdown <= 0);
+    setAgendaRunning(false);
+    setAgendaTotalElapsed(0);
+    agendaTimerRef.current = null;
     setCurrentPage('agenda-active');
   };
 
-  const closeAgenda = async () => {
-    // Snap and save all in-progress timers
-    const saves = [];
-    Object.entries(agendaTaskStates).forEach(([taskId, state]) => {
-      if (state.completed) return;
-      // Snap running timer to true wall-clock elapsed
-      let elapsed = state.elapsed;
-      if (state.isRunning) {
-        const refs = agendaTimerRefsMap.current[taskId];
-        if (refs) {
-          clearInterval(refs.intervalRef);
-          elapsed = refs.baseRef + Math.floor((Date.now() - refs.wallRef) / 1000);
-        }
-      }
-      if (elapsed > 0) {
-        saves.push(
-          apiCall(`/sessions/pause/${taskId}`, 'POST', {
-            accumulatedTime: Math.round(elapsed / 60) // seconds → DB minutes
-          }).catch(e => console.error(`Failed to save task ${taskId}:`, e))
-        );
-      }
-    });
-    await Promise.all(saves);
-    await normalizePriority(); // clear priority_order on any completed tasks
-    agendaTimerRefsMap.current = {};
-    setAgendaTaskStates({});
+  const agendaSaveAndExit = async () => {
+    const { snappedElapsed, snappedCountdown } = agendaStopTimer();
+    const row = (currentAgenda.rows || [])[agendaCurrentRow];
+    try {
+      await apiCall(`/agendas/${currentAgenda.id}/save-exit`, 'POST', {
+        taskId: row?.taskId ?? null,
+        elapsedSeconds: snappedElapsed,
+        countdownSecondsRemaining: snappedCountdown,
+      });
+    } catch (err) {
+      console.error('Save-exit failed:', err);
+    }
+    agendaTimerRef.current = null;
     setCurrentAgenda(null);
     setCurrentPage('agendas');
     loadAgendas();
   };
 
-  const startAgendaTimer = (taskId) => {
-    // Pause any other running timer first (rule: only one running at a time)
-    const newStates = { ...agendaTaskStates };
-    Object.keys(newStates).forEach(id => {
-      if (id !== String(taskId) && newStates[id].isRunning) {
-        // Snap that timer
-        const refs = agendaTimerRefsMap.current[id];
-        if (refs) {
-          clearInterval(refs.intervalRef);
-          const wallElapsed = Math.floor((Date.now() - refs.wallRef) / 1000);
-          newStates[id] = { ...newStates[id], elapsed: refs.baseRef + wallElapsed, isRunning: false };
-          agendaTimerRefsMap.current[id] = null;
-        } else {
-          newStates[id] = { ...newStates[id], isRunning: false };
-        }
-      }
-    });
-
-    // Start this task's timer
-    const baseElapsed = newStates[taskId]?.elapsed || 0;
-    const wallStart = Date.now();
-    const intervalId = setInterval(() => {
-      const wallElapsed = Math.floor((Date.now() - wallStart) / 1000);
-      setAgendaTaskStates(prev => ({
-        ...prev,
-        [taskId]: { ...prev[taskId], elapsed: baseElapsed + wallElapsed }
-      }));
-    }, 500);
-
-    agendaTimerRefsMap.current[taskId] = {
-      baseRef: baseElapsed,
-      wallRef: wallStart,
-      intervalRef: intervalId,
-    };
-
-    newStates[taskId] = { ...newStates[taskId], elapsed: baseElapsed, isRunning: true };
-    setAgendaTaskStates(newStates);
-  };
-
-  const pauseAgendaTimer = (taskId) => {
-    const refs = agendaTimerRefsMap.current[taskId];
-    if (!refs) return;
-    clearInterval(refs.intervalRef);
-    const wallElapsed = Math.floor((Date.now() - refs.wallRef) / 1000);
-    const snapped = refs.baseRef + wallElapsed;
-    agendaTimerRefsMap.current[taskId] = null;
-    setAgendaTaskStates(prev => ({
-      ...prev,
-      [taskId]: { ...prev[taskId], elapsed: snapped, isRunning: false }
-    }));
-  };
-
-  const completeAgendaTask = async (taskId) => {
-    const state = agendaTaskStates[taskId];
-    if (!state || state.completed) return;
-
-    // Stop timer if running
-    const refs = agendaTimerRefsMap.current[taskId];
-    let finalElapsed = state.elapsed;
-    if (refs) {
-      clearInterval(refs.intervalRef);
-      finalElapsed = refs.baseRef + Math.floor((Date.now() - refs.wallRef) / 1000);
-      agendaTimerRefsMap.current[taskId] = null;
-    }
-
+  const agendaSaveAndProceed = async () => {
+    setAgendaProceedLoading(true);
+    const { snappedElapsed } = agendaStopTimer();
+    const rows = currentAgenda.rows || [];
+    const row = rows[agendaCurrentRow];
     try {
-      await apiCall(`/tasks/${taskId}/complete`, 'POST', {
-        timeSpent: Math.round(finalElapsed / 60)
+      const result = await apiCall(`/agendas/${currentAgenda.id}/proceed`, 'POST', {
+        taskId: row?.taskId ?? null,
+        elapsedSeconds: snappedElapsed,
       });
-      await normalizePriority();
-
-      const newStates = {
-        ...agendaTaskStates,
-        [taskId]: { ...state, elapsed: finalElapsed, isRunning: false, completed: true, timeSpent: finalElapsed }
-      };
-      setAgendaTaskStates(newStates);
-
-      // Update agenda tasks list locally
-      setCurrentAgenda(prev => ({
-        ...prev,
-        tasks: prev.tasks.map(t => t.id === taskId ? { ...t, completed: true } : t)
-      }));
-      setSessionTasks(prev => prev.filter(t => t.id !== taskId));
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, completed: true, deleted: true } : t));
-
-      // Check if all tasks are now complete
-      const allDone = Object.values(newStates).every(s => s.completed);
-      if (allDone) {
-        // Mark agenda finished in DB
-        await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
-        setCurrentAgenda(prev => ({ ...prev, allDone: true }));
+      setAgendaTotalElapsed(prev => prev + snappedElapsed);
+      if (result.finished) {
+        const totalSecs = agendaTotalElapsed + snappedElapsed;
+        setAgendaFinishedSummary({ name: currentAgenda.name, totalSecs, rowCount: rows.length });
+        setCurrentAgenda(null);
+        setCurrentPage('agenda-summary');
+        loadAgendas();
+      } else {
+        const nextRow = result.nextRow;
+        const nextRowData = rows[nextRow];
+        const nextCountdown = (nextRowData?.timeMins || 25) * 60;
+        setAgendaCurrentRow(nextRow);
+        setAgendaElapsed(0);
+        setAgendaCountdown(nextCountdown);
+        setAgendaCountdownFlash(false);
+        // Update local agenda current_row
+        setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
       }
     } catch (err) {
-      console.error('Failed to complete agenda task:', err);
-      alert('Failed to complete task: ' + err.message);
+      console.error('Proceed failed:', err);
+      alert('Failed to proceed: ' + err.message);
+    } finally {
+      setAgendaProceedLoading(false);
     }
   };
 
-  const finishAgenda = async () => {
-    // Ensure agenda is marked finished in DB (may not have been called if tasks
-    // were completed in a prior session or via pre-marked state)
+  const agendaFinishLast = async () => {
+    await agendaSaveAndProceed(); // last row proceed triggers finished
+  };
+
+  const saveEditAgenda = async () => {
+    if (!editingAgenda) return;
     try {
-      await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
+      await apiCall(`/agendas/${editingAgenda.id}/rows`, 'PATCH', { rows: editAgendaRows });
+      setEditingAgenda(null);
+      setEditAgendaRows([]);
+      await loadAgendas();
     } catch (err) {
-      console.error('Failed to mark agenda finished:', err);
+      alert('Failed to save edits: ' + err.message);
     }
-    await normalizePriority(); // clear priority_order on completed tasks
-    setAgendas(prev => prev.filter(a => a.id !== currentAgenda.id));
-    agendaTimerRefsMap.current = {};
-    setAgendaTaskStates({});
-    setCurrentAgenda(null);
-    setCurrentPage('agendas');
   };
-
 
   // ── Itinerary functions ─────────────────────────────────────────────────────
 
@@ -4338,302 +4280,513 @@ const fetchCanvasTasks = async () => {
         )}
 
                 {currentPage === 'agendas' && (() => {
-          const totalEst = (tasks) => tasks.reduce((s, t) => s + (t.user_estimated_time || t.estimated_time || 0), 0);
-          return (
-            <div className="max-w-3xl mx-auto p-6">
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
-                  <p className="text-gray-500 text-sm mt-1">Group up to 3 tasks into a focused work block</p>
-                </div>
-                <button
-                  onClick={() => { setShowBuildAgenda(true); setBuildAgendaName(''); setBuildAgendaTaskIds([]); }}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
-                >
-                  <Plus className="w-4 h-4" /> Build an Agenda
-                </button>
-              </div>
-
-              {/* Build Agenda Modal */}
-              {showBuildAgenda && (() => {
-                const available = sessionTasks.filter(t => !buildAgendaTaskIds.includes(t.id));
-                return (
-                  <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
-                      <div className="p-6 border-b border-gray-100">
-                        <h3 className="text-xl font-bold text-gray-900">Build an Agenda</h3>
-                        <p className="text-sm text-gray-500 mt-1">Select 1–3 tasks and give this block a name</p>
+                  return (
+                    <div className="max-w-3xl mx-auto p-6">
+                      <div className="flex items-center justify-between mb-6">
+                        <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
+                        <button
+                          onClick={() => { setShowBuildAgenda(true); setBuildAgendaName(''); setBuildAgendaRows([]); }}
+                          className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
+                        >
+                          <Plus className="w-4 h-4" /> Build an Agenda
+                        </button>
                       </div>
-                      <div className="p-6 space-y-5">
-                        {/* Name */}
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1.5">Agenda Name</label>
-                          <input
-                            type="text"
-                            value={buildAgendaName}
-                            onChange={e => setBuildAgendaName(e.target.value)}
-                            placeholder="e.g. Period 2, On the Bus, NEST..."
-                            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                          />
-                        </div>
 
-                        {/* Selected tasks */}
-                        {buildAgendaTaskIds.length > 0 && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                              Selected Tasks ({buildAgendaTaskIds.length}/3)
-                            </label>
-                            <div className="space-y-2">
-                              {buildAgendaTaskIds.map((id, idx) => {
-                                const task = sessionTasks.find(t => t.id === id);
-                                if (!task) return null;
-                                return (
-                                  <div key={id} className="flex items-center gap-3 p-2.5 bg-purple-50 border border-purple-200 rounded-lg">
-                                    <span className="w-5 h-5 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</span>
-                                    <span className="flex-1 text-sm font-medium text-gray-900 truncate">{cleanTaskTitle(task)}</span>
-                                    <span className="text-xs text-gray-500">{task.userEstimate || task.estimatedTime}m</span>
-                                    <button onClick={() => setBuildAgendaTaskIds(prev => prev.filter(i => i !== id))}
-                                      className="text-gray-400 hover:text-red-500 transition-colors">
-                                      <X className="w-4 h-4" />
+                      {/* ── BUILD AGENDA PANEL ── */}
+                      {showBuildAgenda && (() => {
+                        const canAddRow = buildAgendaRows.length < 10;
+                        const addRow = () => {
+                          if (!canAddRow) return;
+                          setBuildAgendaRows(prev => [...prev, { taskId: null, action: '', timeMins: 25 }]);
+                        };
+                        const removeRow = (idx) => setBuildAgendaRows(prev => prev.filter((_, i) => i !== idx));
+                        const updateRow = (idx, field, val) => setBuildAgendaRows(prev =>
+                          prev.map((r, i) => i === idx ? { ...r, [field]: val } : r)
+                        );
+                        const setRowTask = (idx, taskId) => {
+                          const task = sessionTasks.find(t => t.id === taskId) || tasks.find(t => t.id === taskId);
+                          const defaultTime = task ? (task.userEstimate || task.user_estimated_time || task.estimatedTime || task.estimated_time || 25) : 25;
+                          setBuildAgendaRows(prev => prev.map((r, i) =>
+                            i === idx ? { ...r, taskId, timeMins: defaultTime } : r
+                          ));
+                        };
+                        const allTasksSelected = buildAgendaRows.length > 0 && buildAgendaRows.every(r => r.taskId);
+                        return (
+                          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                              <div className="p-6 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                                <div>
+                                  <h3 className="text-xl font-bold text-gray-900">Build an Agenda</h3>
+                                  <p className="text-sm text-gray-500 mt-0.5">Add up to 10 rows. Each row = one task action.</p>
+                                </div>
+                                <button onClick={() => setShowBuildAgenda(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                              </div>
+                              <div className="p-6 flex-1 overflow-y-auto space-y-4">
+                                {/* Name */}
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Agenda Name</label>
+                                  <input type="text" value={buildAgendaName} onChange={e => setBuildAgendaName(e.target.value)}
+                                    placeholder="e.g. Period 2, On the Bus, NEST..."
+                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm" />
+                                </div>
+                                {/* Rows table */}
+                                <div>
+                                  <label className="block text-sm font-medium text-gray-700 mb-2">Rows ({buildAgendaRows.length}/10)</label>
+                                  {buildAgendaRows.length > 0 && (
+                                    <div className="border border-gray-200 rounded-xl overflow-hidden mb-3">
+                                      {/* Header */}
+                                      <div className="grid grid-cols-[32px_1fr_2fr_90px_32px] gap-0 bg-gray-50 border-b border-gray-200">
+                                        <div className="px-2 py-2.5 text-xs font-semibold text-gray-500 text-center">#</div>
+                                        <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Task</div>
+                                        <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Action</div>
+                                        <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Time (min)</div>
+                                        <div />
+                                      </div>
+                                      {/* Rows */}
+                                      {buildAgendaRows.map((row, idx) => {
+                                        const rowTask = row.taskId ? (sessionTasks.find(t => t.id === row.taskId) || tasks.find(t => t.id === row.taskId)) : null;
+                                        const classColor = rowTask ? getClassColor(rowTask.class) : '#d1d5db';
+                                        const dueDate = rowTask ? (tasks.find(t => t.id === rowTask.id)?.dueDate) : null;
+                                        return (
+                                          <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
+                                            {/* Row number */}
+                                            <div className="flex items-center justify-center py-3">
+                                              <span className="w-5 h-5 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">{idx + 1}</span>
+                                            </div>
+                                            {/* Task picker */}
+                                            <div className="px-2 py-2">
+                                              <select
+                                                value={row.taskId || ''}
+                                                onChange={e => setRowTask(idx, parseInt(e.target.value) || null)}
+                                                className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
+                                              >
+                                                <option value="">— pick task —</option>
+                                                {sessionTasks.map(t => (
+                                                  <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
+                                                ))}
+                                              </select>
+                                              {rowTask && (
+                                                <div className="flex items-center gap-1.5 mt-1">
+                                                  <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                                  <span className="text-xs text-gray-400 truncate">{rowTask.class?.replace(/[\[\]]/g,'')}</span>
+                                                  {dueDate && <span className="text-xs text-gray-300">· Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>}
+                                                </div>
+                                              )}
+                                            </div>
+                                            {/* Action */}
+                                            <div className="px-2 py-2">
+                                              <input type="text" value={row.action} maxLength={100}
+                                                onChange={e => updateRow(idx, 'action', e.target.value)}
+                                                placeholder="Work on Task"
+                                                className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500" />
+                                            </div>
+                                            {/* Time */}
+                                            <div className="px-2 py-2">
+                                              <input type="number" min={1} max={300} value={row.timeMins}
+                                                onChange={e => updateRow(idx, 'timeMins', parseInt(e.target.value) || 1)}
+                                                className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 text-center" />
+                                            </div>
+                                            {/* Remove */}
+                                            <div className="flex items-center justify-center">
+                                              <button onClick={() => removeRow(idx)} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                                                <X className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                  {/* Add row button */}
+                                  {canAddRow && (
+                                    <button onClick={addRow}
+                                      className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-purple-400 hover:text-purple-500 transition-colors text-sm">
+                                      <Plus className="w-4 h-4" /> Add Row
                                     </button>
-                                  </div>
-                                );
-                              })}
+                                  )}
+                                </div>
+                              </div>
+                              <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
+                                <button onClick={() => setShowBuildAgenda(false)}
+                                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                                <button onClick={createAgenda}
+                                  disabled={!buildAgendaName.trim() || buildAgendaRows.length === 0 || !allTasksSelected}
+                                  className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                  Create Agenda
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        )}
+                        );
+                      })()}
 
-                        {/* Available tasks */}
-                        {buildAgendaTaskIds.length < 3 && (
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1.5">Add Tasks</label>
-                            {available.length === 0 ? (
-                              <p className="text-sm text-gray-400 italic">No more tasks available</p>
-                            ) : (
-                              <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                                {available.map(task => (
-                                  <button key={task.id}
-                                    onClick={() => setBuildAgendaTaskIds(prev => [...prev, task.id])}
-                                    className="w-full flex items-center gap-3 p-2.5 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 transition-colors text-left"
-                                  >
-                                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(task.class) }} />
-                                    <span className="flex-1 text-sm text-gray-900 truncate">{cleanTaskTitle(task)}</span>
-                                    <span className="text-xs text-gray-400">{task.userEstimate || task.estimatedTime}m</span>
-                                    <Plus className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                                  </button>
-                                ))}
+                      {/* ── EDIT AGENDA MODAL ── */}
+                      {editingAgenda && (() => {
+                        const lockedCount = (editingAgenda.current_row || 0) + 1;
+                        const canAddEditRow = editAgendaRows.length < 10;
+                        const addEditRow = () => {
+                          if (!canAddEditRow) return;
+                          setEditAgendaRows(prev => [...prev, { rowIndex: lockedCount + prev.length, taskId: null, action: '', timeMins: 25 }]);
+                        };
+                        const removeEditRow = (idx) => setEditAgendaRows(prev => prev.filter((_, i) => i !== idx));
+                        const updateEditRow = (idx, field, val) => setEditAgendaRows(prev =>
+                          prev.map((r, i) => i === idx ? { ...r, [field]: val } : r)
+                        );
+                        const setEditRowTask = (idx, taskId) => {
+                          const task = sessionTasks.find(t => t.id === taskId) || tasks.find(t => t.id === taskId);
+                          const defaultTime = task ? (task.userEstimate || task.user_estimated_time || task.estimatedTime || task.estimated_time || 25) : 25;
+                          setEditAgendaRows(prev => prev.map((r, i) =>
+                            i === idx ? { ...r, taskId, timeMins: defaultTime } : r
+                          ));
+                        };
+                        const lockedRows = (editingAgenda.rows || []).slice(0, lockedCount);
+                        return (
+                          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col">
+                              <div className="p-6 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                                <div>
+                                  <h3 className="text-xl font-bold text-gray-900">Edit Agenda</h3>
+                                  <p className="text-sm text-gray-500 mt-0.5">Rows 1–{lockedCount} are locked (current or completed). You can edit rows {lockedCount+1}+.</p>
+                                </div>
+                                <button onClick={() => setEditingAgenda(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
                               </div>
-                            )}
+                              <div className="p-6 flex-1 overflow-y-auto space-y-3">
+                                {/* Locked rows preview */}
+                                {lockedRows.length > 0 && (
+                                  <div className="border border-gray-100 rounded-xl overflow-hidden opacity-50">
+                                    {lockedRows.map((row, idx) => {
+                                      const rowTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
+                                      return (
+                                        <div key={idx} className="flex items-center gap-3 px-4 py-2.5 bg-gray-50 border-b border-gray-100 last:border-b-0">
+                                          <span className="w-5 h-5 bg-gray-300 text-white rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">{idx+1}</span>
+                                          <span className="text-xs text-gray-500 flex-1 truncate">{rowTask ? cleanTaskTitle(rowTask) : `Task ${row.taskId}`}</span>
+                                          <span className="text-xs text-gray-400">{row.action || 'Work on Task'}</span>
+                                          <span className="text-xs text-gray-400 w-12 text-right">{row.timeMins}m</span>
+                                          <span className="text-xs bg-gray-200 text-gray-500 px-1.5 py-0.5 rounded">Locked</span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {/* Editable rows */}
+                                {editAgendaRows.length > 0 && (
+                                  <div className="border border-gray-200 rounded-xl overflow-hidden">
+                                    <div className="grid grid-cols-[32px_1fr_2fr_90px_32px] bg-gray-50 border-b border-gray-200">
+                                      <div className="px-2 py-2.5 text-xs font-semibold text-gray-500 text-center">#</div>
+                                      <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Task</div>
+                                      <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Action</div>
+                                      <div className="px-3 py-2.5 text-xs font-semibold text-gray-500">Time (min)</div>
+                                      <div />
+                                    </div>
+                                    {editAgendaRows.map((row, idx) => {
+                                      const rowTask = row.taskId ? (sessionTasks.find(t => t.id === row.taskId) || tasks.find(t => t.id === row.taskId)) : null;
+                                      const classColor = rowTask ? getClassColor(rowTask.class) : '#d1d5db';
+                                      return (
+                                        <div key={idx} className="grid grid-cols-[32px_1fr_2fr_90px_32px] gap-0 border-b border-gray-100 last:border-b-0 items-center">
+                                          <div className="flex items-center justify-center py-3">
+                                            <span className="w-5 h-5 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs font-bold">{lockedCount + idx + 1}</span>
+                                          </div>
+                                          <div className="px-2 py-2">
+                                            <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
+                                              className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
+                                              <option value="">— pick task —</option>
+                                              {sessionTasks.map(t => (
+                                                <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
+                                              ))}
+                                            </select>
+                                            {rowTask && (
+                                              <div className="flex items-center gap-1.5 mt-1">
+                                                <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                                <span className="text-xs text-gray-400 truncate">{rowTask.class?.replace(/[\[\]]/g,'')}</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div className="px-2 py-2">
+                                            <input type="text" value={row.action} maxLength={100} onChange={e => updateEditRow(idx, 'action', e.target.value)}
+                                              placeholder="Work on Task"
+                                              className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500" />
+                                          </div>
+                                          <div className="px-2 py-2">
+                                            <input type="number" min={1} max={300} value={row.timeMins} onChange={e => updateEditRow(idx, 'timeMins', parseInt(e.target.value) || 1)}
+                                              className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500 text-center" />
+                                          </div>
+                                          <div className="flex items-center justify-center">
+                                            <button onClick={() => removeEditRow(idx)} className="text-gray-300 hover:text-red-400 transition-colors p-1">
+                                              <X className="w-3.5 h-3.5" />
+                                            </button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                                {canAddEditRow && (
+                                  <button onClick={addEditRow}
+                                    className="w-full flex items-center justify-center gap-2 py-2.5 border-2 border-dashed border-gray-200 rounded-xl text-gray-400 hover:border-purple-400 hover:text-purple-500 transition-colors text-sm">
+                                    <Plus className="w-4 h-4" /> Add Row
+                                  </button>
+                                )}
+                              </div>
+                              <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
+                                <button onClick={() => setEditingAgenda(null)}
+                                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                                <button onClick={saveEditAgenda}
+                                  className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors">Save Changes</button>
+                              </div>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                      <div className="p-6 border-t border-gray-100 flex gap-3">
-                        <button onClick={() => setShowBuildAgenda(false)}
-                          className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium">
-                          Cancel
-                        </button>
-                        <button
-                          onClick={createAgenda}
-                          disabled={!buildAgendaName.trim() || buildAgendaTaskIds.length === 0}
-                          className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        >
-                          Create Agenda
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
+                        );
+                      })()}
 
-              {/* Agenda list */}
-              {agendasLoading ? (
-                <div className="flex items-center justify-center py-16">
-                  <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : agendas.length === 0 ? (
-                <div className="text-center py-16 text-gray-400">
-                  <LayoutList className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                  <p className="font-medium">No agendas yet</p>
-                  <p className="text-sm mt-1">Build an agenda to group tasks into a focused work block.</p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {agendas.map(agenda => {
-                    const totalMins = totalEst(agenda.tasks);
-                    return (
-                      <div key={agenda.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                        {/* Agenda header */}
-                        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                          <div>
-                            <h3 className="font-bold text-gray-900 text-lg">{agenda.name}</h3>
-                            <p className="text-sm text-gray-400 mt-0.5">{agenda.tasks.length} task{agenda.tasks.length !== 1 ? 's' : ''} · {totalMins} min total</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => openAgenda(agenda)}
-                              className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors"
-                            >
-                              <Play className="w-3.5 h-3.5" /> Open Agenda
-                            </button>
-                            <button onClick={() => deleteAgenda(agenda.id)}
-                              className="p-2 text-gray-300 hover:text-red-400 transition-colors" title="Delete agenda">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
+                      {/* ── AGENDA LIST ── */}
+                      {agendasLoading ? (
+                        <div className="flex items-center justify-center py-16">
+                          <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
                         </div>
-                        {/* Task previews */}
-                        <div className="divide-y divide-gray-50">
-                          {agenda.tasks.map((task, idx) => {
-                            const classColor = getClassColor(task.class);
-                            const hasProgress = (task.accumulatedTime || 0) > 0;
-                            // Use pre-parsed dueDate from tasks state if available (UTC-corrected)
-                            const agendaTaskFull = tasks.find(t => t.id === task.id);
-                            const dueLabel = agendaTaskFull?.dueDate
-                              ? agendaTaskFull.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                              : task.deadlineDateRaw
-                                ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                                : '—';
+                      ) : agendas.length === 0 ? (
+                        <div className="text-center py-16 text-gray-400">
+                          <LayoutList className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                          <p className="font-medium">No agendas yet</p>
+                          <p className="text-sm mt-1">Build an agenda to plan a focused work block row by row.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {agendas.map(agenda => {
+                            const rows = agenda.rows || [];
+                            const currentRowIdx = agenda.current_row || 0;
+                            const currentRowData = rows[currentRowIdx];
+                            const currentRowTask = currentRowData?.task;
+                            const totalMins = rows.reduce((s, r) => s + (r.timeMins || 0), 0);
+                            const classColor = currentRowTask ? getClassColor(currentRowTask.class) : '#a855f7';
+                            const dueDate = currentRowTask ? tasks.find(t => t.id === currentRowTask.id)?.dueDate : null;
                             return (
-                              <div key={task.id} className="flex items-center gap-4 px-5 py-3">
-                                <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                <span className="w-5 h-5 bg-gray-100 text-gray-500 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">{idx + 1}</span>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium text-gray-900 truncate">{cleanTaskTitle(task)}</p>
-                                  <div className="flex items-center gap-3 mt-0.5">
-                                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                                      <Clock className="w-3 h-3" />{task.userEstimate || task.estimatedTime} min
-                                    </span>
-                                    <span className="text-xs text-gray-400 flex items-center gap-1">
-                                      <Calendar className="w-3 h-3" />Due {dueLabel}
-                                    </span>
-                                    {hasProgress && (
-                                      <span className="text-xs text-blue-500 font-medium flex items-center gap-1">
-                                        <Timer className="w-3 h-3" />{Math.floor((task.accumulatedTime || 0) / 60)} min logged
-                                      </span>
-                                    )}
+                              <div key={agenda.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                                  <div>
+                                    <h3 className="font-bold text-gray-900 text-lg">{agenda.name}</h3>
+                                    <p className="text-sm text-gray-400 mt-0.5">{rows.length} row{rows.length !== 1 ? 's' : ''} · {totalMins} min total · Row {currentRowIdx + 1} of {rows.length}</p>
+                                  </div>
+                                  <div className="flex items-center gap-2">
+                                    <button onClick={() => {
+                                      setEditingAgenda(agenda);
+                                      const lockedCount = (agenda.current_row || 0) + 1;
+                                      const editableRows = rows.slice(lockedCount).map((r, i) => ({ ...r, rowIndex: lockedCount + i }));
+                                      setEditAgendaRows(editableRows);
+                                    }} className="p-2 text-gray-300 hover:text-purple-500 transition-colors" title="Edit agenda">
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    <button onClick={() => openAgenda(agenda)}
+                                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors">
+                                      <Play className="w-3.5 h-3.5" /> Open
+                                    </button>
+                                    <button onClick={() => deleteAgenda(agenda.id)}
+                                      className="p-2 text-gray-300 hover:text-red-400 transition-colors" title="Delete agenda">
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
                                   </div>
                                 </div>
+                                {/* Current row preview */}
+                                {currentRowData && (
+                                  <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center gap-3">
+                                    <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                    <div className="flex-shrink-0">
+                                      <span className="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">{currentRowIdx + 1}</span>
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-sm font-semibold text-gray-900 truncate">{currentRowTask ? cleanTaskTitle(currentRowTask) : `Task ${currentRowData.taskId}`}</p>
+                                      <p className="text-xs text-purple-600 mt-0.5 truncate">{currentRowData.action || 'Work on Task'}</p>
+                                    </div>
+                                    <div className="flex-shrink-0 text-right">
+                                      <p className="text-sm font-bold text-gray-700">{currentRowData.timeMins}m</p>
+                                      {dueDate && <p className="text-xs text-gray-400">Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</p>}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
                         </div>
-                      </div>
-                    );
-                  })}
+                      )}
+                    </div>
+                  );
+                })()}
+
+        {currentPage === 'agenda-active' && currentAgenda && (() => {
+          const rows = currentAgenda.rows || [];
+          const currentRow = rows[agendaCurrentRow];
+          const isLastRow = agendaCurrentRow >= rows.length - 1;
+          const rowTask = currentRow?.task || (currentRow?.taskId ? tasks.find(t => t.id === currentRow.taskId) : null);
+          const classColor = rowTask ? getClassColor(rowTask.class) : '#a855f7';
+          const dueDate = rowTask ? tasks.find(t => t.id === rowTask.id)?.dueDate : null;
+          const countdownMins = Math.floor((agendaCountdown || 0) / 60);
+          const countdownSecs = (agendaCountdown || 0) % 60;
+          const countdownStr = `${String(countdownMins).padStart(2,'0')}:${String(countdownSecs).padStart(2,'0')}`;
+
+          return (
+            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 flex flex-col">
+              {/* Top bar */}
+              <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
+                <h2 className="text-lg font-bold text-gray-900">{currentAgenda.name}</h2>
+                <div className="flex items-center gap-3">
+                  {/* Countdown timer */}
+                  <div className={`flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-lg font-bold transition-colors ${
+                    agendaCountdownFlash ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-gray-100 text-gray-700'
+                  }`}>
+                    <Timer className="w-4 h-4" />
+                    {countdownStr}
+                  </div>
+                  {/* Save and Proceed / Finish Agenda */}
+                  {isLastRow ? (
+                    <button onClick={agendaFinishLast} disabled={agendaProceedLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm transition-colors disabled:opacity-60">
+                      {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+                      Finish Agenda
+                    </button>
+                  ) : (
+                    <button onClick={agendaSaveAndProceed} disabled={agendaProceedLoading}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors disabled:opacity-60">
+                      {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <ChevronRight className="w-4 h-4" />}
+                      Save &amp; Proceed
+                    </button>
+                  )}
+                  <button onClick={agendaSaveAndExit}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 text-sm transition-colors">
+                    <X className="w-4 h-4" /> Save &amp; Exit
+                  </button>
                 </div>
-              )}
+              </div>
+
+              {/* Main content: row tracker + in-session card */}
+              <div className="flex flex-1 overflow-hidden">
+                {/* ── Left: Row tracker ── */}
+                <div className="w-56 flex-shrink-0 bg-white border-r border-gray-200 overflow-y-auto">
+                  <div className="p-4">
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Agenda Rows</p>
+                    <div className="space-y-1">
+                      {rows.map((row, idx) => {
+                        const isCurrentRow = idx === agendaCurrentRow;
+                        const isPast = idx < agendaCurrentRow;
+                        const rTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
+                        const rColor = rTask ? getClassColor(rTask.class) : '#d1d5db';
+                        return (
+                          <div key={idx} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-colors ${
+                            isCurrentRow ? 'bg-purple-100 border border-purple-300' :
+                            isPast ? 'opacity-40' : 'hover:bg-gray-50'
+                          }`}>
+                            <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: isPast ? '#d1d5db' : isCurrentRow ? '#7c3aed' : rColor }} />
+                            <div className="flex-shrink-0">
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                                isCurrentRow ? 'bg-purple-600 text-white' : isPast ? 'bg-gray-300 text-white' : 'bg-gray-100 text-gray-500'
+                              }`}>{idx + 1}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className={`text-xs font-medium truncate ${isCurrentRow ? 'text-purple-900' : 'text-gray-700'}`}>
+                                {rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}
+                              </p>
+                              <p className="text-xs text-gray-400 truncate">{row.action || 'Work on Task'} · {row.timeMins}m</p>
+                            </div>
+                            {isPast && <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Right: In-session card ── */}
+                <div className="flex-1 flex items-center justify-center p-6">
+                  <div className="w-full max-w-md">
+                    {currentRow ? (
+                      <div className="rounded-2xl shadow-lg overflow-hidden">
+                        {/* Session card top */}
+                        <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white p-7 flex flex-col items-center">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                            <span className="text-purple-200 text-xs font-medium truncate max-w-[200px]">
+                              {rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class'}
+                            </span>
+                          </div>
+                          {rowTask?.url ? (
+                            <a href={rowTask.url} target="_blank" rel="noopener noreferrer"
+                              className="text-lg font-bold text-center mb-1 hover:underline leading-tight line-clamp-2">
+                              {rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow.taskId}`}
+                            </a>
+                          ) : (
+                            <p className="text-lg font-bold text-center mb-1 leading-tight line-clamp-2">
+                              {rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow.taskId}`}
+                            </p>
+                          )}
+                          {/* Action label */}
+                          <p className="text-purple-200 text-sm mb-5 italic">"{currentRow.action || 'Work on Task'}"</p>
+                          {/* In-session elapsed timer */}
+                          <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(agendaElapsed)}</div>
+                          <p className="text-purple-200 text-xs mb-6">Time on this row</p>
+                          {/* Start/pause button */}
+                          <button
+                            onClick={() => {
+                              if (agendaRunning) {
+                                agendaStopTimer();
+                              } else {
+                                agendaStartTimer(agendaElapsed, agendaCountdown ?? (currentRow.timeMins * 60));
+                              }
+                            }}
+                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg font-semibold text-sm transition-colors"
+                          >
+                            {agendaRunning
+                              ? <><Pause className="w-4 h-4" /> Pause Timer</>
+                              : <><Play className="w-4 h-4" /> {agendaElapsed > 0 ? 'Resume Timer' : 'Start Timer'}</>
+                            }
+                          </button>
+                        </div>
+                        {/* Session card bottom */}
+                        <div className="bg-white p-4 space-y-2">
+                          <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
+                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Est. {rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—'} min</span>
+                            {dueDate && (
+                              <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
+                            )}
+                            <span className="flex items-center gap-1 text-purple-500 font-medium">
+                              <span>Row {agendaCurrentRow + 1} of {rows.length}</span>
+                            </span>
+                          </div>
+                          <button onClick={() => openWorkspace(rowTask)}
+                            className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
+                            <BookOpen className="w-3.5 h-3.5" /> Open Workspace
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-gray-400 text-center">No row data available.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           );
         })()}
 
-        {currentPage === 'agenda-active' && currentAgenda && (() => {
-          const allDone = currentAgenda.allDone || Object.values(agendaTaskStates).every(s => s.completed);
+        {currentPage === 'agenda-summary' && agendaFinishedSummary && (() => {
+          const totalMins = Math.floor(agendaFinishedSummary.totalSecs / 60);
+          const totalSecsRemainder = agendaFinishedSummary.totalSecs % 60;
           return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50">
-              {/* Top bar */}
-              <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                <div>
-                  <h2 className="text-xl font-bold text-gray-900">{currentAgenda.name}</h2>
-                  {(() => {
-                    const remaining = currentAgenda.tasks.filter(t => !agendaTaskStates[t.id]?.completed).length;
-                    const total = currentAgenda.tasks.length;
-                    return <p className="text-sm text-gray-400">{remaining} of {total} task{total !== 1 ? 's' : ''} remaining</p>;
-                  })()}
+            <div className="min-h-screen bg-gradient-to-br from-purple-600 to-blue-600 flex items-center justify-center p-6">
+              <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-10 text-center">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                  <Check className="w-8 h-8 text-green-500" />
                 </div>
-                {allDone ? (
-                  <button onClick={finishAgenda}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-colors">
-                    <Check className="w-4 h-4" /> Finish Agenda
-                  </button>
-                ) : (
-                  <button onClick={closeAgenda}
-                    className="flex items-center gap-2 px-5 py-2.5 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
-                    <X className="w-4 h-4" /> Close Agenda
-                  </button>
-                )}
-              </div>
-
-              {/* Task cards side by side */}
-              <div className={`p-6 grid gap-5 ${
-                currentAgenda.tasks.length === 1 ? 'grid-cols-1 max-w-md mx-auto' :
-                currentAgenda.tasks.length === 2 ? 'grid-cols-2 max-w-3xl mx-auto' :
-                'grid-cols-3 max-w-5xl mx-auto'
-              }`}>
-                {currentAgenda.tasks.map(task => {
-                  const state = agendaTaskStates[task.id] || { elapsed: 0, isRunning: false, completed: false, timeSpent: null };
-                  const classColor = getClassColor(task.class);
-
-                  // Completion card
-                  if (state.completed) {
-                    return (
-                      <div key={task.id} className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-2xl p-6 flex flex-col items-center justify-center text-center shadow-lg min-h-[420px]">
-                        <Check className="w-12 h-12 mb-4 opacity-90" />
-                        <h3 className="font-bold text-lg mb-1 leading-tight">{cleanTaskTitle(task)}</h3>
-                        <p className="text-green-100 text-sm mb-4">{task.class ? task.class.replace(/[\[\]]/g, '') : ''}</p>
-                        <div className="text-4xl font-bold mb-1">{formatTime(state.timeSpent || 0)}</div>
-                        <p className="text-green-200 text-sm">Total time spent</p>
-                      </div>
-                    );
-                  }
-
-                  // Active in-session card
-                  return (
-                    <div key={task.id} className="flex flex-col rounded-2xl shadow-lg overflow-hidden min-h-[420px]">
-                      {/* Timer section */}
-                      <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white p-6 flex flex-col items-center flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: classColor }} />
-                          <span className="text-purple-200 text-xs font-medium truncate max-w-[160px]">
-                            {task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}
-                          </span>
-                        </div>
-                        <a href={task.url} target="_blank" rel="noopener noreferrer"
-                          className="text-base font-bold text-center mb-5 hover:underline leading-tight line-clamp-2">
-                          {cleanTaskTitle(task)}
-                        </a>
-                        <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(state.elapsed)}</div>
-                        <p className="text-purple-200 text-xs mb-5">Time on this task</p>
-
-                        {/* Timer controls */}
-                        <button
-                          onClick={() => state.isRunning ? pauseAgendaTimer(task.id) : startAgendaTimer(task.id)}
-                          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg font-semibold text-sm transition-colors"
-                        >
-                          {state.isRunning
-                            ? <><Pause className="w-4 h-4" /> Pause Timer</>
-                            : <><Play className="w-4 h-4" /> {state.elapsed > 0 ? 'Resume Timer' : 'Start Timer'}</>
-                          }
-                        </button>
-                      </div>
-
-                      {/* Bottom action section */}
-                      <div className="bg-white p-4 space-y-2">
-                        <div className="flex items-center gap-3 text-xs text-gray-400 mb-3 flex-wrap">
-                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Est. {task.userEstimate || task.estimatedTime} min</span>
-                          {(task.deadlineDateRaw || tasks.find(t => t.id === task.id)?.dueDate) && (
-                            <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />
-                              Due {(tasks.find(t => t.id === task.id)?.dueDate || new Date(task.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                            </span>
-                          )}
-                          {(task.accumulatedTime || 0) > 0 && (
-                            <span className="flex items-center gap-1 text-blue-500 font-medium">
-                              <Timer className="w-3 h-3" />{Math.floor(task.accumulatedTime / 60)} min prev.
-                            </span>
-                          )}
-                        </div>
-                        <button onClick={() => completeAgendaTask(task.id)}
-                          className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm transition-colors">
-                          <Check className="w-4 h-4" /> Mark Complete
-                        </button>
-                        <button onClick={() => openWorkspace(task)}
-                          className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
-                          <BookOpen className="w-3.5 h-3.5" /> Open Workspace
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                <h2 className="text-2xl font-bold text-gray-900 mb-1">Agenda Complete!</h2>
+                <p className="text-gray-500 text-sm mb-8">{agendaFinishedSummary.name}</p>
+                <div className="bg-gray-50 rounded-2xl p-6 mb-8">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">Total Time in Agenda</p>
+                  <p className="text-5xl font-bold text-gray-900 tabular-nums">
+                    {String(totalMins).padStart(2,'0')}:{String(totalSecsRemainder).padStart(2,'0')}
+                  </p>
+                  <p className="text-sm text-gray-400 mt-1">{agendaFinishedSummary.rowCount} row{agendaFinishedSummary.rowCount !== 1 ? 's' : ''} completed</p>
+                </div>
+                <button onClick={() => { setAgendaFinishedSummary(null); setCurrentPage('agendas'); loadAgendas(); }}
+                  className="w-full py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors">
+                  Back to Agendas
+                </button>
               </div>
             </div>
           );
@@ -5042,7 +5195,7 @@ const fetchCanvasTasks = async () => {
                                         className="w-full flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-left transition-colors">
                                         <LayoutList className="w-4 h-4 text-purple-400 flex-shrink-0" />
                                         <span className="text-sm text-gray-900 flex-1 truncate">{agenda.name}</span>
-                                        <span className="text-xs text-gray-400">{agenda.tasks?.length || 0} tasks</span>
+                                        <span className="text-xs text-gray-400">{(agenda.rows?.length || 0)} rows</span>
                                       </button>
                                     ))}
                                   </div>
