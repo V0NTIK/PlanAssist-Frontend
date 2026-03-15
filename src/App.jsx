@@ -212,6 +212,15 @@ const PlanAssist = () => {
   const [workspaceTab, setWorkspaceTab] = useState('canvas');
   const [savingNotes, setSavingNotes] = useState(false);
   const [canvasWindow, setCanvasWindow] = useState(null);
+  const [workspaceSource, setWorkspaceSource] = useState('session'); // 'session' | 'agenda'
+  const [workspaceToolEmbed, setWorkspaceToolEmbed] = useState(null); // null | 'calculator' | 'desmos'
+  const [workspaceIntegrationEmbed, setWorkspaceIntegrationEmbed] = useState(null); // null | integration key
+  // Free timer state (Session workspace Timer tab only)
+  const [freeTimerMins, setFreeTimerMins] = useState('');
+  const [freeTimerSecs, setFreeTimerSecs] = useState(0);
+  const [freeTimerRunning, setFreeTimerRunning] = useState(false);
+  const [freeTimerDone, setFreeTimerDone] = useState(false);
+  const freeTimerIntervalRef = React.useRef(null);
   
   // Whiteboard state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -2386,9 +2395,18 @@ const PlanAssist = () => {
     }
   };
 
-  const openWorkspace = async (task) => {
+  const openWorkspace = async (task, source = 'session') => {
     setWorkspaceTask(task);
     setWorkspaceTab('canvas');
+    setWorkspaceSource(source);
+    setWorkspaceToolEmbed(null);
+    setWorkspaceIntegrationEmbed(null);
+    // Reset free timer
+    setFreeTimerMins('');
+    setFreeTimerSecs(0);
+    setFreeTimerRunning(false);
+    setFreeTimerDone(false);
+    if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
     await loadTaskNotes(task.id);
     setShowWorkspace(true);
     
@@ -2406,10 +2424,15 @@ const PlanAssist = () => {
     if (canvasWindow && !canvasWindow.closed) {
       canvasWindow.close();
     }
+    // Stop free timer if running
+    if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
+    setFreeTimerRunning(false);
     setShowWorkspace(false);
     setWorkspaceTask(null);
     setWorkspaceNotes('');
     setCanvasWindow(null);
+    setWorkspaceToolEmbed(null);
+    setWorkspaceIntegrationEmbed(null);
     // Restore window to full size
     try {
       window.moveTo(0, 0);
@@ -2834,6 +2857,35 @@ const PlanAssist = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Free workspace timer (Session mode only) helpers
+  const startFreeTimer = () => {
+    const totalSecs = parseInt(freeTimerMins) * 60;
+    if (!totalSecs || totalSecs <= 0) return;
+    setFreeTimerSecs(totalSecs);
+    setFreeTimerDone(false);
+    setFreeTimerRunning(true);
+    if (freeTimerIntervalRef.current) clearInterval(freeTimerIntervalRef.current);
+    freeTimerIntervalRef.current = setInterval(() => {
+      setFreeTimerSecs(prev => {
+        if (prev <= 1) {
+          clearInterval(freeTimerIntervalRef.current);
+          freeTimerIntervalRef.current = null;
+          setFreeTimerRunning(false);
+          setFreeTimerDone(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+  const resetFreeTimer = () => {
+    if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
+    setFreeTimerRunning(false);
+    setFreeTimerDone(false);
+    setFreeTimerSecs(0);
+    setFreeTimerMins('');
+  };
+
   // Handle Escape key to close notes popup
   useEffect(() => {
     const handleEscape = (e) => {
@@ -3083,6 +3135,8 @@ const PlanAssist = () => {
     if (workspaceTab === 'notes' && tab !== 'notes') {
       await saveTaskNotes();
     }
+    setWorkspaceToolEmbed(null);
+    setWorkspaceIntegrationEmbed(null);
     setWorkspaceTab(tab);
   };
   
@@ -4331,7 +4385,7 @@ const PlanAssist = () => {
                     ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
                     : <><Check className="w-5 h-5" /> Mark Complete</>}
                 </button>
-                <button onClick={() => openWorkspace(currentSessionTask)}
+                <button onClick={() => openWorkspace(currentSessionTask, 'session')}
                   className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
                   <BookOpen className="w-4 h-4" /> Open Workspace
                 </button>
@@ -4843,7 +4897,7 @@ const PlanAssist = () => {
                             {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
                             Mark Complete
                           </button>
-                          <button onClick={() => openWorkspace(rowTask)}
+                          <button onClick={() => openWorkspace(rowTask, 'agenda')}
                             className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
                             <BookOpen className="w-3.5 h-3.5" /> Open Workspace
                           </button>
@@ -7120,98 +7174,52 @@ const PlanAssist = () => {
                 
                 {/* Tab selector */}
                 <div className="flex border-b border-gray-200 overflow-x-auto">
-                  <button
-                    onClick={() => switchWorkspaceTab('canvas')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'canvas'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🎓 Canvas Task
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('notes')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'notes'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    📝 Notes
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('whiteboard')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'whiteboard'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🎨 Whiteboard
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('calculator')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'calculator'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🔢 Calculator
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('whitenoise')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'whitenoise'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🎵 Focus Sounds
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('pomodoro')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'pomodoro'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    ⏱️ Pomodoro
-                  </button>
+                  {[
+                    { key: 'canvas', label: '🎓 Canvas Task' },
+                    { key: 'notes', label: '📝 Notes' },
+                    { key: 'whiteboard', label: '🎨 Whiteboard' },
+                    { key: 'tools', label: '🛠️ Tools' },
+                    { key: 'integrations', label: '🔗 Integrations' },
+                    { key: 'whitenoise', label: '🎵 Focus Sounds' },
+                    { key: 'timer', label: '⏱️ Timer' },
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      onClick={() => switchWorkspaceTab(tab.key)}
+                      className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
+                        workspaceTab === tab.key
+                          ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                          : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
                   
                 {/* Tab content */}
                 <div className="flex-1 overflow-hidden">
+
+                  {/* ── Canvas Task ── */}
                   {workspaceTab === 'canvas' ? (
                     <div className="h-full w-full bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center p-4">
                       <div className="text-center max-w-md w-full">
-                        {/* Canvas Logo/Icon */}
                         <div className="mb-4">
                           <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-lg">
                             <BookOpen className="w-8 h-8 text-white" />
                           </div>
                         </div>
-                        
-                        <h2 className="text-xl font-bold text-gray-800 mb-2">
-                          Open Canvas Task
-                        </h2>
-                        
+                        <h2 className="text-xl font-bold text-gray-800 mb-2">Open Canvas Task</h2>
                         <p className="text-sm text-gray-600 mb-4 leading-relaxed">
                           Canvas requires authentication and cannot be embedded. Click below to open this task in a split-screen view.
                         </p>
-                        
-                        {/* Task Info Card */}
                         <div className="bg-white rounded-lg p-3 mb-4 text-left shadow-sm border border-gray-200">
                           <div className="text-xs text-gray-500 mb-1">Current Task:</div>
                           <div className="font-semibold text-gray-800 text-sm">{workspaceTask.title}</div>
                           <div className="text-xs text-purple-600 mt-1">{workspaceTask.class}</div>
                         </div>
-                        
                         {workspaceTask.url ? (
                           <>
-                            {/* Primary Split-Screen Button */}
                             <button
                               onClick={() => openSplitScreen(workspaceTask.url)}
                               className="w-full bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 shadow-lg hover:shadow-xl mb-2 text-sm"
@@ -7221,8 +7229,6 @@ const PlanAssist = () => {
                               </svg>
                               Open in Split-Screen
                             </button>
-                            
-                            {/* Secondary New Tab Button */}
                             <button
                               onClick={() => window.open(workspaceTask.url, '_blank')}
                               className="w-full bg-gray-100 text-gray-700 px-5 py-2.5 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2 text-sm"
@@ -7232,8 +7238,6 @@ const PlanAssist = () => {
                               </svg>
                               Open in New Tab
                             </button>
-                            
-                            {/* Help Text */}
                             <div className="mt-4 text-xs text-gray-500 bg-blue-50 rounded-lg p-2.5 border border-blue-100">
                               <strong className="text-blue-700">💡 Tip:</strong> Split-screen opens Canvas alongside PlanAssist. You may need to manually resize your windows to see both side-by-side.
                             </div>
@@ -7247,6 +7251,7 @@ const PlanAssist = () => {
                         )}
                       </div>
                     </div>
+
                   ) : workspaceTab === 'notes' ? (
                     <div className="h-full flex flex-col p-4">
                       <div className="flex items-center justify-between mb-3">
@@ -7257,15 +7262,9 @@ const PlanAssist = () => {
                           className="bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1"
                         >
                           {savingNotes ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              Saving...
-                            </>
+                            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Saving...</>
                           ) : (
-                            <>
-                              <Save className="w-4 h-4" />
-                              Save
-                            </>
+                            <><Save className="w-4 h-4" />Save</>
                           )}
                         </button>
                       </div>
@@ -7276,63 +7275,234 @@ const PlanAssist = () => {
                         className="flex-1 w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       />
                     </div>
+
                   ) : workspaceTab === 'whiteboard' ? (
                     <div className="h-full flex flex-col p-4">
                       <div className="flex items-center gap-3 mb-3 pb-3 border-b">
                         <div className="flex items-center gap-2">
                           <label className="text-sm font-medium text-gray-700">Color:</label>
-                          <input
-                            type="color"
-                            value={drawColor}
-                            onChange={(e) => setDrawColor(e.target.value)}
-                            className="w-10 h-8 rounded cursor-pointer border border-gray-300"
-                          />
+                          <input type="color" value={drawColor} onChange={(e) => setDrawColor(e.target.value)}
+                            className="w-10 h-8 rounded cursor-pointer border border-gray-300" />
                         </div>
                         <div className="flex items-center gap-2">
                           <label className="text-sm font-medium text-gray-700">Size:</label>
-                          <input
-                            type="range"
-                            min="1"
-                            max="20"
-                            value={drawWidth}
-                            onChange={(e) => setDrawWidth(parseInt(e.target.value))}
-                            className="w-24"
-                          />
+                          <input type="range" min="1" max="20" value={drawWidth}
+                            onChange={(e) => setDrawWidth(parseInt(e.target.value))} className="w-24" />
                           <span className="text-sm text-gray-600 w-6">{drawWidth}</span>
                         </div>
-                        <button
-                          onClick={clearWhiteboard}
-                          className="ml-auto bg-red-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-red-700"
-                        >
+                        <button onClick={clearWhiteboard}
+                          className="ml-auto bg-red-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-red-700">
                           Clear
                         </button>
                       </div>
                       <canvas
                         ref={whiteboardRef}
-                        onMouseDown={startDrawing}
-                        onMouseMove={draw}
-                        onMouseUp={stopDrawing}
-                        onMouseLeave={stopDrawing}
-                        onTouchStart={startDrawing}
-                        onTouchMove={draw}
-                        onTouchEnd={stopDrawing}
+                        onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
+                        onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
                         className="flex-1 w-full border-2 border-gray-300 rounded-lg cursor-crosshair bg-white"
                         style={{ touchAction: 'none', minHeight: '400px' }}
                       />
                       <p className="text-xs text-gray-500 mt-2 text-center">Draw directly on the canvas • Great for diagrams, math problems, and brainstorming</p>
                     </div>
-                  ) : workspaceTab === 'calculator' ? (
-                    <div className="h-full flex flex-col items-center justify-center p-4">
-                      <iframe
-                        src="https://ti84calculator.us/"
-                        height="100%"
-                        width="100%"
-                        frameBorder="0"
-                        sandbox="allow-scripts allow-same-origin allow-forms"
-                        className="rounded-lg"
-                        title="TI-84 Calculator"
-                      />
+
+                  ) : workspaceTab === 'tools' ? (
+                    <div className="h-full flex flex-col">
+                      {/* Active tool embed */}
+                      {workspaceToolEmbed ? (
+                        <div className="h-full flex flex-col">
+                          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
+                            <span className="text-sm font-semibold text-gray-700">
+                              {workspaceToolEmbed === 'calculator' ? '🔢 TI-84 Calculator' : '📈 Desmos Graphing Calculator'}
+                            </span>
+                            <button
+                              onClick={() => setWorkspaceToolEmbed(null)}
+                              className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
+                              title="Back to Tools"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="flex-1 overflow-hidden">
+                            {workspaceToolEmbed === 'calculator' ? (
+                              <iframe
+                                src="https://ti84calculator.us/"
+                                height="100%" width="100%"
+                                frameBorder="0"
+                                sandbox="allow-scripts allow-same-origin allow-forms allow-storage-access-by-user-activation"
+                                allow="storage-access"
+                                className="w-full h-full"
+                                title="TI-84 Calculator"
+                              />
+                            ) : (
+                              <iframe
+                                src={`https://www.desmos.com/calculator`}
+                                height="100%" width="100%"
+                                frameBorder="0"
+                                sandbox="allow-scripts allow-same-origin allow-forms allow-storage-access-by-user-activation allow-popups"
+                                allow="storage-access"
+                                className="w-full h-full"
+                                title="Desmos Graphing Calculator"
+                              />
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        /* Tools button grid */
+                        <div className="flex-1 overflow-y-auto p-6">
+                          <div className="mb-5">
+                            <h3 className="text-lg font-bold text-gray-900 mb-1">🛠️ Tools</h3>
+                            <p className="text-sm text-gray-500">Open a tool to use it inline in the workspace.</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <button
+                              onClick={() => setWorkspaceToolEmbed('calculator')}
+                              className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
+                            >
+                              <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center text-2xl">🔢</div>
+                              <div>
+                                <div className="font-semibold text-gray-800 text-sm">TI-84 Calculator</div>
+                                <div className="text-xs text-gray-500 mt-0.5">Scientific & graphing calculator</div>
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setWorkspaceToolEmbed('desmos')}
+                              className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
+                            >
+                              <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-2xl">📈</div>
+                              <div>
+                                <div className="font-semibold text-gray-800 text-sm">Desmos</div>
+                                <div className="text-xs text-gray-500 mt-0.5">Graphing calculator</div>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                  ) : workspaceTab === 'integrations' ? (
+                    (() => {
+                      const integrations = [
+                        { key: 'kami', label: 'Kami', emoji: '📄', desc: 'PDF annotation tool', url: 'https://web.kamihq.com/web/viewer.html', embeddable: true },
+                        { key: 'gizmos', label: 'Gizmos', emoji: '🔬', desc: 'Science & math simulations', url: 'https://apps.explorelearning.com/account/gizmos/login/student', embeddable: true },
+                        { key: 'masteryprep', label: 'MasteryPrep', emoji: '🎯', desc: 'ACT/SAT prep', url: 'https://app.masteryprep.com/login', embeddable: true },
+                        { key: 'ixl', label: 'IXL', emoji: '✏️', desc: 'Practice & assessments', url: 'https://www.ixl.com/signin/osg/form', embeddable: true },
+                        { key: 'cengage', label: 'Cengage', emoji: '📚', desc: 'Digital textbooks', url: 'https://k12.cengage.com/rostering/Account/LogOn?', embeddable: true },
+                        { key: 'gmetrix', label: 'GMetrix', emoji: '💻', desc: 'IT certification practice', url: 'https://www.gmetrix.net/Login.aspx?', embeddable: true },
+                        { key: 'noredink', label: 'NoRedInk', emoji: '🖊️', desc: 'Writing & grammar', url: 'https://www.noredink.com/login', embeddable: true },
+                      ];
+                      const active = workspaceIntegrationEmbed ? integrations.find(i => i.key === workspaceIntegrationEmbed) : null;
+
+                      const openIntegration = (integration) => {
+                        // Open sign-in popup first, then show embed
+                        const popup = window.open(integration.url, `planassist_integration_${integration.key}`,
+                          'width=600,height=700,left=200,top=100,resizable=yes,scrollbars=yes');
+                        setWorkspaceIntegrationEmbed(integration.key);
+                        // When popup closes, reload the iframe so the session cookie takes effect
+                        if (popup) {
+                          const checkClosed = setInterval(() => {
+                            if (popup.closed) {
+                              clearInterval(checkClosed);
+                              // Force iframe reload by briefly toggling state
+                              setWorkspaceIntegrationEmbed(null);
+                              setTimeout(() => setWorkspaceIntegrationEmbed(integration.key), 150);
+                            }
+                          }, 500);
+                        }
+                      };
+
+                      return (
+                        <div className="h-full flex flex-col">
+                          {active ? (
+                            <div className="h-full flex flex-col">
+                              <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-base">{active.emoji}</span>
+                                  <span className="text-sm font-semibold text-gray-700">{active.label}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      const popup = window.open(active.url, `planassist_integration_${active.key}`,
+                                        'width=600,height=700,left=200,top=100,resizable=yes,scrollbars=yes');
+                                      if (popup) {
+                                        const checkClosed = setInterval(() => {
+                                          if (popup.closed) {
+                                            clearInterval(checkClosed);
+                                            setWorkspaceIntegrationEmbed(null);
+                                            setTimeout(() => setWorkspaceIntegrationEmbed(active.key), 150);
+                                          }
+                                        }, 500);
+                                      }
+                                    }}
+                                    className="text-xs px-2.5 py-1 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 font-medium transition-colors"
+                                    title="Re-open sign-in window"
+                                  >
+                                    🔑 Sign In
+                                  </button>
+                                  <button
+                                    onClick={() => setWorkspaceIntegrationEmbed(null)}
+                                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
+                                    title="Back to Integrations"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="flex-1 overflow-hidden relative">
+                                <iframe
+                                  key={workspaceIntegrationEmbed}
+                                  src={active.url}
+                                  height="100%" width="100%"
+                                  frameBorder="0"
+                                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-storage-access-by-user-activation"
+                                  allow="storage-access; cross-origin-isolated"
+                                  className="w-full h-full"
+                                  title={active.label}
+                                  onError={() => {}}
+                                />
+                                {/* Fallback overlay — shown via CSS if iframe src fails to render (x-frame deny) */}
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 pointer-events-none opacity-0 iframe-fallback"
+                                  style={{ zIndex: 1 }}>
+                                  <div className="text-4xl mb-3">{active.emoji}</div>
+                                  <p className="font-semibold text-gray-700 mb-1">{active.label} can't be embedded</p>
+                                  <p className="text-sm text-gray-500 mb-4 text-center max-w-xs">This site blocks iframe embedding. Use the button below to open it directly.</p>
+                                  <button
+                                    onClick={() => window.open(active.url, '_blank')}
+                                    className="pointer-events-auto px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700"
+                                  >
+                                    Open in New Tab
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex-1 overflow-y-auto p-6">
+                              <div className="mb-5">
+                                <h3 className="text-lg font-bold text-gray-900 mb-1">🔗 Integrations</h3>
+                                <p className="text-sm text-gray-500">Click a service to open it. A sign-in window will appear first — after signing in, the service loads inline.</p>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                {integrations.map(integration => (
+                                  <button
+                                    key={integration.key}
+                                    onClick={() => openIntegration(integration)}
+                                    className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
+                                  >
+                                    <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center text-2xl">{integration.emoji}</div>
+                                    <div>
+                                      <div className="font-semibold text-gray-800 text-sm">{integration.label}</div>
+                                      <div className="text-xs text-gray-500 mt-0.5">{integration.desc}</div>
+                                    </div>
+                                  </button>
+                                ))}
+                              </div>
+                              <p className="text-xs text-gray-400 mt-5 text-center">Sign-in info is saved in your browser cookies where supported.</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
+
                   ) : workspaceTab === 'whitenoise' ? (
                     <div className="h-full flex flex-col p-6 items-center justify-center">
                       <div className="max-w-md w-full space-y-6">
@@ -7340,8 +7510,6 @@ const PlanAssist = () => {
                           <h3 className="text-2xl font-bold text-gray-900 mb-2">Focus Sounds</h3>
                           <p className="text-sm text-gray-600">Play ambient sounds to help you concentrate</p>
                         </div>
-
-                        {/* Sound Selection */}
                         <div className="grid grid-cols-2 gap-3">
                           {[
                             { id: 'rain', label: '🌧️ Soft Rain', desc: 'Gentle pink noise' },
@@ -7370,8 +7538,6 @@ const PlanAssist = () => {
                             </button>
                           ))}
                         </div>
-
-                        {/* Controls */}
                         <div className="space-y-4 pt-4 border-t">
                           <div className="flex items-center gap-3">
                             <button
@@ -7385,17 +7551,13 @@ const PlanAssist = () => {
                               {isWhiteNoisePlaying ? '⏸ Pause' : '▶ Play'}
                             </button>
                           </div>
-
                           {isWhiteNoisePlaying && (
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                 Volume: {Math.round(whiteNoiseVolume * 100)}%
                               </label>
                               <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.1"
+                                type="range" min="0" max="1" step="0.1"
                                 value={whiteNoiseVolume}
                                 onChange={(e) => changeWhiteNoiseVolume(parseFloat(e.target.value))}
                                 className="w-full"
@@ -7405,89 +7567,98 @@ const PlanAssist = () => {
                         </div>
                       </div>
                     </div>
-                  ) : workspaceTab === 'pomodoro' ? (
+
+                  ) : workspaceTab === 'timer' ? (
                     <div className="h-full flex flex-col p-6 items-center justify-center">
-                      <div className="max-w-md w-full space-y-6">
-                        <div className="text-center mb-6">
-                          <h3 className="text-2xl font-bold text-gray-900 mb-2">Pomodoro Timer</h3>
-                          <p className="text-sm text-gray-600">Focus for 25 minutes, then take a break</p>
-                        </div>
-
-                        {/* Mode Selector */}
-                        <div className="flex gap-2 justify-center">
-                          <button
-                            onClick={() => switchPomodoroMode('work')}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                              pomodoroMode === 'work'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            Work (25m)
-                          </button>
-                          <button
-                            onClick={() => switchPomodoroMode('shortBreak')}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                              pomodoroMode === 'shortBreak'
-                                ? 'bg-green-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            Short Break (5m)
-                          </button>
-                          <button
-                            onClick={() => switchPomodoroMode('longBreak')}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                              pomodoroMode === 'longBreak'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            Long Break (15m)
-                          </button>
-                        </div>
-
-                        {/* Timer Display */}
-                        <div className="text-center">
-                          <div className={`text-7xl font-bold mb-4 ${
-                            pomodoroMode === 'work' ? 'text-purple-600' :
-                            pomodoroMode === 'shortBreak' ? 'text-green-600' :
-                            'text-blue-600'
+                      {workspaceSource === 'agenda' ? (
+                        /* ── Agenda mode: read-only mirror of the agenda row countdown ── */
+                        <div className="max-w-sm w-full text-center space-y-4">
+                          <h3 className="text-2xl font-bold text-gray-900">⏱️ Row Timer</h3>
+                          <p className="text-sm text-gray-500">This timer is synced with the current agenda row.</p>
+                          <div className={`text-8xl font-bold tabular-nums mt-4 ${
+                            agendaCountdown !== null && agendaCountdown <= 60 && agendaCountdown > 0
+                              ? 'text-red-500'
+                              : agendaCountdown === 0
+                                ? 'text-gray-400'
+                                : 'text-purple-600'
                           }`}>
-                            {formatPomodoroTime(pomodoroTime)}
+                            {agendaCountdown !== null
+                              ? `${String(Math.floor(agendaCountdown / 60)).padStart(2,'0')}:${String(agendaCountdown % 60).padStart(2,'0')}`
+                              : '--:--'
+                            }
                           </div>
-                          <div className="text-sm text-gray-600 mb-6">
-                            Sessions completed today: {pomodoroSessions}
+                          {agendaCountdown === 0 && (
+                            <p className="text-red-500 font-semibold text-sm animate-pulse">⏰ Time's up!</p>
+                          )}
+                          {!agendaRunning && agendaCountdown !== 0 && (
+                            <p className="text-xs text-gray-400">Timer is paused — start it from the agenda view.</p>
+                          )}
+                        </div>
+                      ) : (
+                        /* ── Session mode: free settable timer ── */
+                        <div className="max-w-sm w-full space-y-6">
+                          <div className="text-center">
+                            <h3 className="text-2xl font-bold text-gray-900 mb-1">⏱️ Timer</h3>
+                            <p className="text-sm text-gray-500">Set a custom countdown for your work session.</p>
                           </div>
-                        </div>
 
-                        {/* Controls */}
-                        <div className="flex gap-3">
-                          <button
-                            onClick={isPomodoroRunning ? pausePomodoro : startPomodoro}
-                            className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all ${
-                              isPomodoroRunning
-                                ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                                : pomodoroMode === 'work' ? 'bg-purple-600 hover:bg-purple-700 text-white' :
-                                  pomodoroMode === 'shortBreak' ? 'bg-green-600 hover:bg-green-700 text-white' :
-                                  'bg-blue-600 hover:bg-blue-700 text-white'
-                            }`}
-                          >
-                            {isPomodoroRunning ? '⏸ Pause' : '▶ Start'}
-                          </button>
-                          <button
-                            onClick={resetPomodoro}
-                            className="px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-semibold text-lg transition-all"
-                          >
-                            🔄 Reset
-                          </button>
-                        </div>
+                          {/* Time display */}
+                          <div className="text-center">
+                            <div className={`text-8xl font-bold tabular-nums ${
+                              freeTimerDone ? 'text-green-500' :
+                              freeTimerRunning && freeTimerSecs <= 60 ? 'text-red-500' :
+                              freeTimerRunning ? 'text-purple-600' : 'text-gray-700'
+                            }`}>
+                              {freeTimerRunning || freeTimerSecs > 0
+                                ? `${String(Math.floor(freeTimerSecs / 60)).padStart(2,'0')}:${String(freeTimerSecs % 60).padStart(2,'0')}`
+                                : `${String(parseInt(freeTimerMins) || 0).padStart(2,'0')}:00`
+                              }
+                            </div>
+                            {freeTimerDone && (
+                              <p className="text-green-500 font-semibold text-sm mt-2 animate-pulse">✅ Time's up!</p>
+                            )}
+                          </div>
 
-                        <div className="text-xs text-gray-500 text-center pt-4 border-t">
-                          💡 Tip: After 4 work sessions, take a long break to recharge
+                          {/* Input — only shown when timer is not running */}
+                          {!freeTimerRunning && !freeTimerDone && (
+                            <div className="flex items-center gap-3 justify-center">
+                              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Minutes:</label>
+                              <input
+                                type="number"
+                                min="1" max="180"
+                                value={freeTimerMins}
+                                onChange={e => setFreeTimerMins(e.target.value.replace(/[^0-9]/g, ''))}
+                                placeholder="e.g. 25"
+                                className="w-28 px-3 py-2 border-2 border-gray-300 rounded-lg text-center text-lg font-semibold focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                              />
+                            </div>
+                          )}
+
+                          {/* Controls */}
+                          <div className="flex gap-3 justify-center">
+                            {!freeTimerRunning && !freeTimerDone ? (
+                              <button
+                                onClick={startFreeTimer}
+                                disabled={!freeTimerMins || parseInt(freeTimerMins) < 1}
+                                className="flex-1 py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all"
+                              >
+                                ▶ Start
+                              </button>
+                            ) : (
+                              <button
+                                onClick={resetFreeTimer}
+                                className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-semibold transition-all"
+                              >
+                                🔄 Reset
+                              </button>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-gray-400 text-center">This timer is independent from your session timer.</p>
                         </div>
-                      </div>
+                      )}
                     </div>
+
                   ) : null}
                 </div>
               </div>
