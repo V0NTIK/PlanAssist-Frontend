@@ -7381,111 +7381,76 @@ const PlanAssist = () => {
 
                   ) : workspaceTab === 'integrations' ? (
                     (() => {
+                      // inline: loads directly in workspace iframe, no popup
+                      // window: opens in a separate browser window, tab stays on grid
                       const integrations = [
-                        { key: 'kami', label: 'Kami', emoji: '📄', desc: 'PDF annotation tool', url: 'https://web.kamihq.com/web/viewer.html', embeddable: true },
-                        { key: 'gizmos', label: 'Gizmos', emoji: '🔬', desc: 'Science & math simulations', url: 'https://apps.explorelearning.com/account/gizmos/login/student', embeddable: true },
-                        { key: 'masteryprep', label: 'MasteryPrep', emoji: '🎯', desc: 'ACT/SAT prep', url: 'https://app.masteryprep.com/login', embeddable: true },
-                        { key: 'ixl', label: 'IXL', emoji: '✏️', desc: 'Practice & assessments', url: 'https://www.ixl.com/signin/osg/form', embeddable: true },
-                        { key: 'cengage', label: 'Cengage', emoji: '📚', desc: 'Digital textbooks', url: 'https://k12.cengage.com/rostering/Account/LogOn?', embeddable: true },
-                        { key: 'gmetrix', label: 'GMetrix', emoji: '💻', desc: 'IT certification practice', url: 'https://www.gmetrix.net/Login.aspx?', embeddable: true },
-                        { key: 'noredink', label: 'NoRedInk', emoji: '🖊️', desc: 'Writing & grammar', url: 'https://www.noredink.com/login', embeddable: true },
+                        { key: 'kami',        label: 'Kami',        emoji: '📄', desc: 'PDF annotation tool',         url: 'https://web.kamihq.com/web/viewer.html',                          mode: 'inline' },
+                        { key: 'masteryprep', label: 'MasteryPrep', emoji: '🎯', desc: 'ACT/SAT prep',                url: 'https://app.masteryprep.com/login',                               mode: 'inline' },
+                        { key: 'gmetrix',     label: 'GMetrix',     emoji: '💻', desc: 'IT certification practice',   url: 'https://www.gmetrix.net/Login.aspx?',                             mode: 'inline' },
+                        { key: 'gizmos',      label: 'Gizmos',      emoji: '🔬', desc: 'Science & math simulations',  url: 'https://apps.explorelearning.com/account/gizmos/login/student',   mode: 'window' },
+                        { key: 'ixl',         label: 'IXL',         emoji: '✏️', desc: 'Practice & assessments',      url: 'https://www.ixl.com/signin/osg/form',                             mode: 'window' },
+                        { key: 'cengage',     label: 'Cengage',     emoji: '📚', desc: 'Digital textbooks',           url: 'https://k12.cengage.com/rostering/Account/LogOn?',                mode: 'window' },
+                        { key: 'noredink',    label: 'NoRedInk',    emoji: '🖊️', desc: 'Writing & grammar',           url: 'https://www.noredink.com/login',                                  mode: 'window' },
                       ];
-                      const active = workspaceIntegrationEmbed ? integrations.find(i => i.key === workspaceIntegrationEmbed) : null;
 
-                      const openIntegration = (integration) => {
-                        // Open sign-in popup first, then show embed
-                        const popup = window.open(integration.url, `planassist_integration_${integration.key}`,
-                          'width=600,height=700,left=200,top=100,resizable=yes,scrollbars=yes');
-                        setWorkspaceIntegrationEmbed(integration.key);
-                        // When popup closes, reload the iframe so the session cookie takes effect
-                        if (popup) {
-                          const checkClosed = setInterval(() => {
-                            if (popup.closed) {
-                              clearInterval(checkClosed);
-                              // Force iframe reload by briefly toggling state
-                              setWorkspaceIntegrationEmbed(null);
-                              setTimeout(() => setWorkspaceIntegrationEmbed(integration.key), 150);
-                            }
-                          }, 500);
+                      const active = workspaceIntegrationEmbed
+                        ? integrations.find(i => i.key === workspaceIntegrationEmbed)
+                        : null;
+
+                      const handleIntegrationClick = (integration) => {
+                        if (integration.mode === 'window') {
+                          // Open in separate window, leave tab on grid
+                          window.open(integration.url, `planassist_integration_${integration.key}`,
+                            'width=1100,height=800,left=100,top=80,resizable=yes,scrollbars=yes');
+                        } else {
+                          // Load inline in workspace
+                          setWorkspaceIntegrationEmbed(integration.key);
                         }
                       };
 
                       return (
                         <div className="h-full flex flex-col">
                           {active ? (
+                            /* ── Inline embed view ── */
                             <div className="h-full flex flex-col">
                               <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
                                 <div className="flex items-center gap-2">
                                   <span className="text-base">{active.emoji}</span>
                                   <span className="text-sm font-semibold text-gray-700">{active.label}</span>
                                 </div>
-                                <div className="flex items-center gap-2">
-                                  <button
-                                    onClick={() => {
-                                      const popup = window.open(active.url, `planassist_integration_${active.key}`,
-                                        'width=600,height=700,left=200,top=100,resizable=yes,scrollbars=yes');
-                                      if (popup) {
-                                        const checkClosed = setInterval(() => {
-                                          if (popup.closed) {
-                                            clearInterval(checkClosed);
-                                            setWorkspaceIntegrationEmbed(null);
-                                            setTimeout(() => setWorkspaceIntegrationEmbed(active.key), 150);
-                                          }
-                                        }, 500);
-                                      }
-                                    }}
-                                    className="text-xs px-2.5 py-1 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 font-medium transition-colors"
-                                    title="Re-open sign-in window"
-                                  >
-                                    🔑 Sign In
-                                  </button>
-                                  <button
-                                    onClick={() => setWorkspaceIntegrationEmbed(null)}
-                                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
-                                    title="Back to Integrations"
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </button>
-                                </div>
+                                <button
+                                  onClick={() => setWorkspaceIntegrationEmbed(null)}
+                                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
+                                  title="Back to Integrations"
+                                >
+                                  <X className="w-4 h-4" />
+                                </button>
                               </div>
-                              <div className="flex-1 overflow-hidden relative">
+                              <div className="flex-1 overflow-hidden">
                                 <iframe
                                   key={workspaceIntegrationEmbed}
                                   src={active.url}
                                   height="100%" width="100%"
                                   frameBorder="0"
                                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-storage-access-by-user-activation"
-                                  allow="storage-access; cross-origin-isolated"
+                                  allow="storage-access"
                                   className="w-full h-full"
                                   title={active.label}
-                                  onError={() => {}}
                                 />
-                                {/* Fallback overlay — shown via CSS if iframe src fails to render (x-frame deny) */}
-                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 pointer-events-none opacity-0 iframe-fallback"
-                                  style={{ zIndex: 1 }}>
-                                  <div className="text-4xl mb-3">{active.emoji}</div>
-                                  <p className="font-semibold text-gray-700 mb-1">{active.label} can't be embedded</p>
-                                  <p className="text-sm text-gray-500 mb-4 text-center max-w-xs">This site blocks iframe embedding. Use the button below to open it directly.</p>
-                                  <button
-                                    onClick={() => window.open(active.url, '_blank')}
-                                    className="pointer-events-auto px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-semibold hover:bg-purple-700"
-                                  >
-                                    Open in New Tab
-                                  </button>
-                                </div>
                               </div>
                             </div>
                           ) : (
+                            /* ── Button grid ── */
                             <div className="flex-1 overflow-y-auto p-6">
                               <div className="mb-5">
                                 <h3 className="text-lg font-bold text-gray-900 mb-1">🔗 Integrations</h3>
-                                <p className="text-sm text-gray-500">Click a service to open it. A sign-in window will appear first — after signing in, the service loads inline.</p>
+                                <p className="text-sm text-gray-500">Click a service to open it.</p>
                               </div>
                               <div className="grid grid-cols-2 gap-4">
                                 {integrations.map(integration => (
                                   <button
                                     key={integration.key}
-                                    onClick={() => openIntegration(integration)}
+                                    onClick={() => handleIntegrationClick(integration)}
                                     className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
                                   >
                                     <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center text-2xl">{integration.emoji}</div>
@@ -7493,6 +7458,14 @@ const PlanAssist = () => {
                                       <div className="font-semibold text-gray-800 text-sm">{integration.label}</div>
                                       <div className="text-xs text-gray-500 mt-0.5">{integration.desc}</div>
                                     </div>
+                                    {integration.mode === 'window' && (
+                                      <div className="text-xs text-purple-500 font-medium flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                        </svg>
+                                        Opens in window
+                                      </div>
+                                    )}
                                   </button>
                                 ))}
                               </div>
