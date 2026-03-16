@@ -3351,7 +3351,7 @@ const PlanAssist = () => {
               <span className="font-medium">Tasks</span>
               {hasUnsavedChanges && !['session-active','agenda-active'].includes(currentPage) && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
@@ -3367,7 +3367,7 @@ const PlanAssist = () => {
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <UserCircle className="w-5 h-5" />
             </button>
             {user?.isAdmin && (
@@ -3385,7 +3385,7 @@ const PlanAssist = () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
           </div>
