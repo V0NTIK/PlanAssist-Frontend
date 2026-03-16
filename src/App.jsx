@@ -5894,21 +5894,41 @@ const PlanAssist = () => {
                         ].map(({ key, label, desc }) => {
                           const checked = key === 'calendarShowCurrentWeek' ? accountSetup[key] !== false : (accountSetup[key] || false);
                           return (
-                            <div key={key} className={`flex items-center gap-3 p-4 cursor-pointer transition-colors ${checked ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
-                              onClick={() => {
+                            <div key={key}
+                              className={`flex items-center p-4 cursor-pointer transition-colors select-none ${checked ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
+                              onClick={async () => {
                                 // Prevent deselecting all — need at least one
                                 const otherKeys = ['calendarShowPrevWeek','calendarShowCurrentWeek','calendarShowNextWeek1','calendarShowNextWeek2'].filter(k => k !== key);
                                 const otherSelected = otherKeys.some(k => k === 'calendarShowCurrentWeek' ? accountSetup[k] !== false : accountSetup[k]);
-                                if (checked && !otherSelected) return; // block deselect if last
-                                setAccountSetup(prev => ({ ...prev, [key]: !checked }));
+                                if (checked && !otherSelected) return;
+                                const newVal = !checked;
+                                const updated = { ...accountSetup, [key]: newVal };
+                                setAccountSetup(updated);
+                                // Auto-save immediately
+                                try {
+                                  await apiCall('/account/setup', 'POST', {
+                                    grade: updated.grade,
+                                    canvasApiToken: updated.canvasApiToken,
+                                    presentPeriods: updated.presentPeriods,
+                                    schedule: updated.schedule,
+                                    calendarTodayCentered: updated.calendarTodayCentered,
+                                    calendarShowHomeroom: updated.calendarShowHomeroom,
+                                    calendarShowCompleted: updated.calendarShowCompleted,
+                                    calendarShowPrevWeek: updated.calendarShowPrevWeek,
+                                    calendarShowCurrentWeek: updated.calendarShowCurrentWeek,
+                                    calendarShowNextWeek1: updated.calendarShowNextWeek1,
+                                    calendarShowNextWeek2: updated.calendarShowNextWeek2,
+                                    calendarShowWeekends: updated.calendarShowWeekends
+                                  });
+                                } catch (err) { console.error('Failed to save week setting:', err); }
                               }}>
-                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-purple-600 border-purple-600' : 'border-gray-300'}`}>
-                                {checked && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-                              </div>
                               <div className="flex-1">
-                                <p className="font-medium text-gray-900 text-sm">{label}</p>
-                                <p className="text-xs text-gray-500">{desc}</p>
+                                <p className={`font-medium text-sm ${checked ? 'text-purple-800' : 'text-gray-900'}`}>{label}</p>
+                                <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
                               </div>
+                              {checked && (
+                                <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 ml-3" />
+                              )}
                             </div>
                           );
                         })}
