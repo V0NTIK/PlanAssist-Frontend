@@ -2910,6 +2910,39 @@ const PlanAssist = () => {
     setFreeTimerMins('');
   };
 
+  // Item 3: Warn + auto-add tasks before page unload when sidebar is open
+  useEffect(() => {
+    if (!newTasksSidebarOpen || newTasks.length === 0) return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = `You have ${newTasks.length} unsorted task(s). If you leave, they will be added to your list automatically by deadline order.`;
+      return e.returnValue;
+    };
+    // On actual unload (after confirm), trigger the smart add via beacon so it fires even as the page closes
+    const handleUnload = () => {
+      // Best-effort: fire clear-new-flags synchronously via sendBeacon
+      const taskIds = newTasks.map(t => t.id);
+      if (taskIds.length > 0 && navigator.sendBeacon) {
+        const token = localStorage.getItem('token');
+        const blob = new Blob([JSON.stringify({ taskIds })], { type: 'application/json' });
+        // sendBeacon can't set Authorization header, so we use the /tasks/reorder endpoint
+        // instead just fire clear-new-flags to at least clear is_new; reorder happens on next load
+        fetch(`${API_URL}/tasks/clear-new-flags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ taskIds }),
+          keepalive: true
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('unload', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [newTasksSidebarOpen, newTasks]);
+
   // Handle Escape key to close notes popup
   useEffect(() => {
     const handleEscape = (e) => {
@@ -3305,36 +3338,36 @@ const PlanAssist = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Calendar className="w-5 h-5" />
               <span className="font-medium">Calendar</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
               {hasUnsavedChanges && !['session-active','agenda-active'].includes(currentPage) && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <LayoutList className="w-5 h-5" />
               <span className="font-medium">Agendas</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <ClipboardList className="w-5 h-5" />
               <span className="font-medium">Itinerary</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <UserCircle className="w-5 h-5" />
             </button>
             {user?.isAdmin && (
@@ -3352,7 +3385,7 @@ const PlanAssist = () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -3417,8 +3450,16 @@ const PlanAssist = () => {
       ))}
 
       {/* Save & Adjust Plan - Full Lock Overlay */}
-      {isSavingPlan && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed" />
+      {(isSavingPlan || isLoadingTasks) && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed flex items-center justify-center">
+          {isLoadingTasks && !isSavingPlan && (
+            <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-3 pointer-events-none">
+              <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-gray-800 font-semibold text-base">Syncing with Canvas...</p>
+              <p className="text-gray-400 text-sm">This may take a moment</p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Tutorial Overlay */}
