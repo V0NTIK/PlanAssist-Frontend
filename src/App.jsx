@@ -4974,9 +4974,8 @@ const PlanAssist = () => {
           const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
 
-          // Build day list based on week toggle settings
+          // Build weeks as separate rows (each selected week = one row of columns)
           const todayIdx = today.getDay(); // 0=Sun
-          // Sunday of current week
           const currentWeekSunday = new Date(today);
           currentWeekSunday.setDate(today.getDate() - todayIdx);
 
@@ -4990,17 +4989,22 @@ const PlanAssist = () => {
             });
           };
 
-          let days = [];
-          if (accountSetup.calendarShowPrevWeek)    days = [...days, ...buildWeek(currentWeekSunday, -1)];
-          if (accountSetup.calendarShowCurrentWeek !== false) days = [...days, ...buildWeek(currentWeekSunday, 0)];
-          if (accountSetup.calendarShowNextWeek1)   days = [...days, ...buildWeek(currentWeekSunday, 1)];
-          if (accountSetup.calendarShowNextWeek2)   days = [...days, ...buildWeek(currentWeekSunday, 2)];
-          // If nothing selected, default to current week
-          if (days.length === 0) days = buildWeek(currentWeekSunday, 0);
-          // Filter weekends if show weekends is off
-          if (!accountSetup.calendarShowWeekends) {
-            days = days.filter(d => d.getDay() !== 0 && d.getDay() !== 6);
-          }
+          // weeks is an array of week-arrays; each inner array = one row
+          let weeks = [];
+          if (accountSetup.calendarShowPrevWeek)              weeks.push(buildWeek(currentWeekSunday, -1));
+          if (accountSetup.calendarShowCurrentWeek !== false) weeks.push(buildWeek(currentWeekSunday, 0));
+          if (accountSetup.calendarShowNextWeek1)             weeks.push(buildWeek(currentWeekSunday, 1));
+          if (accountSetup.calendarShowNextWeek2)             weeks.push(buildWeek(currentWeekSunday, 2));
+          if (weeks.length === 0) weeks = [buildWeek(currentWeekSunday, 0)];
+
+          // Filter weekends from each week if needed
+          const showWeekends = accountSetup.calendarShowWeekends !== false;
+          const filteredWeeks = weeks.map(week =>
+            showWeekends ? week : week.filter(d => d.getDay() !== 0 && d.getDay() !== 6)
+          );
+
+          // For header date range display
+          const allDays = filteredWeeks.flat();
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
@@ -5065,11 +5069,11 @@ const PlanAssist = () => {
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
                   <p className="text-sm text-gray-500 mt-0.5">
-                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[days.length-1].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                    {allDays[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {allDays[allDays.length-1].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
                   </p>
                 </div>
                 <button
-                  onClick={() => { setCurrentPage('settings'); setAccountTab('settings'); }}
+                  onClick={() => { setCurrentPage('account'); setAccountTab('settings'); }}
                   className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   <Settings className="w-4 h-4" />
@@ -5077,10 +5081,11 @@ const PlanAssist = () => {
                 </button>
               </div>
 
-              {/* 7-day grid */}
-              <div className="flex-1 overflow-hidden px-4 py-4">
-                <div className={`grid gap-2 h-full`} style={{gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`}}>
-                  {days.map((day, colIdx) => {
+              {/* Stacked week rows */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                {filteredWeeks.map((weekDays, weekIdx) => (
+                  <div key={weekIdx} className="grid gap-2" style={{gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))`, minHeight: '180px'}}>
+                  {weekDays.map((day, colIdx) => {
                     const dayTasks = getTasksForDay(day);
                     const todayCol = isToday(day);
                     return (
@@ -5194,7 +5199,8 @@ const PlanAssist = () => {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                ))}
               </div>
             </div>
           );
@@ -5247,7 +5253,7 @@ const PlanAssist = () => {
                 <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
                 <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
                 <p className="text-gray-500 mb-6">Link your courses to your Lesson periods to unlock the Itinerary.</p>
-                <button onClick={() => { setCurrentPage('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
+                <button onClick={() => { setCurrentPage('account'); setAccountTab('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
                   className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">Enhance Schedule</button>
                 <button onClick={() => setCurrentPage('hub')} className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">Back to Hub</button>
               </div>
@@ -5265,7 +5271,7 @@ const PlanAssist = () => {
 
           return (
             <div className="max-w-3xl mx-auto p-6">
-              {/* Header with date navigation */}
+              {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
@@ -5274,36 +5280,37 @@ const PlanAssist = () => {
                     {isViewToday && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">Today</span>}
                   </p>
                 </div>
+
+                {/* Date navigation — centered between title and button */}
+                <div className="flex items-center gap-2">
+                  <button onClick={() => navigateItinerary(-1)}
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <div className="text-center min-w-[90px]">
+                    <p className="font-semibold text-gray-800 text-sm">
+                      {viewDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </p>
+                    {!isViewToday && (
+                      <button onClick={() => {
+                        const t = new Date();
+                        setItineraryDate(t);
+                        const s = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+                        setItinerarySlots({});
+                        loadItinerary(s);
+                        loadTutorials(s);
+                      }} className="text-xs text-purple-500 hover:text-purple-700 font-medium">Today</button>
+                    )}
+                  </div>
+                  <button onClick={() => navigateItinerary(1)}
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+
                 <button onClick={openHubTutorialDialog}
                   className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
                   <BookOpen className="w-4 h-4" /> Book a Tutorial
-                </button>
-              </div>
-
-              {/* Date navigation arrows */}
-              <div className="flex items-center justify-center gap-4 mb-6">
-                <button onClick={() => navigateItinerary(-1)}
-                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                </button>
-                <div className="text-center">
-                  <p className="font-semibold text-gray-800 text-sm">
-                    {viewDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                  </p>
-                  {!isViewToday && (
-                    <button onClick={() => {
-                      const t = new Date();
-                      setItineraryDate(t);
-                      const s = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
-                      setItinerarySlots({});
-                      loadItinerary(s);
-                      loadTutorials(s);
-                    }} className="text-xs text-purple-500 hover:text-purple-700 font-medium">Back to Today</button>
-                  )}
-                </div>
-                <button onClick={() => navigateItinerary(1)}
-                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                 </button>
               </div>
 
