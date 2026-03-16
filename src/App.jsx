@@ -79,7 +79,12 @@ const PlanAssist = () => {
     classColors: {},
     calendarTodayCentered: false,
     calendarShowHomeroom: true,
-    calendarShowCompleted: true
+    calendarShowCompleted: true,
+    calendarShowPrevWeek: false,
+    calendarShowCurrentWeek: true,
+    calendarShowNextWeek1: false,
+    calendarShowNextWeek2: false,
+    calendarShowWeekends: true
   });
   const [tasks, setTasks] = useState([]);
   const [sessionTasks, setSessionTasks] = useState([]);
@@ -98,13 +103,15 @@ const PlanAssist = () => {
   const [enhanceZoom, setEnhanceZoom] = useState({});                  // { courseId: zoomNumber }
   const [scheduleLessons, setScheduleLessons] = useState([]);           // from DB after enhance
   const [itinerarySlots, setItinerarySlots] = useState({});            // { period: { agendaId, agendaName } }
+  const [itineraryDate, setItineraryDate] = useState(null);              // Date object for currently viewed itinerary date
   const [itineraryLoading, setItineraryLoading] = useState(false);
   const [showAddAgendaSlot, setShowAddAgendaSlot] = useState(null);    // period number being picked
   const [tutorials, setTutorials] = useState({});          // { 'Monday-3': { zoom_number, topic, period, day } }
   const [showTutorialDialog, setShowTutorialDialog] = useState(null); // { day, period } or 'hub'
   const [tutorialZoom, setTutorialZoom] = useState('');
   const [tutorialTopic, setTutorialTopic] = useState('');
-  const [tutorialDay, setTutorialDay] = useState('');     // for hub booking
+  const [tutorialDay, setTutorialDay] = useState('');     // for hub booking (kept for compat)
+  const [tutorialDate, setTutorialDate] = useState('');   // ISO date string for hub booking
   const [tutorialPeriod, setTutorialPeriod] = useState('');
   const [isSavingTutorial, setIsSavingTutorial] = useState(false);
   const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
@@ -215,6 +222,7 @@ const PlanAssist = () => {
   const [workspaceSource, setWorkspaceSource] = useState('session'); // 'session' | 'agenda'
   const [workspaceToolEmbed, setWorkspaceToolEmbed] = useState(null); // null | 'calculator' | 'desmos'
   const [workspaceIntegrationEmbed, setWorkspaceIntegrationEmbed] = useState(null); // null | integration key
+  const [workspaceEmbedZoom, setWorkspaceEmbedZoom] = useState(1.0); // zoom scale for inline embeds
   // Free timer state (Session workspace Timer tab only)
   const [freeTimerMins, setFreeTimerMins] = useState('');
   const [freeTimerSecs, setFreeTimerSecs] = useState(0);
@@ -454,6 +462,11 @@ const PlanAssist = () => {
         calendarTodayCentered: setupData.calendarTodayCentered ?? false,
         calendarShowHomeroom: setupData.calendarShowHomeroom ?? true,
         calendarShowCompleted: setupData.calendarShowCompleted ?? true,
+        calendarShowPrevWeek: setupData.calendarShowPrevWeek ?? false,
+        calendarShowCurrentWeek: setupData.calendarShowCurrentWeek ?? true,
+        calendarShowNextWeek1: setupData.calendarShowNextWeek1 ?? false,
+        calendarShowNextWeek2: setupData.calendarShowNextWeek2 ?? false,
+        calendarShowWeekends: setupData.calendarShowWeekends ?? true,
           schedule: setupData.schedule || {},
           scheduleEnhanced: setupData.schedule_enhanced || false,
           classColors: savedColors ? JSON.parse(savedColors) : {}
@@ -877,7 +890,12 @@ const PlanAssist = () => {
         schedule: accountSetup.schedule,
         calendarTodayCentered: accountSetup.calendarTodayCentered,
         calendarShowHomeroom: accountSetup.calendarShowHomeroom,
-        calendarShowCompleted: accountSetup.calendarShowCompleted
+        calendarShowCompleted: accountSetup.calendarShowCompleted,
+        calendarShowPrevWeek: accountSetup.calendarShowPrevWeek,
+        calendarShowCurrentWeek: accountSetup.calendarShowCurrentWeek,
+        calendarShowNextWeek1: accountSetup.calendarShowNextWeek1,
+        calendarShowNextWeek2: accountSetup.calendarShowNextWeek2,
+        calendarShowWeekends: accountSetup.calendarShowWeekends
       });
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
       
@@ -1928,10 +1946,17 @@ const PlanAssist = () => {
     }
   };
 
-  const loadItinerary = async (dayName) => {
+  const localDateStr = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const loadItinerary = async (dateStr) => {
     setItineraryLoading(true);
     try {
-      const data = await apiCall(`/itinerary?day=${dayName}`, 'GET');
+      const data = await apiCall(`/itinerary?date=${dateStr}`, 'GET');
       const slots = {};
       (data || []).forEach(row => {
         if (row.agenda_id && !row.finished) {
@@ -1946,9 +1971,9 @@ const PlanAssist = () => {
     }
   };
 
-  const assignAgendaToSlot = async (dayName, period, agendaId, agendaName) => {
+  const assignAgendaToSlot = async (dateStr, period, agendaId, agendaName) => {
     try {
-      await apiCall('/itinerary', 'PUT', { day: dayName, period, agendaId });
+      await apiCall('/itinerary', 'PUT', { date: dateStr, period, agendaId });
       setItinerarySlots(prev => ({
         ...prev,
         [period]: { agendaId, agendaName }
@@ -1959,9 +1984,9 @@ const PlanAssist = () => {
     }
   };
 
-  const clearAgendaFromSlot = async (dayName, period) => {
+  const clearAgendaFromSlot = async (dateStr, period) => {
     try {
-      await apiCall('/itinerary', 'PUT', { day: dayName, period, agendaId: null });
+      await apiCall('/itinerary', 'PUT', { date: dateStr, period, agendaId: null });
       setItinerarySlots(prev => {
         const next = { ...prev };
         delete next[period];
@@ -2000,27 +2025,28 @@ const PlanAssist = () => {
 
   // ── Tutorial functions ──────────────────────────────────────────────────────
 
-  const loadTutorials = async (dayName) => {
+  const loadTutorials = async (dateStr) => {
     try {
-      const data = await apiCall(`/tutorials?day=${dayName}`, 'GET');
+      const data = await apiCall(`/tutorials?date=${dateStr}`, 'GET');
       const map = {};
-      (data || []).forEach(t => { map[`${t.day}-${t.period}`] = t; });
+      (data || []).forEach(t => { map[`${t.date}-${t.period}`] = t; });
       setTutorials(map);
     } catch (err) {
       console.error('Failed to load tutorials:', err);
     }
   };
 
-  const saveTutorial = async ({ day, period, zoomNumber, topic }) => {
+  const saveTutorial = async ({ date, period, zoomNumber, topic }) => {
     setIsSavingTutorial(true);
     try {
-      await apiCall('/tutorials', 'PUT', { day, period, zoomNumber, topic });
-      const key = `${day}-${period}`;
-      setTutorials(prev => ({ ...prev, [key]: { day, period, zoom_number: zoomNumber, topic } }));
+      await apiCall('/tutorials', 'PUT', { date, period, zoomNumber, topic });
+      const key = `${date}-${period}`;
+      setTutorials(prev => ({ ...prev, [key]: { date, period, zoom_number: zoomNumber, topic } }));
       setShowTutorialDialog(null);
       setTutorialZoom('');
       setTutorialTopic('');
       setTutorialDay('');
+      setTutorialDate('');
       setTutorialPeriod('');
     } catch (err) {
       console.error('Failed to save tutorial:', err);
@@ -2030,27 +2056,28 @@ const PlanAssist = () => {
     }
   };
 
-  const deleteTutorial = async (day, period) => {
+  const deleteTutorial = async (date, period) => {
     try {
-      await apiCall('/tutorials', 'DELETE', { day, period });
-      const key = `${day}-${period}`;
+      await apiCall('/tutorials', 'DELETE', { date, period });
+      const key = `${date}-${period}`;
       setTutorials(prev => { const n = { ...prev }; delete n[key]; return n; });
     } catch (err) {
       console.error('Failed to delete tutorial:', err);
     }
   };
 
-  const openTutorialDialog = ({ day, period }) => {
-    const existing = tutorials[`${day}-${period}`];
+  const openTutorialDialog = ({ date, period }) => {
+    const existing = tutorials[`${date}-${period}`];
     setTutorialZoom(existing?.zoom_number || '');
     setTutorialTopic(existing?.topic || '');
-    setShowTutorialDialog({ day, period });
+    setShowTutorialDialog({ date, period });
   };
 
   const openHubTutorialDialog = () => {
     setTutorialZoom('');
     setTutorialTopic('');
     setTutorialDay('');
+    setTutorialDate('');
     setTutorialPeriod('');
     setShowTutorialDialog('hub');
   };
@@ -3123,9 +3150,11 @@ const PlanAssist = () => {
       loadSessionTasks();
     }
     if (currentPage === 'itinerary') {
-      const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date().getDay()];
-      loadItinerary(todayName);
-      loadTutorials(todayName);
+      const todayDate = new Date();
+      const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth()+1).padStart(2,'0')}-${String(todayDate.getDate()).padStart(2,'0')}`;
+      setItineraryDate(todayDate);
+      loadItinerary(todayStr);
+      loadTutorials(todayStr);
       loadScheduleLessons(); // always fetch; returns empty if not enhanced
       loadAgendas();
     }
@@ -3137,6 +3166,7 @@ const PlanAssist = () => {
     }
     setWorkspaceToolEmbed(null);
     setWorkspaceIntegrationEmbed(null);
+    setWorkspaceEmbedZoom(1.0);
     setWorkspaceTab(tab);
   };
   
@@ -4944,17 +4974,33 @@ const PlanAssist = () => {
           const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
 
-          // Build 7-day window
-          const todayIdx = today.getDay();
-          const dayOffsets = accountSetup.calendarTodayCentered
-            ? [-3,-2,-1,0,1,2,3]
-            : Array.from({length:7}, (_,i) => i - todayIdx);
+          // Build day list based on week toggle settings
+          const todayIdx = today.getDay(); // 0=Sun
+          // Sunday of current week
+          const currentWeekSunday = new Date(today);
+          currentWeekSunday.setDate(today.getDate() - todayIdx);
 
-          const days = dayOffsets.map(offset => {
-            const d = new Date(today);
-            d.setDate(today.getDate() + offset);
-            return d;
-          });
+          const buildWeek = (sundayBase, offsetWeeks) => {
+            const sun = new Date(sundayBase);
+            sun.setDate(sundayBase.getDate() + offsetWeeks * 7);
+            return Array.from({length:7}, (_, i) => {
+              const d = new Date(sun);
+              d.setDate(sun.getDate() + i);
+              return d;
+            });
+          };
+
+          let days = [];
+          if (accountSetup.calendarShowPrevWeek)    days = [...days, ...buildWeek(currentWeekSunday, -1)];
+          if (accountSetup.calendarShowCurrentWeek !== false) days = [...days, ...buildWeek(currentWeekSunday, 0)];
+          if (accountSetup.calendarShowNextWeek1)   days = [...days, ...buildWeek(currentWeekSunday, 1)];
+          if (accountSetup.calendarShowNextWeek2)   days = [...days, ...buildWeek(currentWeekSunday, 2)];
+          // If nothing selected, default to current week
+          if (days.length === 0) days = buildWeek(currentWeekSunday, 0);
+          // Filter weekends if show weekends is off
+          if (!accountSetup.calendarShowWeekends) {
+            days = days.filter(d => d.getDay() !== 0 && d.getDay() !== 6);
+          }
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
@@ -5019,13 +5065,11 @@ const PlanAssist = () => {
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
                   <p className="text-sm text-gray-500 mt-0.5">
-                    {accountSetup.calendarTodayCentered ? 'Today-centered view' : 'Weekly view (Sun – Sat)'}
-                    {' · '}
-                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[days.length-1].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
                   </p>
                 </div>
                 <button
-                  onClick={() => setCurrentPage('settings')}
+                  onClick={() => { setCurrentPage('settings'); setAccountTab('settings'); }}
                   className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   <Settings className="w-4 h-4" />
@@ -5035,7 +5079,7 @@ const PlanAssist = () => {
 
               {/* 7-day grid */}
               <div className="flex-1 overflow-hidden px-4 py-4">
-                <div className="grid grid-cols-7 gap-2 h-full">
+                <div className={`grid gap-2 h-full`} style={{gridTemplateColumns: `repeat(${days.length}, minmax(0, 1fr))`}}>
                   {days.map((day, colIdx) => {
                     const dayTasks = getTasksForDay(day);
                     const todayCol = isToday(day);
@@ -5157,25 +5201,30 @@ const PlanAssist = () => {
         })()}
 
         {currentPage === 'itinerary' && (() => {
-          const todayIdx = new Date().getDay();
           const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-          const todayName = dayNames[todayIdx];
-          const isWeekend = todayIdx === 0 || todayIdx === 6;
+          const today = new Date();
+          const viewDate = itineraryDate || today;
+          const viewDayIdx = viewDate.getDay();
+          const viewDayName = dayNames[viewDayIdx];
+          const isViewWeekend = viewDayIdx === 0 || viewDayIdx === 6;
+          const isViewToday = viewDate.toDateString() === today.toDateString();
           const userGrade = user?.grade ? parseInt(user.grade) : 0;
+          const viewDateStr = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(viewDate.getDate()).padStart(2,'0')}`;
 
           // Tutorial booking URL by grade
           const tutorialUrl = userGrade >= 11 ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
 
-          // Weekend
-          if (isWeekend) return (
-            <div className="max-w-2xl mx-auto p-6 text-center py-24">
-              <ClipboardList className="w-14 h-14 mx-auto mb-4 text-gray-300" />
-              <h2 className="text-2xl font-bold text-gray-700 mb-2">No School Today</h2>
-              <p className="text-gray-400">The Itinerary is only available on school days (Mon–Fri).</p>
-            </div>
-          );
+          const navigateItinerary = (delta) => {
+            const newDate = new Date(viewDate);
+            newDate.setDate(viewDate.getDate() + delta);
+            setItineraryDate(newDate);
+            const newStr = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,'0')}-${String(newDate.getDate()).padStart(2,'0')}`;
+            setItinerarySlots({});
+            loadItinerary(newStr);
+            loadTutorials(newStr);
+          };
 
           // Grade 3-6 block
           if (userGrade >= 3 && userGrade <= 6) return (
@@ -5205,28 +5254,65 @@ const PlanAssist = () => {
             </div>
           );
 
-          // Build period list
+          // Build period list based on the viewed day's schedule
           const range = accountSetup.presentPeriods || '2-6';
           const [pStart, pEnd] = range.split('-').map(Number);
           const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
-          const todaySchedule = accountSetup.schedule?.[todayName] || {};
+          const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
           const lessonCourseMap = {};
-          scheduleLessons.forEach(sl => { if (sl.day === todayName) lessonCourseMap[sl.period] = sl; });
+          scheduleLessons.forEach(sl => { if (sl.day === viewDayName) lessonCourseMap[sl.period] = sl; });
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
             <div className="max-w-3xl mx-auto p-6">
-              {/* Header */}
+              {/* Header with date navigation */}
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
-                  <p className="text-gray-500 text-sm mt-1">{todayName} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                  <p className="text-gray-500 text-sm mt-1">
+                    {viewDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                    {isViewToday && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">Today</span>}
+                  </p>
                 </div>
                 <button onClick={openHubTutorialDialog}
                   className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
                   <BookOpen className="w-4 h-4" /> Book a Tutorial
                 </button>
               </div>
+
+              {/* Date navigation arrows */}
+              <div className="flex items-center justify-center gap-4 mb-6">
+                <button onClick={() => navigateItinerary(-1)}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                </button>
+                <div className="text-center">
+                  <p className="font-semibold text-gray-800 text-sm">
+                    {viewDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                  </p>
+                  {!isViewToday && (
+                    <button onClick={() => {
+                      const t = new Date();
+                      setItineraryDate(t);
+                      const s = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+                      setItinerarySlots({});
+                      loadItinerary(s);
+                      loadTutorials(s);
+                    }} className="text-xs text-purple-500 hover:text-purple-700 font-medium">Back to Today</button>
+                  )}
+                </div>
+                <button onClick={() => navigateItinerary(1)}
+                  className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                </button>
+              </div>
+
+              {/* Weekend notice — shown inline, not a blocker */}
+              {isViewWeekend && (
+                <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl text-center">
+                  <p className="text-gray-500 text-sm">📅 This is a weekend day. You can still plan ahead — periods are shown based on your schedule.</p>
+                </div>
+              )}
 
               {itineraryLoading ? (
                 <div className="flex items-center justify-center py-16">
@@ -5235,11 +5321,11 @@ const PlanAssist = () => {
               ) : (
                 <div className="space-y-4">
                   {selectedPeriods.map(period => {
-                    const slotType = todaySchedule[String(period)] || 'Study';
+                    const slotType = viewSchedule[String(period)] || 'Study';
                     const isLesson = slotType === 'Lesson';
                     const lessonInfo = lessonCourseMap[period];
                     const assignedAgenda = itinerarySlots[period];
-                    const tutorial = tutorials[`${todayName}-${period}`];
+                    const tutorial = tutorials[`${viewDateStr}-${period}`];
 
                     return (
                       <div key={period} className={`rounded-2xl border-2 overflow-hidden shadow-sm ${isLesson ? 'border-blue-200' : 'border-gray-200'}`}>
@@ -5297,14 +5383,14 @@ const PlanAssist = () => {
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 flex-shrink-0">
-                                <button onClick={() => openTutorialDialog({ day: todayName, period })}
+                                <button onClick={() => openTutorialDialog({ date: viewDateStr, period })}
                                   className="text-xs text-orange-600 hover:text-orange-800 font-medium px-2 py-1 rounded hover:bg-orange-100">Edit</button>
-                                <button onClick={() => deleteTutorial(todayName, period)}
+                                <button onClick={() => deleteTutorial(viewDateStr, period)}
                                   className="text-gray-300 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
                               </div>
                             </div>
                           ) : (
-                            <button onClick={() => openTutorialDialog({ day: todayName, period })}
+                            <button onClick={() => openTutorialDialog({ date: viewDateStr, period })}
                               className="flex items-center gap-2 text-sm text-orange-500 hover:text-orange-700 transition-colors font-medium">
                               <BookOpen className="w-4 h-4" /> + Add Tutorial
                             </button>
@@ -5325,7 +5411,7 @@ const PlanAssist = () => {
                                   className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700">
                                   <Play className="w-3 h-3" /> Open
                                 </button>
-                                <button onClick={() => clearAgendaFromSlot(todayName, period)}
+                                <button onClick={() => clearAgendaFromSlot(viewDateStr, period)}
                                   className="text-gray-300 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
                               </div>
                             </div>
@@ -5339,7 +5425,7 @@ const PlanAssist = () => {
                                   <div className="space-y-1.5 max-h-40 overflow-y-auto">
                                     {availableAgendas.map(agenda => (
                                       <button key={agenda.id}
-                                        onClick={() => assignAgendaToSlot(todayName, period, agenda.id, agenda.name)}
+                                        onClick={() => assignAgendaToSlot(viewDateStr, period, agenda.id, agenda.name)}
                                         className="w-full flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-left transition-colors">
                                         <LayoutList className="w-4 h-4 text-purple-400 flex-shrink-0" />
                                         <span className="text-sm text-gray-900 flex-1 truncate">{agenda.name}</span>
@@ -5366,14 +5452,14 @@ const PlanAssist = () => {
 
               {/* Tutorial Dialog — shared for itinerary slot booking */}
               {showTutorialDialog && showTutorialDialog !== 'hub' && (() => {
-                const { day, period } = showTutorialDialog;
+                const { date: dlgDate, period } = showTutorialDialog;
                 return (
                   <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
                       <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
                         <div>
                           <h3 className="text-xl font-bold text-gray-900">Book a Tutorial</h3>
-                          <p className="text-sm text-gray-500 mt-0.5">{day} · Period {period}</p>
+                          <p className="text-sm text-gray-500 mt-0.5">{dlgDate} · Period {period}</p>
                         </div>
                         <button onClick={() => setShowTutorialDialog(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
                       </div>
@@ -5394,7 +5480,7 @@ const PlanAssist = () => {
                           <button onClick={() => setShowTutorialDialog(null)}
                             className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Close</button>
                           <button
-                            onClick={() => saveTutorial({ day, period, zoomNumber: tutorialZoom, topic: tutorialTopic })}
+                            onClick={() => saveTutorial({ date: dlgDate, period, zoomNumber: tutorialZoom, topic: tutorialTopic })}
                             disabled={isSavingTutorial}
                             className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-60 flex items-center justify-center gap-2">
                             {isSavingTutorial ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</> : 'Save'}
@@ -5773,14 +5859,14 @@ const PlanAssist = () => {
                     {/* Calendar Settings */}
                     <div>
                       <h3 className="text-sm font-semibold text-gray-700 mb-3">Calendar Settings</h3>
-                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 mb-4">
                         {[
-                          { key: 'calendarTodayCentered', label: 'Today-Centered View', desc: 'Today always appears in the middle column of the calendar.' },
                           { key: 'calendarShowHomeroom', label: 'Show Homeroom Tasks', desc: 'Homeroom tasks appear on the calendar.' },
                           { key: 'calendarShowCompleted', label: 'Show Completed Tasks', desc: 'Submitted and completed tasks appear with a strikethrough.' },
+                          { key: 'calendarShowWeekends', label: 'Show Weekends', desc: 'Saturday and Sunday columns are visible on the calendar.' },
                         ].map(({ key, label, desc }) => (
                           <div key={key} className="flex items-start gap-3 p-4">
-                            <input type="checkbox" checked={accountSetup[key] || false}
+                            <input type="checkbox" checked={accountSetup[key] !== false}
                               onChange={(e) => setAccountSetup(prev => ({ ...prev, [key]: e.target.checked }))}
                               className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
                             <div>
@@ -5789,6 +5875,36 @@ const PlanAssist = () => {
                             </div>
                           </div>
                         ))}
+                      </div>
+                      <p className="text-xs font-semibold text-gray-600 mb-2">Visible Weeks</p>
+                      <p className="text-xs text-gray-400 mb-3">Select which weeks appear on your calendar. At least one must be selected.</p>
+                      <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+                        {[
+                          { key: 'calendarShowPrevWeek',    label: 'Previous Week', desc: 'The week before the current week.' },
+                          { key: 'calendarShowCurrentWeek', label: 'Current Week',  desc: 'The week containing today.' },
+                          { key: 'calendarShowNextWeek1',   label: 'Next Week',     desc: 'One week from now.' },
+                          { key: 'calendarShowNextWeek2',   label: 'Next Week 2',   desc: 'Two weeks from now.' },
+                        ].map(({ key, label, desc }) => {
+                          const checked = key === 'calendarShowCurrentWeek' ? accountSetup[key] !== false : (accountSetup[key] || false);
+                          return (
+                            <div key={key} className={`flex items-center gap-3 p-4 cursor-pointer transition-colors ${checked ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
+                              onClick={() => {
+                                // Prevent deselecting all — need at least one
+                                const otherKeys = ['calendarShowPrevWeek','calendarShowCurrentWeek','calendarShowNextWeek1','calendarShowNextWeek2'].filter(k => k !== key);
+                                const otherSelected = otherKeys.some(k => k === 'calendarShowCurrentWeek' ? accountSetup[k] !== false : accountSetup[k]);
+                                if (checked && !otherSelected) return; // block deselect if last
+                                setAccountSetup(prev => ({ ...prev, [key]: !checked }));
+                              }}>
+                              <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-purple-600 border-purple-600' : 'border-gray-300'}`}>
+                                {checked && <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+                              </div>
+                              <div className="flex-1">
+                                <p className="font-medium text-gray-900 text-sm">{label}</p>
+                                <p className="text-xs text-gray-500">{desc}</p>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -7009,7 +7125,7 @@ const PlanAssist = () => {
           const range = accountSetup.presentPeriods || '2-6';
           const [pStart, pEnd] = range.split('-').map(Number);
           const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
-          const canSave = tutorialDay && tutorialPeriod;
+          const canSave = tutorialDate && tutorialPeriod;
           return (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
@@ -7026,11 +7142,9 @@ const PlanAssist = () => {
                 <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
                   <p className="text-xs text-gray-500">Once booked, fill in your tutorial details:</p>
                   <div className="flex gap-3">
-                    <select value={tutorialDay} onChange={e => setTutorialDay(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
-                      <option value="">Day *</option>
-                      {dayNames.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    <input type="date" value={tutorialDate} onChange={e => setTutorialDate(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                      placeholder="Date *" />
                     <select value={tutorialPeriod} onChange={e => setTutorialPeriod(e.target.value)}
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
                       <option value="">Period *</option>
@@ -7049,7 +7163,7 @@ const PlanAssist = () => {
                     <button onClick={() => setShowTutorialDialog(null)}
                       className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Close</button>
                     <button
-                      onClick={() => saveTutorial({ day: tutorialDay, period: parseInt(tutorialPeriod), zoomNumber: tutorialZoom, topic: tutorialTopic })}
+                      onClick={() => saveTutorial({ date: tutorialDate, period: parseInt(tutorialPeriod), zoomNumber: tutorialZoom, topic: tutorialTopic })}
                       disabled={!canSave || isSavingTutorial}
                       className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                       {isSavingTutorial
@@ -7058,7 +7172,7 @@ const PlanAssist = () => {
                     </button>
                   </div>
                   {!canSave && (tutorialZoom || tutorialTopic) && (
-                    <p className="text-xs text-red-400 text-center">Please select a Day and Period to save.</p>
+                    <p className="text-xs text-red-400 text-center">Please select a Date and Period to save.</p>
                   )}
                 </div>
               </div>
@@ -7314,15 +7428,25 @@ const PlanAssist = () => {
                             <span className="text-sm font-semibold text-gray-700">
                               {workspaceToolEmbed === 'calculator' ? '🔢 TI-84 Calculator' : '📈 Desmos Graphing Calculator'}
                             </span>
-                            <button
-                              onClick={() => setWorkspaceToolEmbed(null)}
-                              className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
-                              title="Back to Tools"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setWorkspaceEmbedZoom(z => Math.max(0.5, parseFloat((z - 0.1).toFixed(1))))}
+                                className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom out">−</button>
+                              <span className="text-xs text-gray-500 w-10 text-center">{Math.round(workspaceEmbedZoom * 100)}%</span>
+                              <button onClick={() => setWorkspaceEmbedZoom(z => Math.min(2.0, parseFloat((z + 0.1).toFixed(1))))}
+                                className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom in">+</button>
+                              <button onClick={() => setWorkspaceEmbedZoom(1.0)}
+                                className="px-2 py-1 rounded text-xs text-gray-400 hover:bg-gray-200" title="Reset zoom">Reset</button>
+                              <button
+                                onClick={() => { setWorkspaceToolEmbed(null); setWorkspaceEmbedZoom(1.0); }}
+                                className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors ml-1"
+                                title="Back to Tools"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
-                          <div className="flex-1 overflow-hidden">
+                          <div className="flex-1 overflow-auto">
+                            <div style={{ transform: `scale(${workspaceEmbedZoom})`, transformOrigin: 'top left', width: `${100 / workspaceEmbedZoom}%`, height: `${100 / workspaceEmbedZoom}%` }}>
                             {workspaceToolEmbed === 'calculator' ? (
                               <iframe
                                 src="https://ti84calculator.us/"
@@ -7331,6 +7455,7 @@ const PlanAssist = () => {
                                 sandbox="allow-scripts allow-same-origin allow-forms allow-storage-access-by-user-activation"
                                 allow="storage-access"
                                 className="w-full h-full"
+                                style={{ minHeight: '600px' }}
                                 title="TI-84 Calculator"
                               />
                             ) : (
@@ -7341,9 +7466,11 @@ const PlanAssist = () => {
                                 sandbox="allow-scripts allow-same-origin allow-forms allow-storage-access-by-user-activation allow-popups"
                                 allow="storage-access"
                                 className="w-full h-full"
+                                style={{ minHeight: '600px' }}
                                 title="Desmos Graphing Calculator"
                               />
                             )}
+                            </div>
                           </div>
                         </div>
                       ) : (
@@ -7418,15 +7545,25 @@ const PlanAssist = () => {
                                   <span className="text-base">{active.emoji}</span>
                                   <span className="text-sm font-semibold text-gray-700">{active.label}</span>
                                 </div>
-                                <button
-                                  onClick={() => setWorkspaceIntegrationEmbed(null)}
-                                  className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors"
-                                  title="Back to Integrations"
-                                >
-                                  <X className="w-4 h-4" />
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => setWorkspaceEmbedZoom(z => Math.max(0.5, parseFloat((z - 0.1).toFixed(1))))}
+                                    className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom out">−</button>
+                                  <span className="text-xs text-gray-500 w-10 text-center">{Math.round(workspaceEmbedZoom * 100)}%</span>
+                                  <button onClick={() => setWorkspaceEmbedZoom(z => Math.min(2.0, parseFloat((z + 0.1).toFixed(1))))}
+                                    className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom in">+</button>
+                                  <button onClick={() => setWorkspaceEmbedZoom(1.0)}
+                                    className="px-2 py-1 rounded text-xs text-gray-400 hover:bg-gray-200" title="Reset zoom">Reset</button>
+                                  <button
+                                    onClick={() => { setWorkspaceIntegrationEmbed(null); setWorkspaceEmbedZoom(1.0); }}
+                                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors ml-1"
+                                    title="Back to Integrations"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
                               </div>
-                              <div className="flex-1 overflow-hidden">
+                              <div className="flex-1 overflow-auto">
+                                <div style={{ transform: `scale(${workspaceEmbedZoom})`, transformOrigin: 'top left', width: `${100 / workspaceEmbedZoom}%`, height: `${100 / workspaceEmbedZoom}%` }}>
                                 <iframe
                                   key={workspaceIntegrationEmbed}
                                   src={active.url}
@@ -7435,8 +7572,10 @@ const PlanAssist = () => {
                                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-storage-access-by-user-activation"
                                   allow="storage-access"
                                   className="w-full h-full"
+                                  style={{ minHeight: '600px' }}
                                   title={active.label}
                                 />
+                                </div>
                               </div>
                             </div>
                           ) : (
