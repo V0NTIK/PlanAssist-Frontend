@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -125,6 +125,7 @@ const PlanAssist = () => {
   const [adminUserDetail, setAdminUserDetail] = useState(null);
   const [adminDiagnostics, setAdminDiagnostics] = useState(null);
   const [adminAuditLog, setAdminAuditLog] = useState([]);
+  const [adminFeedback, setAdminFeedback] = useState([]);
   const [adminSection, setAdminSection] = useState('users');
   const [adminSearch, setAdminSearch] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
@@ -488,9 +489,14 @@ const PlanAssist = () => {
         }
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
-        // Update user object with grade + isAdmin (merge, don't clobber prior setUser)
+        // Update user object with grade + isAdmin + showInFeed (merge, don't clobber prior setUser)
         setUser(prev => {
-          const merged = { ...(prev || {}), grade: setupData.grade, isAdmin: setupData.is_admin || false };
+          const merged = {
+            ...(prev || {}),
+            grade: setupData.grade,
+            isAdmin: setupData.is_admin || false,
+            showInFeed: setupData.showInFeed !== false
+          };
           localStorage.setItem('user', JSON.stringify(merged));
           return merged;
         });
@@ -946,6 +952,7 @@ const PlanAssist = () => {
       await apiCall(`/tasks/${taskId}/restore`, 'POST');
       await loadResolvedTasks();
       await loadTasks();
+      setCurrentPage('tasks');
     } catch (err) {
       alert('Failed to restore task: ' + err.message);
     }
@@ -1416,7 +1423,8 @@ const PlanAssist = () => {
     if (!currentSessionTask) return;
     setSavingSession(true);
     try {
-      await apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
+      // /end clears session_active; user is leaving the session screen
+      await apiCall(`/sessions/end/${currentSessionTask.id}`, 'POST', {
         accumulatedTime: Math.round(sessionElapsed / 60) // DB stores minutes
       });
       setIsTimerRunning(false);
@@ -1810,12 +1818,20 @@ const PlanAssist = () => {
     setAgendaRunning(false);
     setAgendaTotalElapsed(0);
     agendaTimerRef.current = null;
+    // Mark the current row's task as session_active
+    if (rowData?.taskId) {
+      apiCall(`/sessions/agenda-start/${rowData.taskId}`, 'POST').catch(() => {});
+    }
     setCurrentPage('agenda-active');
   };
 
   const agendaSaveAndExit = async () => {
     const { snappedElapsed, snappedCountdown } = agendaStopTimer();
     const row = (currentAgenda.rows || [])[agendaCurrentRow];
+    // Clear session_active for current row's task
+    if (row?.taskId) {
+      apiCall(`/sessions/agenda-end/${row.taskId}`, 'POST').catch(() => {});
+    }
     try {
       await apiCall(`/agendas/${currentAgenda.id}/save-exit`, 'POST', {
         taskId: row?.taskId ?? null,
@@ -1845,6 +1861,10 @@ const PlanAssist = () => {
       if (result.finished) {
         const totalSecs = agendaTotalElapsed + snappedElapsed;
         setAgendaFinishedSummary({ name: currentAgenda.name, totalSecs, rowCount: rows.length });
+        // Clear session_active — agenda is done
+        if (row?.taskId) {
+          apiCall(`/sessions/agenda-end/${row.taskId}`, 'POST').catch(() => {});
+        }
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
         loadAgendas();
@@ -1857,6 +1877,10 @@ const PlanAssist = () => {
         setAgendaElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
+        // Update session_active to the next row's task
+        if (nextRowData?.taskId) {
+          apiCall(`/sessions/agenda-start/${nextRowData.taskId}`, 'POST').catch(() => {});
+        }
         // Update local agenda current_row
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
       }
@@ -1904,6 +1928,10 @@ const PlanAssist = () => {
         const totalSecs = agendaTotalElapsed + snappedElapsed;
         await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
         setAgendaFinishedSummary({ name: currentAgenda.name, totalSecs, rowCount: rows.length });
+        // Clear session_active — agenda is done
+        if (currentRow?.taskId) {
+          apiCall(`/sessions/agenda-end/${currentRow.taskId}`, 'POST').catch(() => {});
+        }
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
         loadAgendas();
@@ -1922,6 +1950,10 @@ const PlanAssist = () => {
         setAgendaBaseElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
+        // Update session_active to the next row's task
+        if (nextRowData?.taskId) {
+          apiCall(`/sessions/agenda-start/${nextRowData.taskId}`, 'POST').catch(() => {});
+        }
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
       }
     } catch (err) {
@@ -2150,6 +2182,13 @@ const PlanAssist = () => {
     } catch (err) { console.error(err); }
   };
 
+  const loadAdminFeedback = async () => {
+    try {
+      const data = await apiCall('/admin/feedback', 'GET');
+      setAdminFeedback(data || []);
+    } catch (err) { console.error(err); }
+  };
+
   const loadAdminAnnouncements = async () => {
     try {
       const data = await apiCall('/admin/announcements', 'GET');
@@ -2245,13 +2284,16 @@ const PlanAssist = () => {
     setCheckingTask(taskId);
     try {
       await apiCall(`/tasks/${taskId}/complete`, 'PATCH'); // marks deleted=true
-      // Remove task and immediately reassign sequential priorityOrder so
-      // Calendar doesn't show stale numbers before normalizePriority completes
+      // Mark task as deleted in state (keep it for Calendar display) and
+      // immediately reassign sequential priorityOrder for remaining active tasks
       setTasks(prev => {
-        const remaining = prev.filter(t => t.id !== taskId);
-        // Only reassign priorityOrder for active (non-completed, non-deleted) tasks
+        const updated = prev.map(t => t.id === taskId
+          ? { ...t, deleted: true, priorityOrder: null, priority_order: null }
+          : t
+        );
+        // Renumber only active tasks
         let activeIdx = 0;
-        return remaining.map(t => {
+        return updated.map(t => {
           if (t.completed || t.deleted) return t;
           activeIdx++;
           return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
@@ -2942,6 +2984,46 @@ const PlanAssist = () => {
       window.removeEventListener('unload', handleUnload);
     };
   }, [newTasksSidebarOpen, newTasks]);
+
+  // Inactivity auto-pause: if tab is hidden for 180+ minutes, pause any running timer
+  useEffect(() => {
+    let hiddenAt = null;
+    const INACTIVITY_LIMIT_MS = 180 * 60 * 1000; // 180 minutes
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+      } else {
+        if (hiddenAt !== null) {
+          const hiddenMs = Date.now() - hiddenAt;
+          hiddenAt = null;
+          if (hiddenMs >= INACTIVITY_LIMIT_MS) {
+            // Auto-pause session timer if running
+            if (isTimerRunning && currentSessionTask) {
+              setIsTimerRunning(false);
+              timerBaseElapsedRef.current = sessionElapsed;
+              apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
+                accumulatedTime: Math.round(sessionElapsed / 60)
+              }).catch(() => {});
+              alert(`Your session timer was paused after ${Math.round(hiddenMs / 60000)} minutes of inactivity.`);
+            }
+            // Auto-pause agenda timer if running
+            if (agendaRunning) {
+              setAgendaRunning(false);
+              if (agendaTimerRef.current) {
+                clearInterval(agendaTimerRef.current.intervalRef);
+                agendaTimerRef.current = null;
+              }
+              alert(`Your agenda timer was paused after ${Math.round(hiddenMs / 60000)} minutes of inactivity.`);
+            }
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isTimerRunning, currentSessionTask, sessionElapsed, agendaRunning]);
 
   // Handle Escape key to close notes popup
   useEffect(() => {
@@ -5291,7 +5373,7 @@ const PlanAssist = () => {
                 <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
                 <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
                 <p className="text-gray-500 mb-6">Link your courses to your Lesson periods to unlock the Itinerary.</p>
-                <button onClick={() => { setCurrentPage('account'); setAccountTab('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
+                <button onClick={() => { setCurrentPage('account'); setAccountTab('schedule'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
                   className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">Enhance Schedule</button>
                 <button onClick={() => setCurrentPage('hub')} className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">Back to Hub</button>
               </div>
@@ -5977,12 +6059,18 @@ const PlanAssist = () => {
                       <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy Settings</h3>
                       <div className="border border-gray-200 rounded-xl p-4">
                         <div className="flex items-start gap-3">
-                          <input type="checkbox" checked={user?.showInFeed !== false}
+                          <input type="checkbox" checked={user?.showInFeed === true}
                             onChange={async (e) => {
+                              const newVal = e.target.checked;
+                              // Optimistically update UI first
+                              setUser(prev => ({ ...prev, showInFeed: newVal }));
                               try {
-                                await apiCall('/user/feed-preference', 'PUT', { showInFeed: e.target.checked });
-                                setUser(prev => ({ ...prev, showInFeed: e.target.checked }));
-                              } catch (err) { console.error(err); }
+                                await apiCall('/user/feed-preference', 'PUT', { showInFeed: newVal });
+                              } catch (err) {
+                                // Revert on failure
+                                setUser(prev => ({ ...prev, showInFeed: !newVal }));
+                                console.error(err);
+                              }
                             }}
                             className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
                           <div>
@@ -6515,6 +6603,7 @@ const PlanAssist = () => {
                 { id: 'announcements', label: 'Banners', icon: Bell },
                 { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
                 { id: 'audit', label: 'Audit Log', icon: FileText },
+                { id: 'feedback', label: 'Feedback', icon: MessageSquare },
                 { id: 'help', label: 'Help Page', icon: HelpCircle },
               ].map(({ id, label, icon: Icon }) => (
                 <button
@@ -6525,6 +6614,7 @@ const PlanAssist = () => {
                     if (id === 'diagnostics' && !adminDiagnostics) loadAdminDiagnostics();
                     if (id === 'audit') loadAdminAuditLog();
                     if (id === 'announcements') loadAdminAnnouncements();
+                    if (id === 'feedback') loadAdminFeedback();
                     if (id === 'help') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); }
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -6572,6 +6662,7 @@ const PlanAssist = () => {
                                 {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
                                 {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
                                 {parseInt(u.new_tasks) > 0 && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded font-medium">{u.new_tasks} unsorted</span>}
+                                {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>Active</span>}
                               </div>
                             </div>
                           </div>
@@ -6605,6 +6696,12 @@ const PlanAssist = () => {
                               {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-semibold">Admin</span>}
                               {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-semibold">Blocked</span>}
                               {u.schedule_enhanced && <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-semibold">Enhanced</span>}
+                              {adminUserDetail.tasks.some(t => t.session_active) && (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>
+                                  Active: {adminUserDetail.tasks.find(t => t.session_active)?.title?.replace(/\s*\[[^\]]+\]\s*/,'')?.slice(0,30) || 'Task'}
+                                </span>
+                              )}
                             </div>
                           </div>
 
@@ -6929,6 +7026,34 @@ const PlanAssist = () => {
                         )}
                       </div>
                       <span className="text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── FEEDBACK ── */}
+            {adminSection === 'feedback' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900">User Feedback & Bug Reports</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{adminFeedback.length} submission{adminFeedback.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button onClick={loadAdminFeedback} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh</button>
+                </div>
+                <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                  {adminFeedback.length === 0 && <p className="text-gray-400 text-sm">No feedback submitted yet.</p>}
+                  {adminFeedback.map(fb => (
+                    <div key={fb.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm text-gray-900">{fb.user_name || '(unknown)'}</span>
+                          <span className="text-xs text-gray-400">{fb.user_email}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 flex-shrink-0">{new Date(fb.created_at).toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{fb.feedback_text}</p>
                     </div>
                   ))}
                 </div>
