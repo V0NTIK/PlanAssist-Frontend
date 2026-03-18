@@ -1423,9 +1423,15 @@ const PlanAssist = () => {
     if (!currentSessionTask) return;
     setSavingSession(true);
     try {
+      // Snap elapsed from wall clock if timer is currently running
+      let snappedElapsed = sessionElapsed;
+      if (isTimerRunning && timerStartWallRef.current !== null) {
+        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+        snappedElapsed = timerBaseElapsedRef.current + wallElapsed;
+      }
       // /end clears session_active; user is leaving the session screen
       await apiCall(`/sessions/end/${currentSessionTask.id}`, 'POST', {
-        accumulatedTime: Math.round(sessionElapsed / 60) // DB stores minutes
+        accumulatedTime: Math.round(snappedElapsed / 60) // DB stores minutes
       });
       setIsTimerRunning(false);
       const updated = { ...currentSessionTask, accumulatedTime: sessionElapsed, sessionActive: false };
