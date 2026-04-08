@@ -396,33 +396,20 @@ const PlanAssist = () => {
   };
 
   // API helper
-  const apiCall = async (endpoint, method = 'GET', body = null, { retries = 2, retryDelay = 4000 } = {}) => {
+  const apiCall = async (endpoint, method = 'GET', body = null) => {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
-    let lastError;
-    for (let attempt = 0; attempt <= retries; attempt++) {
-      try {
-        const response = await fetch(`${API_URL}${endpoint}`, options);
-        if (!response.ok) {
-          const error = await response.json().catch(() => ({ error: 'Request failed' }));
-          throw new Error(error.error || error.message || 'Request failed');
-        }
-        return await response.json();
-      } catch (err) {
-        lastError = err;
-        // Only retry on network errors (cold start), not on HTTP error responses
-        const isNetworkError = err instanceof TypeError && err.message === 'Failed to fetch';
-        if (!isNetworkError || attempt === retries) throw err;
-        // Wait before retrying — server is likely cold-starting
-        await new Promise(res => setTimeout(res, retryDelay));
-      }
+    const response = await fetch(`${API_URL}${endpoint}`, options);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || error.message || 'Request failed');
     }
-    throw lastError;
+    return response.json();
   };
   
-  // Check for existing session on mount
+  // Check for existing session on mount — warm up server first to avoid cold-start failures
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
@@ -435,8 +422,24 @@ const PlanAssist = () => {
       if (savedColors) {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
-      loadUserData(savedToken).finally(() => setIsAppLoading(false));
-      loadAnnouncements(savedToken);
+      // Ping the health endpoint first — if server is cold this waits for it to wake
+      // before firing all the real data requests, avoiding a flood of 502 errors
+      const warmUp = async () => {
+        const MAX_WAIT = 35000; // 35s max — Render cold starts take up to 30s
+        const POLL_INTERVAL = 2000;
+        const start = Date.now();
+        while (Date.now() - start < MAX_WAIT) {
+          try {
+            const resp = await fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' });
+            if (resp.ok) break; // server is ready
+          } catch (e) { /* still waking */ }
+          await new Promise(r => setTimeout(r, POLL_INTERVAL));
+        }
+      };
+      warmUp().then(() => {
+        loadUserData(savedToken).finally(() => setIsAppLoading(false));
+        loadAnnouncements(savedToken);
+      });
     }
   }, []);
 
