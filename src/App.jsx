@@ -1674,7 +1674,12 @@ const PlanAssist = () => {
       }
 
       // Reassign priority_order sequentially
-      const reordered = merged.map((t, idx) => ({ ...t, priorityOrder: idx + 1, priority_order: idx + 1 }));
+      let activeIdx = 0;
+      const reordered = merged.map(t => {
+        if (t.completed || t.deleted) return { ...t, priorityOrder: null, priority_order: null };
+        activeIdx++;
+        return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
+      });
 
       // Persist new order to server — endpoint expects { taskOrder: [id, id, ...] }
       const taskOrder = reordered
@@ -4413,7 +4418,7 @@ const PlanAssist = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {sessionTasks.map(task => {
+                {sessionTasks.filter(t => isCourseEnabled(t)).map(task => {
                   const hasProgress = task.accumulatedTime > 0;
                   const classColor = getClassColor(task.class);
                   // Use the pre-parsed dueDate from tasks state (already UTC-corrected)
@@ -4638,7 +4643,7 @@ const PlanAssist = () => {
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
                                               >
                                                 <option value="">— pick task —</option>
-                                                {sessionTasks.map(t => (
+                                                {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                                 ))}
                                               </select>
@@ -4772,7 +4777,7 @@ const PlanAssist = () => {
                                             <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
-                                              {sessionTasks.map(t => (
+                                              {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                               ))}
                                             </select>
