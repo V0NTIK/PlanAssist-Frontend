@@ -3671,6 +3671,34 @@ const PlanAssist = () => {
         </div>
       )}
 
+      {/* Hub Explainer Overlay — top-level so it covers the full viewport including nav */}
+      {showHubExplainer && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-[200] flex items-center justify-center p-4" onClick={() => setShowHubExplainer(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setShowHubExplainer(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            <h3 className="text-xl font-bold text-gray-900 mb-5 flex items-center gap-2"><Info className="w-5 h-5 text-purple-500" /> How the Hub Works</h3>
+            <div className="space-y-4 text-sm text-gray-700">
+              <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                <p className="font-semibold text-blue-900 mb-1">📊 Stats (Today / This Week / Study Time / Accuracy / Streak)</p>
+                <p className="text-blue-800">All tasks completed in PlanAssist count here — whether through a Session, Agenda, or checkbox. Accuracy compares your estimated vs actual time. Streak tracks consecutive days with at least one completion.</p>
+              </div>
+              <div className="bg-green-50 rounded-xl p-4 border border-green-100">
+                <p className="font-semibold text-green-900 mb-1">🟢 Live Activity Feed</p>
+                <p className="text-green-800">Shows Canvas tasks (not manually created) completed inside a Session or Agenda with more than 0 minutes logged. Users who opt out of the feed won't appear here.</p>
+              </div>
+              <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
+                <p className="font-semibold text-yellow-900 mb-1">🏆 Leaderboard</p>
+                <p className="text-yellow-800">Only counts tasks where Canvas confirms completion — either detected automatically during a Sync, or when you click Mark Complete and Canvas confirms the submission. Resets every Monday. Shows all participants in your grade.</p>
+              </div>
+              <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
+                <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
+                <p className="text-purple-800">Start Session begins a timed work block on a specific task. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* PWA Install Banner */}
       {showPwaBanner && isAuthenticated && (
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
@@ -3962,10 +3990,10 @@ const PlanAssist = () => {
                       </div>
                     )}
 
-                    {/* Leaderboard List — capped at 5 with scroll */}
+                    {/* Leaderboard List — all participants, scrollable */}
                     <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                       {leaderboard.length > 0 ? (
-                        leaderboard.slice(0, 5).map((entry, index) => {
+                        leaderboard.map((entry, index) => {
                           const isCurrentUser = entry.user_name === user?.name;
                           const medals = ['🥇', '🥈', '🥉'];
                           
@@ -4028,34 +4056,6 @@ const PlanAssist = () => {
                 </div>
               </div>
             </div>
-
-            {/* Feature 4: Hub Explainer Overlay */}
-            {showHubExplainer && (
-              <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setShowHubExplainer(false)}>
-                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative" onClick={e => e.stopPropagation()}>
-                  <button onClick={() => setShowHubExplainer(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                  <h3 className="text-xl font-bold text-gray-900 mb-5 flex items-center gap-2"><Info className="w-5 h-5 text-purple-500" /> How the Hub Works</h3>
-                  <div className="space-y-4 text-sm text-gray-700">
-                    <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
-                      <p className="font-semibold text-blue-900 mb-1">📊 Stats (Today / This Week / Study Time / Accuracy / Streak)</p>
-                      <p className="text-blue-800">All tasks completed in PlanAssist count here — whether through a Session, Agenda, or checkbox. Accuracy compares your estimated vs actual time. Streak tracks consecutive days with at least one completion.</p>
-                    </div>
-                    <div className="bg-green-50 rounded-xl p-4 border border-green-100">
-                      <p className="font-semibold text-green-900 mb-1">🟢 Live Activity Feed</p>
-                      <p className="text-green-800">Shows Canvas tasks (not manually created) completed inside a Session or Agenda with more than 0 minutes logged. Users who opt out of the feed won't appear here.</p>
-                    </div>
-                    <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
-                      <p className="font-semibold text-yellow-900 mb-1">🏆 Leaderboard</p>
-                      <p className="text-yellow-800">Only counts tasks where Canvas confirms completion — either detected automatically during a Sync, or when you click Mark Complete and Canvas confirms the submission. Resets every Monday. Shows top 5 in your grade.</p>
-                    </div>
-                    <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
-                      <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
-                      <p className="text-purple-800">Start Session begins a timed work block on a specific task. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* No Tasks State */}
             {tasks.length === 0 && (
