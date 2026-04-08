@@ -5850,7 +5850,10 @@ const PlanAssist = () => {
           );
         })()}
 
-        {currentPage === 'marks' && (
+        {currentPage === 'marks' && (() => {
+          // Only show enabled courses on the Marks page
+          const enabledCourses = courses.filter(c => c.enabled !== false);
+          return (
           <div className="max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6 relative overflow-hidden">
@@ -5860,12 +5863,12 @@ const PlanAssist = () => {
                 <h1 className="text-3xl font-bold">Your Marks</h1>
               </div>
               <p className="text-blue-100">Track your progress and see how you stack up</p>
-              {courses.length > 0 && (
+              {enabledCourses.length > 0 && (
                 <div className="mt-4 flex flex-wrap gap-4">
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">
                       {(() => {
-                        const scored = courses.filter(c => c.current_period_score != null);
+                        const scored = enabledCourses.filter(c => c.current_period_score != null);
                         if (scored.length === 0) return 'N/A';
                         const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score), 0) / scored.length;
                         return avg.toFixed(1) + '%';
@@ -5874,18 +5877,18 @@ const PlanAssist = () => {
                     <div className="text-xs text-blue-100">Period Average</div>
                   </div>
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
-                    <div className="text-2xl font-bold">{courses.length}</div>
+                    <div className="text-2xl font-bold">{enabledCourses.length}</div>
                     <div className="text-xs text-blue-100">Active Courses</div>
                   </div>
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">
-                      {calculateGPA(courses) ?? 'N/A'}
+                      {calculateGPA(enabledCourses) ?? 'N/A'}
                     </div>
                     <div className="text-xs text-blue-100">Current GPA</div>
                   </div>
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">
-                      {calculateYearAverage(courses) != null ? calculateYearAverage(courses) + '%' : 'N/A'}
+                      {calculateYearAverage(enabledCourses) != null ? calculateYearAverage(enabledCourses) + '%' : 'N/A'}
                     </div>
                     <div className="text-xs text-blue-100">Year Average</div>
                   </div>
@@ -5894,7 +5897,7 @@ const PlanAssist = () => {
             </div>
 
             {/* No courses yet */}
-            {courses.length === 0 ? (
+            {enabledCourses.length === 0 ? (
               <div className="bg-white rounded-xl shadow-md p-12 text-center">
                 <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-gray-900 mb-2">No Courses Yet</h3>
@@ -5905,7 +5908,7 @@ const PlanAssist = () => {
               <>
                 {/* Grade cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                  {[...courses].sort((a, b) => {
+                  {[...enabledCourses].sort((a, b) => {
                     const aScore = a.current_period_score ?? null;
                     const bScore = b.current_period_score ?? null;
                     const aNum = aScore != null ? parseFloat(aScore) : null;
@@ -6046,7 +6049,8 @@ const PlanAssist = () => {
               }
             `}</style>
           </div>
-        )}
+          );
+        })()}
         {currentPage === 'account' && (
           <div className="max-w-6xl mx-auto p-6">
             {/* Header */}
