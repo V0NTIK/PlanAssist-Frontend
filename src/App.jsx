@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -77,9 +77,13 @@ const PlanAssist = () => {
     presentPeriods: '2-6',
     schedule: {},
     classColors: {},
-    calendarTodayCentered: false,
     calendarShowHomeroom: true,
-    calendarShowCompleted: true
+    calendarShowCompleted: true,
+    calendarShowPrevWeek: false,
+    calendarShowCurrentWeek: true,
+    calendarShowNextWeek1: false,
+    calendarShowNextWeek2: false,
+    calendarShowWeekends: true
   });
   const [tasks, setTasks] = useState([]);
   const [sessionTasks, setSessionTasks] = useState([]);
@@ -98,13 +102,15 @@ const PlanAssist = () => {
   const [enhanceZoom, setEnhanceZoom] = useState({});                  // { courseId: zoomNumber }
   const [scheduleLessons, setScheduleLessons] = useState([]);           // from DB after enhance
   const [itinerarySlots, setItinerarySlots] = useState({});            // { period: { agendaId, agendaName } }
+  const [itineraryDate, setItineraryDate] = useState(null);              // Date object for currently viewed itinerary date
   const [itineraryLoading, setItineraryLoading] = useState(false);
   const [showAddAgendaSlot, setShowAddAgendaSlot] = useState(null);    // period number being picked
   const [tutorials, setTutorials] = useState({});          // { 'Monday-3': { zoom_number, topic, period, day } }
   const [showTutorialDialog, setShowTutorialDialog] = useState(null); // { day, period } or 'hub'
   const [tutorialZoom, setTutorialZoom] = useState('');
   const [tutorialTopic, setTutorialTopic] = useState('');
-  const [tutorialDay, setTutorialDay] = useState('');     // for hub booking
+  const [tutorialDay, setTutorialDay] = useState('');     // for hub booking (kept for compat)
+  const [tutorialDate, setTutorialDate] = useState('');   // ISO date string for hub booking
   const [tutorialPeriod, setTutorialPeriod] = useState('');
   const [isSavingTutorial, setIsSavingTutorial] = useState(false);
   const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
@@ -119,6 +125,7 @@ const PlanAssist = () => {
   const [adminUserDetail, setAdminUserDetail] = useState(null);
   const [adminDiagnostics, setAdminDiagnostics] = useState(null);
   const [adminAuditLog, setAdminAuditLog] = useState([]);
+  const [adminFeedback, setAdminFeedback] = useState([]);
   const [adminSection, setAdminSection] = useState('users');
   const [adminSearch, setAdminSearch] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
@@ -212,6 +219,16 @@ const PlanAssist = () => {
   const [workspaceTab, setWorkspaceTab] = useState('canvas');
   const [savingNotes, setSavingNotes] = useState(false);
   const [canvasWindow, setCanvasWindow] = useState(null);
+  const [workspaceSource, setWorkspaceSource] = useState('session'); // 'session' | 'agenda'
+  const [workspaceToolEmbed, setWorkspaceToolEmbed] = useState(null); // null | 'calculator' | 'desmos'
+  const [workspaceIntegrationEmbed, setWorkspaceIntegrationEmbed] = useState(null); // null | integration key
+  const [workspaceEmbedZoom, setWorkspaceEmbedZoom] = useState(1.0); // zoom scale for inline embeds
+  // Free timer state (Session workspace Timer tab only)
+  const [freeTimerMins, setFreeTimerMins] = useState('');
+  const [freeTimerSecs, setFreeTimerSecs] = useState(0);
+  const [freeTimerRunning, setFreeTimerRunning] = useState(false);
+  const [freeTimerDone, setFreeTimerDone] = useState(false);
+  const freeTimerIntervalRef = React.useRef(null);
   
   // Whiteboard state
   const [isDrawing, setIsDrawing] = useState(false);
@@ -442,9 +459,13 @@ const PlanAssist = () => {
           grade: setupData.grade || '',
           canvasApiToken: setupData.canvasApiToken || '',
           presentPeriods: setupData.presentPeriods || '2-6',
-        calendarTodayCentered: setupData.calendarTodayCentered ?? false,
         calendarShowHomeroom: setupData.calendarShowHomeroom ?? true,
         calendarShowCompleted: setupData.calendarShowCompleted ?? true,
+        calendarShowPrevWeek: setupData.calendarShowPrevWeek ?? false,
+        calendarShowCurrentWeek: setupData.calendarShowCurrentWeek ?? true,
+        calendarShowNextWeek1: setupData.calendarShowNextWeek1 ?? false,
+        calendarShowNextWeek2: setupData.calendarShowNextWeek2 ?? false,
+        calendarShowWeekends: setupData.calendarShowWeekends ?? true,
           schedule: setupData.schedule || {},
           scheduleEnhanced: setupData.schedule_enhanced || false,
           classColors: savedColors ? JSON.parse(savedColors) : {}
@@ -468,9 +489,14 @@ const PlanAssist = () => {
         }
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
         
-        // Update user object with grade + isAdmin (merge, don't clobber prior setUser)
+        // Update user object with grade + isAdmin + showInFeed (merge, don't clobber prior setUser)
         setUser(prev => {
-          const merged = { ...(prev || {}), grade: setupData.grade, isAdmin: setupData.is_admin || false };
+          const merged = {
+            ...(prev || {}),
+            grade: setupData.grade,
+            isAdmin: setupData.is_admin || false,
+            showInFeed: setupData.showInFeed !== false
+          };
           localStorage.setItem('user', JSON.stringify(merged));
           return merged;
         });
@@ -866,9 +892,13 @@ const PlanAssist = () => {
         canvasApiToken: accountSetup.canvasApiToken,
         presentPeriods: accountSetup.presentPeriods,
         schedule: accountSetup.schedule,
-        calendarTodayCentered: accountSetup.calendarTodayCentered,
         calendarShowHomeroom: accountSetup.calendarShowHomeroom,
-        calendarShowCompleted: accountSetup.calendarShowCompleted
+        calendarShowCompleted: accountSetup.calendarShowCompleted,
+        calendarShowPrevWeek: accountSetup.calendarShowPrevWeek,
+        calendarShowCurrentWeek: accountSetup.calendarShowCurrentWeek,
+        calendarShowNextWeek1: accountSetup.calendarShowNextWeek1,
+        calendarShowNextWeek2: accountSetup.calendarShowNextWeek2,
+        calendarShowWeekends: accountSetup.calendarShowWeekends
       });
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
       
@@ -922,6 +952,7 @@ const PlanAssist = () => {
       await apiCall(`/tasks/${taskId}/restore`, 'POST');
       await loadResolvedTasks();
       await loadTasks();
+      setCurrentPage('tasks');
     } catch (err) {
       alert('Failed to restore task: ' + err.message);
     }
@@ -1392,8 +1423,15 @@ const PlanAssist = () => {
     if (!currentSessionTask) return;
     setSavingSession(true);
     try {
-      await apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
-        accumulatedTime: Math.round(sessionElapsed / 60) // DB stores minutes
+      // Snap elapsed from wall clock if timer is currently running
+      let snappedElapsed = sessionElapsed;
+      if (isTimerRunning && timerStartWallRef.current !== null) {
+        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+        snappedElapsed = timerBaseElapsedRef.current + wallElapsed;
+      }
+      // /end clears session_active; user is leaving the session screen
+      await apiCall(`/sessions/end/${currentSessionTask.id}`, 'POST', {
+        accumulatedTime: Math.round(snappedElapsed / 60) // DB stores minutes
       });
       setIsTimerRunning(false);
       const updated = { ...currentSessionTask, accumulatedTime: sessionElapsed, sessionActive: false };
@@ -1635,13 +1673,8 @@ const PlanAssist = () => {
         }
       }
 
-      // Reassign priority_order sequentially — only for active (non-deleted, non-completed) tasks
-      let activeIdx = 0;
-      const reordered = merged.map(t => {
-        if (t.completed || t.deleted) return { ...t, priorityOrder: null, priority_order: null };
-        activeIdx++;
-        return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
-      });
+      // Reassign priority_order sequentially
+      const reordered = merged.map((t, idx) => ({ ...t, priorityOrder: idx + 1, priority_order: idx + 1 }));
 
       // Persist new order to server — endpoint expects { taskOrder: [id, id, ...] }
       const taskOrder = reordered
@@ -1791,12 +1824,20 @@ const PlanAssist = () => {
     setAgendaRunning(false);
     setAgendaTotalElapsed(0);
     agendaTimerRef.current = null;
+    // Mark the current row's task as session_active
+    if (rowData?.taskId) {
+      apiCall(`/sessions/agenda-start/${rowData.taskId}`, 'POST').catch(() => {});
+    }
     setCurrentPage('agenda-active');
   };
 
   const agendaSaveAndExit = async () => {
     const { snappedElapsed, snappedCountdown } = agendaStopTimer();
     const row = (currentAgenda.rows || [])[agendaCurrentRow];
+    // Clear session_active for current row's task
+    if (row?.taskId) {
+      apiCall(`/sessions/agenda-end/${row.taskId}`, 'POST').catch(() => {});
+    }
     try {
       await apiCall(`/agendas/${currentAgenda.id}/save-exit`, 'POST', {
         taskId: row?.taskId ?? null,
@@ -1826,6 +1867,10 @@ const PlanAssist = () => {
       if (result.finished) {
         const totalSecs = agendaTotalElapsed + snappedElapsed;
         setAgendaFinishedSummary({ name: currentAgenda.name, totalSecs, rowCount: rows.length });
+        // Clear session_active — agenda is done
+        if (row?.taskId) {
+          apiCall(`/sessions/agenda-end/${row.taskId}`, 'POST').catch(() => {});
+        }
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
         loadAgendas();
@@ -1838,6 +1883,10 @@ const PlanAssist = () => {
         setAgendaElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
+        // Update session_active to the next row's task
+        if (nextRowData?.taskId) {
+          apiCall(`/sessions/agenda-start/${nextRowData.taskId}`, 'POST').catch(() => {});
+        }
         // Update local agenda current_row
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
       }
@@ -1885,6 +1934,10 @@ const PlanAssist = () => {
         const totalSecs = agendaTotalElapsed + snappedElapsed;
         await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
         setAgendaFinishedSummary({ name: currentAgenda.name, totalSecs, rowCount: rows.length });
+        // Clear session_active — agenda is done
+        if (currentRow?.taskId) {
+          apiCall(`/sessions/agenda-end/${currentRow.taskId}`, 'POST').catch(() => {});
+        }
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
         loadAgendas();
@@ -1903,6 +1956,10 @@ const PlanAssist = () => {
         setAgendaBaseElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
+        // Update session_active to the next row's task
+        if (nextRowData?.taskId) {
+          apiCall(`/sessions/agenda-start/${nextRowData.taskId}`, 'POST').catch(() => {});
+        }
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
       }
     } catch (err) {
@@ -1924,10 +1981,17 @@ const PlanAssist = () => {
     }
   };
 
-  const loadItinerary = async (dayName) => {
+  const localDateStr = (d) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const loadItinerary = async (dateStr) => {
     setItineraryLoading(true);
     try {
-      const data = await apiCall(`/itinerary?day=${dayName}`, 'GET');
+      const data = await apiCall(`/itinerary?date=${dateStr}`, 'GET');
       const slots = {};
       (data || []).forEach(row => {
         if (row.agenda_id && !row.finished) {
@@ -1942,9 +2006,9 @@ const PlanAssist = () => {
     }
   };
 
-  const assignAgendaToSlot = async (dayName, period, agendaId, agendaName) => {
+  const assignAgendaToSlot = async (dateStr, period, agendaId, agendaName) => {
     try {
-      await apiCall('/itinerary', 'PUT', { day: dayName, period, agendaId });
+      await apiCall('/itinerary', 'PUT', { date: dateStr, period, agendaId });
       setItinerarySlots(prev => ({
         ...prev,
         [period]: { agendaId, agendaName }
@@ -1955,9 +2019,9 @@ const PlanAssist = () => {
     }
   };
 
-  const clearAgendaFromSlot = async (dayName, period) => {
+  const clearAgendaFromSlot = async (dateStr, period) => {
     try {
-      await apiCall('/itinerary', 'PUT', { day: dayName, period, agendaId: null });
+      await apiCall('/itinerary', 'PUT', { date: dateStr, period, agendaId: null });
       setItinerarySlots(prev => {
         const next = { ...prev };
         delete next[period];
@@ -2048,6 +2112,7 @@ const PlanAssist = () => {
     setTutorialZoom('');
     setTutorialTopic('');
     setTutorialDay('');
+    setTutorialDate('');
     setTutorialPeriod('');
     setShowTutorialDialog('hub');
   };
@@ -2120,6 +2185,13 @@ const PlanAssist = () => {
     try {
       const data = await apiCall('/admin/audit-log', 'GET');
       setAdminAuditLog(data || []);
+    } catch (err) { console.error(err); }
+  };
+
+  const loadAdminFeedback = async () => {
+    try {
+      const data = await apiCall('/admin/feedback', 'GET');
+      setAdminFeedback(data || []);
     } catch (err) { console.error(err); }
   };
 
@@ -2218,13 +2290,16 @@ const PlanAssist = () => {
     setCheckingTask(taskId);
     try {
       await apiCall(`/tasks/${taskId}/complete`, 'PATCH'); // marks deleted=true
-      // Remove task and immediately reassign sequential priorityOrder so
-      // Calendar doesn't show stale numbers before normalizePriority completes
+      // Mark task as deleted in state (keep it for Calendar display) and
+      // immediately reassign sequential priorityOrder for remaining active tasks
       setTasks(prev => {
-        const remaining = prev.filter(t => t.id !== taskId);
-        // Only reassign priorityOrder for active (non-completed, non-deleted) tasks
+        const updated = prev.map(t => t.id === taskId
+          ? { ...t, deleted: true, priorityOrder: null, priority_order: null }
+          : t
+        );
+        // Renumber only active tasks
         let activeIdx = 0;
-        return remaining.map(t => {
+        return updated.map(t => {
           if (t.completed || t.deleted) return t;
           activeIdx++;
           return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
@@ -2392,9 +2467,18 @@ const PlanAssist = () => {
     }
   };
 
-  const openWorkspace = async (task) => {
+  const openWorkspace = async (task, source = 'session') => {
     setWorkspaceTask(task);
     setWorkspaceTab('canvas');
+    setWorkspaceSource(source);
+    setWorkspaceToolEmbed(null);
+    setWorkspaceIntegrationEmbed(null);
+    // Reset free timer
+    setFreeTimerMins('');
+    setFreeTimerSecs(0);
+    setFreeTimerRunning(false);
+    setFreeTimerDone(false);
+    if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
     await loadTaskNotes(task.id);
     setShowWorkspace(true);
     
@@ -2412,10 +2496,15 @@ const PlanAssist = () => {
     if (canvasWindow && !canvasWindow.closed) {
       canvasWindow.close();
     }
+    // Stop free timer if running
+    if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
+    setFreeTimerRunning(false);
     setShowWorkspace(false);
     setWorkspaceTask(null);
     setWorkspaceNotes('');
     setCanvasWindow(null);
+    setWorkspaceToolEmbed(null);
+    setWorkspaceIntegrationEmbed(null);
     // Restore window to full size
     try {
       window.moveTo(0, 0);
@@ -2840,6 +2929,108 @@ const PlanAssist = () => {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Free workspace timer (Session mode only) helpers
+  const startFreeTimer = () => {
+    const totalSecs = parseInt(freeTimerMins) * 60;
+    if (!totalSecs || totalSecs <= 0) return;
+    setFreeTimerSecs(totalSecs);
+    setFreeTimerDone(false);
+    setFreeTimerRunning(true);
+    if (freeTimerIntervalRef.current) clearInterval(freeTimerIntervalRef.current);
+    freeTimerIntervalRef.current = setInterval(() => {
+      setFreeTimerSecs(prev => {
+        if (prev <= 1) {
+          clearInterval(freeTimerIntervalRef.current);
+          freeTimerIntervalRef.current = null;
+          setFreeTimerRunning(false);
+          setFreeTimerDone(true);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+  const resetFreeTimer = () => {
+    if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
+    setFreeTimerRunning(false);
+    setFreeTimerDone(false);
+    setFreeTimerSecs(0);
+    setFreeTimerMins('');
+  };
+
+  // Item 3: Warn + auto-add tasks before page unload when sidebar is open
+  useEffect(() => {
+    if (!newTasksSidebarOpen || newTasks.length === 0) return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = `You have ${newTasks.length} unsorted task(s). If you leave, they will be added to your list automatically by deadline order.`;
+      return e.returnValue;
+    };
+    // On actual unload (after confirm), trigger the smart add via beacon so it fires even as the page closes
+    const handleUnload = () => {
+      // Best-effort: fire clear-new-flags synchronously via sendBeacon
+      const taskIds = newTasks.map(t => t.id);
+      if (taskIds.length > 0 && navigator.sendBeacon) {
+        const token = localStorage.getItem('token');
+        const blob = new Blob([JSON.stringify({ taskIds })], { type: 'application/json' });
+        // sendBeacon can't set Authorization header, so we use the /tasks/reorder endpoint
+        // instead just fire clear-new-flags to at least clear is_new; reorder happens on next load
+        fetch(`${API_URL}/tasks/clear-new-flags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ taskIds }),
+          keepalive: true
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('unload', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [newTasksSidebarOpen, newTasks]);
+
+  // Inactivity auto-pause: if tab is hidden for 180+ minutes, pause any running timer
+  useEffect(() => {
+    let hiddenAt = null;
+    const INACTIVITY_LIMIT_MS = 180 * 60 * 1000; // 180 minutes
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        hiddenAt = Date.now();
+      } else {
+        if (hiddenAt !== null) {
+          const hiddenMs = Date.now() - hiddenAt;
+          hiddenAt = null;
+          if (hiddenMs >= INACTIVITY_LIMIT_MS) {
+            // Auto-pause session timer if running
+            if (isTimerRunning && currentSessionTask) {
+              setIsTimerRunning(false);
+              timerBaseElapsedRef.current = sessionElapsed;
+              apiCall(`/sessions/pause/${currentSessionTask.id}`, 'POST', {
+                accumulatedTime: Math.round(sessionElapsed / 60)
+              }).catch(() => {});
+              alert(`Your session timer was paused after ${Math.round(hiddenMs / 60000)} minutes of inactivity.`);
+            }
+            // Auto-pause agenda timer if running
+            if (agendaRunning) {
+              setAgendaRunning(false);
+              if (agendaTimerRef.current) {
+                clearInterval(agendaTimerRef.current.intervalRef);
+                agendaTimerRef.current = null;
+              }
+              alert(`Your agenda timer was paused after ${Math.round(hiddenMs / 60000)} minutes of inactivity.`);
+            }
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isTimerRunning, currentSessionTask, sessionElapsed, agendaRunning]);
+
   // Handle Escape key to close notes popup
   useEffect(() => {
     const handleEscape = (e) => {
@@ -3091,6 +3282,9 @@ const PlanAssist = () => {
     if (workspaceTab === 'notes' && tab !== 'notes') {
       await saveTaskNotes();
     }
+    setWorkspaceToolEmbed(null);
+    setWorkspaceIntegrationEmbed(null);
+    setWorkspaceEmbedZoom(1.0);
     setWorkspaceTab(tab);
   };
   
@@ -3232,36 +3426,36 @@ const PlanAssist = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Calendar className="w-5 h-5" />
               <span className="font-medium">Calendar</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
               {hasUnsavedChanges && !['session-active','agenda-active'].includes(currentPage) && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <LayoutList className="w-5 h-5" />
               <span className="font-medium">Agendas</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <ClipboardList className="w-5 h-5" />
               <span className="font-medium">Itinerary</span>
             </button>
-            <button onClick={() => !isSavingPlan && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isSavingPlan && !isLoadingTasks && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <UserCircle className="w-5 h-5" />
             </button>
             {user?.isAdmin && (
@@ -3279,7 +3473,7 @@ const PlanAssist = () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -3344,8 +3538,16 @@ const PlanAssist = () => {
       ))}
 
       {/* Save & Adjust Plan - Full Lock Overlay */}
-      {isSavingPlan && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed" />
+      {(isSavingPlan || isLoadingTasks) && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed flex items-center justify-center">
+          {isLoadingTasks && !isSavingPlan && (
+            <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-3 pointer-events-none">
+              <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-gray-800 font-semibold text-base">Syncing with Canvas...</p>
+              <p className="text-gray-400 text-sm">This may take a moment</p>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Tutorial Overlay */}
@@ -4211,7 +4413,7 @@ const PlanAssist = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {sessionTasks.filter(t => isCourseEnabled(t)).map(task => {
+                {sessionTasks.map(task => {
                   const hasProgress = task.accumulatedTime > 0;
                   const classColor = getClassColor(task.class);
                   // Use the pre-parsed dueDate from tasks state (already UTC-corrected)
@@ -4339,7 +4541,7 @@ const PlanAssist = () => {
                     ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
                     : <><Check className="w-5 h-5" /> Mark Complete</>}
                 </button>
-                <button onClick={() => openWorkspace(currentSessionTask)}
+                <button onClick={() => openWorkspace(currentSessionTask, 'session')}
                   className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
                   <BookOpen className="w-4 h-4" /> Open Workspace
                 </button>
@@ -4436,7 +4638,7 @@ const PlanAssist = () => {
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
                                               >
                                                 <option value="">— pick task —</option>
-                                                {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
+                                                {sessionTasks.map(t => (
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                                 ))}
                                               </select>
@@ -4570,7 +4772,7 @@ const PlanAssist = () => {
                                             <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
-                                              {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
+                                              {sessionTasks.map(t => (
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                               ))}
                                             </select>
@@ -4851,7 +5053,7 @@ const PlanAssist = () => {
                             {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
                             Mark Complete
                           </button>
-                          <button onClick={() => openWorkspace(rowTask)}
+                          <button onClick={() => openWorkspace(rowTask, 'agenda')}
                             className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
                             <BookOpen className="w-3.5 h-3.5" /> Open Workspace
                           </button>
@@ -4898,17 +5100,37 @@ const PlanAssist = () => {
           const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
 
-          // Build 7-day window
-          const todayIdx = today.getDay();
-          const dayOffsets = accountSetup.calendarTodayCentered
-            ? [-3,-2,-1,0,1,2,3]
-            : Array.from({length:7}, (_,i) => i - todayIdx);
+          // Build weeks as separate rows (each selected week = one row of columns)
+          const todayIdx = today.getDay(); // 0=Sun
+          const currentWeekSunday = new Date(today);
+          currentWeekSunday.setDate(today.getDate() - todayIdx);
 
-          const days = dayOffsets.map(offset => {
-            const d = new Date(today);
-            d.setDate(today.getDate() + offset);
-            return d;
-          });
+          const buildWeek = (sundayBase, offsetWeeks) => {
+            const sun = new Date(sundayBase);
+            sun.setDate(sundayBase.getDate() + offsetWeeks * 7);
+            return Array.from({length:7}, (_, i) => {
+              const d = new Date(sun);
+              d.setDate(sun.getDate() + i);
+              return d;
+            });
+          };
+
+          // weeks is an array of week-arrays; each inner array = one row
+          let weeks = [];
+          if (accountSetup.calendarShowPrevWeek)              weeks.push(buildWeek(currentWeekSunday, -1));
+          if (accountSetup.calendarShowCurrentWeek !== false) weeks.push(buildWeek(currentWeekSunday, 0));
+          if (accountSetup.calendarShowNextWeek1)             weeks.push(buildWeek(currentWeekSunday, 1));
+          if (accountSetup.calendarShowNextWeek2)             weeks.push(buildWeek(currentWeekSunday, 2));
+          if (weeks.length === 0) weeks = [buildWeek(currentWeekSunday, 0)];
+
+          // Filter weekends from each week if needed
+          const showWeekends = accountSetup.calendarShowWeekends !== false;
+          const filteredWeeks = weeks.map(week =>
+            showWeekends ? week : week.filter(d => d.getDay() !== 0 && d.getDay() !== 6)
+          );
+
+          // For header date range display
+          const allDays = filteredWeeks.flat();
 
           const isToday = (d) => d.toDateString() === today.toDateString();
 
@@ -4973,13 +5195,11 @@ const PlanAssist = () => {
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Calendar</h2>
                   <p className="text-sm text-gray-500 mt-0.5">
-                    {accountSetup.calendarTodayCentered ? 'Today-centered view' : 'Weekly view (Sun – Sat)'}
-                    {' · '}
-                    {days[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {days[6].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+                    {allDays[0].toLocaleDateString('en-US',{month:'short',day:'numeric'})} – {allDays[allDays.length-1].toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
                   </p>
                 </div>
                 <button
-                  onClick={() => setCurrentPage('settings')}
+                  onClick={() => { setCurrentPage('account'); setAccountTab('settings'); }}
                   className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
                 >
                   <Settings className="w-4 h-4" />
@@ -4987,10 +5207,11 @@ const PlanAssist = () => {
                 </button>
               </div>
 
-              {/* 7-day grid */}
-              <div className="flex-1 overflow-hidden px-4 py-4">
-                <div className="grid grid-cols-7 gap-2 h-full">
-                  {days.map((day, colIdx) => {
+              {/* Stacked week rows */}
+              <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+                {filteredWeeks.map((weekDays, weekIdx) => (
+                  <div key={weekIdx} className="grid gap-2" style={{gridTemplateColumns: `repeat(${weekDays.length}, minmax(0, 1fr))`, minHeight: '180px'}}>
+                  {weekDays.map((day, colIdx) => {
                     const dayTasks = getTasksForDay(day);
                     const todayCol = isToday(day);
                     return (
@@ -5104,32 +5325,38 @@ const PlanAssist = () => {
                       </div>
                     );
                   })}
-                </div>
+                  </div>
+                ))}
               </div>
             </div>
           );
         })()}
 
         {currentPage === 'itinerary' && (() => {
-          const todayIdx = new Date().getDay();
           const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-          const todayName = dayNames[todayIdx];
-          const isWeekend = todayIdx === 0 || todayIdx === 6;
+          const today = new Date();
+          const viewDate = itineraryDate || today;
+          const viewDayIdx = viewDate.getDay();
+          const viewDayName = dayNames[viewDayIdx];
+          const isViewWeekend = viewDayIdx === 0 || viewDayIdx === 6;
+          const isViewToday = viewDate.toDateString() === today.toDateString();
           const userGrade = user?.grade ? parseInt(user.grade) : 0;
+          const viewDateStr = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(viewDate.getDate()).padStart(2,'0')}`;
 
           // Tutorial booking URL by grade
           const tutorialUrl = userGrade >= 11 ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
 
-          // Weekend
-          if (isWeekend) return (
-            <div className="max-w-2xl mx-auto p-6 text-center py-24">
-              <ClipboardList className="w-14 h-14 mx-auto mb-4 text-gray-300" />
-              <h2 className="text-2xl font-bold text-gray-700 mb-2">No School Today</h2>
-              <p className="text-gray-400">The Itinerary is only available on school days (Mon–Fri).</p>
-            </div>
-          );
+          const navigateItinerary = (delta) => {
+            const newDate = new Date(viewDate);
+            newDate.setDate(viewDate.getDate() + delta);
+            setItineraryDate(newDate);
+            const newStr = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,'0')}-${String(newDate.getDate()).padStart(2,'0')}`;
+            setItinerarySlots({});
+            loadItinerary(newStr);
+            loadTutorials(newStr);
+          };
 
           // Grade 3-6 block
           if (userGrade >= 3 && userGrade <= 6) return (
@@ -5152,35 +5379,73 @@ const PlanAssist = () => {
                 <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
                 <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
                 <p className="text-gray-500 mb-6">Link your courses to your Lesson periods to unlock the Itinerary.</p>
-                <button onClick={() => { setCurrentPage('settings'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
+                <button onClick={() => { setCurrentPage('account'); setAccountTab('schedule'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
                   className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">Enhance Schedule</button>
                 <button onClick={() => setCurrentPage('hub')} className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">Back to Hub</button>
               </div>
             </div>
           );
 
-          // Build period list
+          // Build period list based on the viewed day's schedule
           const range = accountSetup.presentPeriods || '2-6';
           const [pStart, pEnd] = range.split('-').map(Number);
           const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
-          const todaySchedule = accountSetup.schedule?.[todayName] || {};
+          const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
           const lessonCourseMap = {};
-          scheduleLessons.forEach(sl => { if (sl.day === todayName) lessonCourseMap[sl.period] = sl; });
+          scheduleLessons.forEach(sl => { if (sl.day === viewDayName) lessonCourseMap[sl.period] = sl; });
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
             <div className="max-w-3xl mx-auto p-6">
-              {/* Header */}
+              {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
-                  <p className="text-gray-500 text-sm mt-1">{todayName} · {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                  <p className="text-gray-500 text-sm mt-1">
+                    {viewDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                    {isViewToday && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">Today</span>}
+                  </p>
                 </div>
+
+                {/* Date navigation — centered between title and button */}
+                <div className="flex items-center gap-2">
+                  <button onClick={() => navigateItinerary(-1)}
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <div className="text-center min-w-[90px]">
+                    <p className="font-semibold text-gray-800 text-sm">
+                      {viewDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+                    </p>
+                    {!isViewToday && (
+                      <button onClick={() => {
+                        const t = new Date();
+                        setItineraryDate(t);
+                        const s = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
+                        setItinerarySlots({});
+                        loadItinerary(s);
+                        loadTutorials(s);
+                      }} className="text-xs text-purple-500 hover:text-purple-700 font-medium">Today</button>
+                    )}
+                  </div>
+                  <button onClick={() => navigateItinerary(1)}
+                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+
                 <button onClick={openHubTutorialDialog}
                   className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
                   <BookOpen className="w-4 h-4" /> Book a Tutorial
                 </button>
               </div>
+
+              {/* Weekend notice — shown inline, not a blocker */}
+              {isViewWeekend && (
+                <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl text-center">
+                  <p className="text-gray-500 text-sm">📅 This is a weekend day. You can still plan ahead — periods are shown based on your schedule.</p>
+                </div>
+              )}
 
               {itineraryLoading ? (
                 <div className="flex items-center justify-center py-16">
@@ -5189,7 +5454,7 @@ const PlanAssist = () => {
               ) : (
                 <div className="space-y-4">
                   {selectedPeriods.map(period => {
-                    const slotType = todaySchedule[String(period)] || 'Study';
+                    const slotType = viewSchedule[String(period)] || 'Study';
                     const isLesson = slotType === 'Lesson';
                     const lessonInfo = lessonCourseMap[period];
                     const assignedAgenda = itinerarySlots[period];
@@ -5727,14 +5992,14 @@ const PlanAssist = () => {
                     {/* Calendar Settings */}
                     <div>
                       <h3 className="text-sm font-semibold text-gray-700 mb-3">Calendar Settings</h3>
-                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 mb-4">
                         {[
-                          { key: 'calendarTodayCentered', label: 'Today-Centered View', desc: 'Today always appears in the middle column of the calendar.' },
                           { key: 'calendarShowHomeroom', label: 'Show Homeroom Tasks', desc: 'Homeroom tasks appear on the calendar.' },
                           { key: 'calendarShowCompleted', label: 'Show Completed Tasks', desc: 'Submitted and completed tasks appear with a strikethrough.' },
+                          { key: 'calendarShowWeekends', label: 'Show Weekends', desc: 'Saturday and Sunday columns are visible on the calendar.' },
                         ].map(({ key, label, desc }) => (
                           <div key={key} className="flex items-start gap-3 p-4">
-                            <input type="checkbox" checked={accountSetup[key] || false}
+                            <input type="checkbox" checked={accountSetup[key] !== false}
                               onChange={(e) => setAccountSetup(prev => ({ ...prev, [key]: e.target.checked }))}
                               className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
                             <div>
@@ -5744,6 +6009,55 @@ const PlanAssist = () => {
                           </div>
                         ))}
                       </div>
+                      <p className="text-xs font-semibold text-gray-600 mb-2">Visible Weeks</p>
+                      <p className="text-xs text-gray-400 mb-3">Select which weeks appear on your calendar. At least one must be selected.</p>
+                      <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+                        {[
+                          { key: 'calendarShowPrevWeek',    label: 'Previous Week', desc: 'The week before the current week.' },
+                          { key: 'calendarShowCurrentWeek', label: 'Current Week',  desc: 'The week containing today.' },
+                          { key: 'calendarShowNextWeek1',   label: 'Next Week',     desc: 'One week from now.' },
+                          { key: 'calendarShowNextWeek2',   label: 'Next Week 2',   desc: 'Two weeks from now.' },
+                        ].map(({ key, label, desc }) => {
+                          const checked = key === 'calendarShowCurrentWeek' ? accountSetup[key] !== false : (accountSetup[key] || false);
+                          return (
+                            <div key={key}
+                              className={`flex items-center p-4 cursor-pointer transition-colors select-none ${checked ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
+                              onClick={async () => {
+                                // Prevent deselecting all — need at least one
+                                const otherKeys = ['calendarShowPrevWeek','calendarShowCurrentWeek','calendarShowNextWeek1','calendarShowNextWeek2'].filter(k => k !== key);
+                                const otherSelected = otherKeys.some(k => k === 'calendarShowCurrentWeek' ? accountSetup[k] !== false : accountSetup[k]);
+                                if (checked && !otherSelected) return;
+                                const newVal = !checked;
+                                const updated = { ...accountSetup, [key]: newVal };
+                                setAccountSetup(updated);
+                                // Auto-save immediately
+                                try {
+                                  await apiCall('/account/setup', 'POST', {
+                                    grade: updated.grade,
+                                    canvasApiToken: updated.canvasApiToken,
+                                    presentPeriods: updated.presentPeriods,
+                                    schedule: updated.schedule,
+                                    calendarShowHomeroom: updated.calendarShowHomeroom,
+                                    calendarShowCompleted: updated.calendarShowCompleted,
+                                    calendarShowPrevWeek: updated.calendarShowPrevWeek,
+                                    calendarShowCurrentWeek: updated.calendarShowCurrentWeek,
+                                    calendarShowNextWeek1: updated.calendarShowNextWeek1,
+                                    calendarShowNextWeek2: updated.calendarShowNextWeek2,
+                                    calendarShowWeekends: updated.calendarShowWeekends
+                                  });
+                                } catch (err) { console.error('Failed to save week setting:', err); }
+                              }}>
+                              <div className="flex-1">
+                                <p className={`font-medium text-sm ${checked ? 'text-purple-800' : 'text-gray-900'}`}>{label}</p>
+                                <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                              </div>
+                              {checked && (
+                                <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 ml-3" />
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* Privacy Settings */}
@@ -5751,12 +6065,18 @@ const PlanAssist = () => {
                       <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy Settings</h3>
                       <div className="border border-gray-200 rounded-xl p-4">
                         <div className="flex items-start gap-3">
-                          <input type="checkbox" checked={user?.showInFeed !== false}
+                          <input type="checkbox" checked={user?.showInFeed === true}
                             onChange={async (e) => {
+                              const newVal = e.target.checked;
+                              // Optimistically update UI first
+                              setUser(prev => ({ ...prev, showInFeed: newVal }));
                               try {
-                                await apiCall('/user/feed-preference', 'PUT', { showInFeed: e.target.checked });
-                                setUser(prev => ({ ...prev, showInFeed: e.target.checked }));
-                              } catch (err) { console.error(err); }
+                                await apiCall('/user/feed-preference', 'PUT', { showInFeed: newVal });
+                              } catch (err) {
+                                // Revert on failure
+                                setUser(prev => ({ ...prev, showInFeed: !newVal }));
+                                console.error(err);
+                              }
                             }}
                             className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
                           <div>
@@ -6289,6 +6609,7 @@ const PlanAssist = () => {
                 { id: 'announcements', label: 'Banners', icon: Bell },
                 { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
                 { id: 'audit', label: 'Audit Log', icon: FileText },
+                { id: 'feedback', label: 'Feedback', icon: MessageSquare },
                 { id: 'help', label: 'Help Page', icon: HelpCircle },
               ].map(({ id, label, icon: Icon }) => (
                 <button
@@ -6299,6 +6620,7 @@ const PlanAssist = () => {
                     if (id === 'diagnostics' && !adminDiagnostics) loadAdminDiagnostics();
                     if (id === 'audit') loadAdminAuditLog();
                     if (id === 'announcements') loadAdminAnnouncements();
+                    if (id === 'feedback') loadAdminFeedback();
                     if (id === 'help') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); }
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -6346,6 +6668,7 @@ const PlanAssist = () => {
                                 {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
                                 {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
                                 {parseInt(u.new_tasks) > 0 && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded font-medium">{u.new_tasks} unsorted</span>}
+                                {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>Active</span>}
                               </div>
                             </div>
                           </div>
@@ -6379,6 +6702,12 @@ const PlanAssist = () => {
                               {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-semibold">Admin</span>}
                               {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-semibold">Blocked</span>}
                               {u.schedule_enhanced && <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-semibold">Enhanced</span>}
+                              {adminUserDetail.tasks.some(t => t.session_active) && (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>
+                                  Active: {adminUserDetail.tasks.find(t => t.session_active)?.title?.replace(/\s*\[[^\]]+\]\s*/,'')?.slice(0,30) || 'Task'}
+                                </span>
+                              )}
                             </div>
                           </div>
 
@@ -6709,6 +7038,34 @@ const PlanAssist = () => {
               </div>
             )}
 
+            {/* ── FEEDBACK ── */}
+            {adminSection === 'feedback' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900">User Feedback & Bug Reports</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{adminFeedback.length} submission{adminFeedback.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <button onClick={loadAdminFeedback} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh</button>
+                </div>
+                <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                  {adminFeedback.length === 0 && <p className="text-gray-400 text-sm">No feedback submitted yet.</p>}
+                  {adminFeedback.map(fb => (
+                    <div key={fb.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm text-gray-900">{fb.user_name || '(unknown)'}</span>
+                          <span className="text-xs text-gray-400">{fb.user_email}</span>
+                        </div>
+                        <span className="text-xs text-gray-400 flex-shrink-0">{new Date(fb.created_at).toLocaleString()}</span>
+                      </div>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{fb.feedback_text}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* ── HELP PAGE EDITOR ── */}
             {adminSection === 'help' && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -6963,7 +7320,7 @@ const PlanAssist = () => {
           const range = accountSetup.presentPeriods || '2-6';
           const [pStart, pEnd] = range.split('-').map(Number);
           const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
-          const canSave = tutorialDay && tutorialPeriod;
+          const canSave = tutorialDate && tutorialPeriod;
           return (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
@@ -6980,11 +7337,9 @@ const PlanAssist = () => {
                 <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
                   <p className="text-xs text-gray-500">Once booked, fill in your tutorial details:</p>
                   <div className="flex gap-3">
-                    <select value={tutorialDay} onChange={e => setTutorialDay(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
-                      <option value="">Day *</option>
-                      {dayNames.map(d => <option key={d} value={d}>{d}</option>)}
-                    </select>
+                    <input type="date" value={tutorialDate} onChange={e => setTutorialDate(e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+                      placeholder="Date *" />
                     <select value={tutorialPeriod} onChange={e => setTutorialPeriod(e.target.value)}
                       className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
                       <option value="">Period *</option>
@@ -7012,7 +7367,7 @@ const PlanAssist = () => {
                     </button>
                   </div>
                   {!canSave && (tutorialZoom || tutorialTopic) && (
-                    <p className="text-xs text-red-400 text-center">Please select a Day and Period to save.</p>
+                    <p className="text-xs text-red-400 text-center">Please select a Date and Period to save.</p>
                   )}
                 </div>
               </div>
@@ -7128,98 +7483,52 @@ const PlanAssist = () => {
                 
                 {/* Tab selector */}
                 <div className="flex border-b border-gray-200 overflow-x-auto">
-                  <button
-                    onClick={() => switchWorkspaceTab('canvas')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'canvas'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🎓 Canvas Task
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('notes')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'notes'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    📝 Notes
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('whiteboard')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'whiteboard'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🎨 Whiteboard
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('calculator')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'calculator'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🔢 Calculator
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('whitenoise')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'whitenoise'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    🎵 Focus Sounds
-                  </button>
-                  <button
-                    onClick={() => switchWorkspaceTab('pomodoro')}
-                    className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
-                      workspaceTab === 'pomodoro'
-                        ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
-                        : 'text-gray-600 hover:bg-gray-50'
-                    }`}
-                  >
-                    ⏱️ Pomodoro
-                  </button>
+                  {[
+                    { key: 'canvas', label: '🎓 Canvas Task' },
+                    { key: 'notes', label: '📝 Notes' },
+                    { key: 'whiteboard', label: '🎨 Whiteboard' },
+                    { key: 'tools', label: '🛠️ Tools' },
+                    { key: 'integrations', label: '🔗 Integrations' },
+                    { key: 'whitenoise', label: '🎵 Focus Sounds' },
+                    { key: 'timer', label: '⏱️ Timer' },
+                  ].map(tab => (
+                    <button
+                      key={tab.key}
+                      onClick={() => switchWorkspaceTab(tab.key)}
+                      className={`flex-shrink-0 py-3 px-4 font-semibold text-sm ${
+                        workspaceTab === tab.key
+                          ? 'bg-purple-50 text-purple-600 border-b-2 border-purple-600'
+                          : 'text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
                   
                 {/* Tab content */}
                 <div className="flex-1 overflow-hidden">
+
+                  {/* ── Canvas Task ── */}
                   {workspaceTab === 'canvas' ? (
                     <div className="h-full w-full bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center p-4">
                       <div className="text-center max-w-md w-full">
-                        {/* Canvas Logo/Icon */}
                         <div className="mb-4">
                           <div className="w-16 h-16 bg-purple-600 rounded-2xl flex items-center justify-center mx-auto shadow-lg">
                             <BookOpen className="w-8 h-8 text-white" />
                           </div>
                         </div>
-                        
-                        <h2 className="text-xl font-bold text-gray-800 mb-2">
-                          Open Canvas Task
-                        </h2>
-                        
+                        <h2 className="text-xl font-bold text-gray-800 mb-2">Open Canvas Task</h2>
                         <p className="text-sm text-gray-600 mb-4 leading-relaxed">
                           Canvas requires authentication and cannot be embedded. Click below to open this task in a split-screen view.
                         </p>
-                        
-                        {/* Task Info Card */}
                         <div className="bg-white rounded-lg p-3 mb-4 text-left shadow-sm border border-gray-200">
                           <div className="text-xs text-gray-500 mb-1">Current Task:</div>
                           <div className="font-semibold text-gray-800 text-sm">{workspaceTask.title}</div>
                           <div className="text-xs text-purple-600 mt-1">{workspaceTask.class}</div>
                         </div>
-                        
                         {workspaceTask.url ? (
                           <>
-                            {/* Primary Split-Screen Button */}
                             <button
                               onClick={() => openSplitScreen(workspaceTask.url)}
                               className="w-full bg-purple-600 text-white px-5 py-3 rounded-lg font-semibold hover:bg-purple-700 transition-colors flex items-center justify-center gap-2 shadow-lg hover:shadow-xl mb-2 text-sm"
@@ -7229,8 +7538,6 @@ const PlanAssist = () => {
                               </svg>
                               Open in Split-Screen
                             </button>
-                            
-                            {/* Secondary New Tab Button */}
                             <button
                               onClick={() => window.open(workspaceTask.url, '_blank')}
                               className="w-full bg-gray-100 text-gray-700 px-5 py-2.5 rounded-lg font-medium hover:bg-gray-200 transition-colors flex items-center justify-center gap-2 text-sm"
@@ -7240,8 +7547,6 @@ const PlanAssist = () => {
                               </svg>
                               Open in New Tab
                             </button>
-                            
-                            {/* Help Text */}
                             <div className="mt-4 text-xs text-gray-500 bg-blue-50 rounded-lg p-2.5 border border-blue-100">
                               <strong className="text-blue-700">💡 Tip:</strong> Split-screen opens Canvas alongside PlanAssist. You may need to manually resize your windows to see both side-by-side.
                             </div>
@@ -7255,6 +7560,7 @@ const PlanAssist = () => {
                         )}
                       </div>
                     </div>
+
                   ) : workspaceTab === 'notes' ? (
                     <div className="h-full flex flex-col p-4">
                       <div className="flex items-center justify-between mb-3">
@@ -7265,15 +7571,9 @@ const PlanAssist = () => {
                           className="bg-purple-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-purple-700 disabled:opacity-50 flex items-center gap-1"
                         >
                           {savingNotes ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                              Saving...
-                            </>
+                            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Saving...</>
                           ) : (
-                            <>
-                              <Save className="w-4 h-4" />
-                              Save
-                            </>
+                            <><Save className="w-4 h-4" />Save</>
                           )}
                         </button>
                       </div>
@@ -7284,63 +7584,232 @@ const PlanAssist = () => {
                         className="flex-1 w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent"
                       />
                     </div>
+
                   ) : workspaceTab === 'whiteboard' ? (
                     <div className="h-full flex flex-col p-4">
                       <div className="flex items-center gap-3 mb-3 pb-3 border-b">
                         <div className="flex items-center gap-2">
                           <label className="text-sm font-medium text-gray-700">Color:</label>
-                          <input
-                            type="color"
-                            value={drawColor}
-                            onChange={(e) => setDrawColor(e.target.value)}
-                            className="w-10 h-8 rounded cursor-pointer border border-gray-300"
-                          />
+                          <input type="color" value={drawColor} onChange={(e) => setDrawColor(e.target.value)}
+                            className="w-10 h-8 rounded cursor-pointer border border-gray-300" />
                         </div>
                         <div className="flex items-center gap-2">
                           <label className="text-sm font-medium text-gray-700">Size:</label>
-                          <input
-                            type="range"
-                            min="1"
-                            max="20"
-                            value={drawWidth}
-                            onChange={(e) => setDrawWidth(parseInt(e.target.value))}
-                            className="w-24"
-                          />
+                          <input type="range" min="1" max="20" value={drawWidth}
+                            onChange={(e) => setDrawWidth(parseInt(e.target.value))} className="w-24" />
                           <span className="text-sm text-gray-600 w-6">{drawWidth}</span>
                         </div>
-                        <button
-                          onClick={clearWhiteboard}
-                          className="ml-auto bg-red-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-red-700"
-                        >
+                        <button onClick={clearWhiteboard}
+                          className="ml-auto bg-red-600 text-white px-3 py-1.5 rounded text-sm font-medium hover:bg-red-700">
                           Clear
                         </button>
                       </div>
                       <canvas
                         ref={whiteboardRef}
-                        onMouseDown={startDrawing}
-                        onMouseMove={draw}
-                        onMouseUp={stopDrawing}
-                        onMouseLeave={stopDrawing}
-                        onTouchStart={startDrawing}
-                        onTouchMove={draw}
-                        onTouchEnd={stopDrawing}
+                        onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
+                        onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
                         className="flex-1 w-full border-2 border-gray-300 rounded-lg cursor-crosshair bg-white"
                         style={{ touchAction: 'none', minHeight: '400px' }}
                       />
                       <p className="text-xs text-gray-500 mt-2 text-center">Draw directly on the canvas • Great for diagrams, math problems, and brainstorming</p>
                     </div>
-                  ) : workspaceTab === 'calculator' ? (
-                    <div className="h-full flex flex-col items-center justify-center p-4">
-                      <iframe
-                        src="https://ti84calculator.us/"
-                        height="100%"
-                        width="100%"
-                        frameBorder="0"
-                        sandbox="allow-scripts allow-same-origin allow-forms"
-                        className="rounded-lg"
-                        title="TI-84 Calculator"
-                      />
+
+                  ) : workspaceTab === 'tools' ? (
+                    <div className="h-full flex flex-col">
+                      {/* Active tool embed */}
+                      {workspaceToolEmbed ? (
+                        <div className="h-full flex flex-col">
+                          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
+                            <span className="text-sm font-semibold text-gray-700">
+                              {workspaceToolEmbed === 'calculator' ? '🔢 TI-84 Calculator' : '📈 Desmos Graphing Calculator'}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button onClick={() => setWorkspaceEmbedZoom(z => Math.max(0.5, parseFloat((z - 0.1).toFixed(1))))}
+                                className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom out">−</button>
+                              <span className="text-xs text-gray-500 w-10 text-center">{Math.round(workspaceEmbedZoom * 100)}%</span>
+                              <button onClick={() => setWorkspaceEmbedZoom(z => Math.min(2.0, parseFloat((z + 0.1).toFixed(1))))}
+                                className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom in">+</button>
+                              <button onClick={() => setWorkspaceEmbedZoom(1.0)}
+                                className="px-2 py-1 rounded text-xs text-gray-400 hover:bg-gray-200" title="Reset zoom">Reset</button>
+                              <button
+                                onClick={() => { setWorkspaceToolEmbed(null); setWorkspaceEmbedZoom(1.0); }}
+                                className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors ml-1"
+                                title="Back to Tools"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex-1 overflow-auto">
+                            <div style={{ transform: `scale(${workspaceEmbedZoom})`, transformOrigin: 'top left', width: `${100 / workspaceEmbedZoom}%`, height: `${100 / workspaceEmbedZoom}%` }}>
+                            {workspaceToolEmbed === 'calculator' ? (
+                              <iframe
+                                src="https://ti84calculator.us/"
+                                height="100%" width="100%"
+                                frameBorder="0"
+                                sandbox="allow-scripts allow-same-origin allow-forms allow-storage-access-by-user-activation"
+                                allow="storage-access"
+                                className="w-full h-full"
+                                style={{ minHeight: '600px' }}
+                                title="TI-84 Calculator"
+                              />
+                            ) : (
+                              <iframe
+                                src={`https://www.desmos.com/calculator`}
+                                height="100%" width="100%"
+                                frameBorder="0"
+                                sandbox="allow-scripts allow-same-origin allow-forms allow-storage-access-by-user-activation allow-popups"
+                                allow="storage-access"
+                                className="w-full h-full"
+                                style={{ minHeight: '600px' }}
+                                title="Desmos Graphing Calculator"
+                              />
+                            )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Tools button grid */
+                        <div className="flex-1 overflow-y-auto p-6">
+                          <div className="mb-5">
+                            <h3 className="text-lg font-bold text-gray-900 mb-1">🛠️ Tools</h3>
+                            <p className="text-sm text-gray-500">Open a tool to use it inline in the workspace.</p>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4">
+                            <button
+                              onClick={() => setWorkspaceToolEmbed('calculator')}
+                              className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
+                            >
+                              <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center text-2xl">🔢</div>
+                              <div>
+                                <div className="font-semibold text-gray-800 text-sm">TI-84 Calculator</div>
+                                <div className="text-xs text-gray-500 mt-0.5">Scientific & graphing calculator</div>
+                              </div>
+                            </button>
+                            <button
+                              onClick={() => setWorkspaceToolEmbed('desmos')}
+                              className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
+                            >
+                              <div className="w-12 h-12 bg-blue-50 rounded-xl flex items-center justify-center text-2xl">📈</div>
+                              <div>
+                                <div className="font-semibold text-gray-800 text-sm">Desmos</div>
+                                <div className="text-xs text-gray-500 mt-0.5">Graphing calculator</div>
+                              </div>
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                  ) : workspaceTab === 'integrations' ? (
+                    (() => {
+                      // inline: loads directly in workspace iframe, no popup
+                      // window: opens in a separate browser window, tab stays on grid
+                      const integrations = [
+                        { key: 'kami',        label: 'Kami',        emoji: '📄', desc: 'PDF annotation tool',         url: 'https://web.kamihq.com/web/viewer.html',                          mode: 'inline' },
+                        { key: 'masteryprep', label: 'MasteryPrep', emoji: '🎯', desc: 'ACT/SAT prep',                url: 'https://app.masteryprep.com/login',                               mode: 'inline' },
+                        { key: 'gmetrix',     label: 'GMetrix',     emoji: '💻', desc: 'IT certification practice',   url: 'https://www.gmetrix.net/Login.aspx?',                             mode: 'inline' },
+                        { key: 'gizmos',      label: 'Gizmos',      emoji: '🔬', desc: 'Science & math simulations',  url: 'https://apps.explorelearning.com/account/gizmos/login/student',   mode: 'window' },
+                        { key: 'ixl',         label: 'IXL',         emoji: '✏️', desc: 'Practice & assessments',      url: 'https://www.ixl.com/signin/osg/form',                             mode: 'window' },
+                        { key: 'cengage',     label: 'Cengage',     emoji: '📚', desc: 'Digital textbooks',           url: 'https://k12.cengage.com/rostering/Account/LogOn?',                mode: 'window' },
+                        { key: 'noredink',    label: 'NoRedInk',    emoji: '🖊️', desc: 'Writing & grammar',           url: 'https://www.noredink.com/login',                                  mode: 'window' },
+                      ];
+
+                      const active = workspaceIntegrationEmbed
+                        ? integrations.find(i => i.key === workspaceIntegrationEmbed)
+                        : null;
+
+                      const handleIntegrationClick = (integration) => {
+                        if (integration.mode === 'window') {
+                          // Open in separate window, leave tab on grid
+                          window.open(integration.url, `planassist_integration_${integration.key}`,
+                            'width=1100,height=800,left=100,top=80,resizable=yes,scrollbars=yes');
+                        } else {
+                          // Load inline in workspace
+                          setWorkspaceIntegrationEmbed(integration.key);
+                        }
+                      };
+
+                      return (
+                        <div className="h-full flex flex-col">
+                          {active ? (
+                            /* ── Inline embed view ── */
+                            <div className="h-full flex flex-col">
+                              <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-base">{active.emoji}</span>
+                                  <span className="text-sm font-semibold text-gray-700">{active.label}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => setWorkspaceEmbedZoom(z => Math.max(0.5, parseFloat((z - 0.1).toFixed(1))))}
+                                    className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom out">−</button>
+                                  <span className="text-xs text-gray-500 w-10 text-center">{Math.round(workspaceEmbedZoom * 100)}%</span>
+                                  <button onClick={() => setWorkspaceEmbedZoom(z => Math.min(2.0, parseFloat((z + 0.1).toFixed(1))))}
+                                    className="px-2 py-1 rounded text-gray-500 hover:bg-gray-200 text-sm font-bold leading-none" title="Zoom in">+</button>
+                                  <button onClick={() => setWorkspaceEmbedZoom(1.0)}
+                                    className="px-2 py-1 rounded text-xs text-gray-400 hover:bg-gray-200" title="Reset zoom">Reset</button>
+                                  <button
+                                    onClick={() => { setWorkspaceIntegrationEmbed(null); setWorkspaceEmbedZoom(1.0); }}
+                                    className="p-1.5 rounded-lg hover:bg-gray-200 text-gray-500 hover:text-gray-700 transition-colors ml-1"
+                                    title="Back to Integrations"
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="flex-1 overflow-auto">
+                                <div style={{ transform: `scale(${workspaceEmbedZoom})`, transformOrigin: 'top left', width: `${100 / workspaceEmbedZoom}%`, height: `${100 / workspaceEmbedZoom}%` }}>
+                                <iframe
+                                  key={workspaceIntegrationEmbed}
+                                  src={active.url}
+                                  height="100%" width="100%"
+                                  frameBorder="0"
+                                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-storage-access-by-user-activation"
+                                  allow="storage-access"
+                                  className="w-full h-full"
+                                  style={{ minHeight: '600px' }}
+                                  title={active.label}
+                                />
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            /* ── Button grid ── */
+                            <div className="flex-1 overflow-y-auto p-6">
+                              <div className="mb-5">
+                                <h3 className="text-lg font-bold text-gray-900 mb-1">🔗 Integrations</h3>
+                                <p className="text-sm text-gray-500">Click a service to open it.</p>
+                              </div>
+                              <div className="grid grid-cols-2 gap-4">
+                                {integrations.map(integration => (
+                                  <button
+                                    key={integration.key}
+                                    onClick={() => handleIntegrationClick(integration)}
+                                    className="flex flex-col items-center gap-3 p-5 bg-white border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:shadow-md transition-all text-left"
+                                  >
+                                    <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center text-2xl">{integration.emoji}</div>
+                                    <div>
+                                      <div className="font-semibold text-gray-800 text-sm">{integration.label}</div>
+                                      <div className="text-xs text-gray-500 mt-0.5">{integration.desc}</div>
+                                    </div>
+                                    {integration.mode === 'window' && (
+                                      <div className="text-xs text-purple-500 font-medium flex items-center gap-1">
+                                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                        </svg>
+                                        Opens in window
+                                      </div>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                              <p className="text-xs text-gray-400 mt-5 text-center">Sign-in info is saved in your browser cookies where supported.</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()
+
                   ) : workspaceTab === 'whitenoise' ? (
                     <div className="h-full flex flex-col p-6 items-center justify-center">
                       <div className="max-w-md w-full space-y-6">
@@ -7348,8 +7817,6 @@ const PlanAssist = () => {
                           <h3 className="text-2xl font-bold text-gray-900 mb-2">Focus Sounds</h3>
                           <p className="text-sm text-gray-600">Play ambient sounds to help you concentrate</p>
                         </div>
-
-                        {/* Sound Selection */}
                         <div className="grid grid-cols-2 gap-3">
                           {[
                             { id: 'rain', label: '🌧️ Soft Rain', desc: 'Gentle pink noise' },
@@ -7378,8 +7845,6 @@ const PlanAssist = () => {
                             </button>
                           ))}
                         </div>
-
-                        {/* Controls */}
                         <div className="space-y-4 pt-4 border-t">
                           <div className="flex items-center gap-3">
                             <button
@@ -7393,17 +7858,13 @@ const PlanAssist = () => {
                               {isWhiteNoisePlaying ? '⏸ Pause' : '▶ Play'}
                             </button>
                           </div>
-
                           {isWhiteNoisePlaying && (
                             <div>
                               <label className="block text-sm font-medium text-gray-700 mb-2">
                                 Volume: {Math.round(whiteNoiseVolume * 100)}%
                               </label>
                               <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.1"
+                                type="range" min="0" max="1" step="0.1"
                                 value={whiteNoiseVolume}
                                 onChange={(e) => changeWhiteNoiseVolume(parseFloat(e.target.value))}
                                 className="w-full"
@@ -7413,89 +7874,98 @@ const PlanAssist = () => {
                         </div>
                       </div>
                     </div>
-                  ) : workspaceTab === 'pomodoro' ? (
+
+                  ) : workspaceTab === 'timer' ? (
                     <div className="h-full flex flex-col p-6 items-center justify-center">
-                      <div className="max-w-md w-full space-y-6">
-                        <div className="text-center mb-6">
-                          <h3 className="text-2xl font-bold text-gray-900 mb-2">Pomodoro Timer</h3>
-                          <p className="text-sm text-gray-600">Focus for 25 minutes, then take a break</p>
-                        </div>
-
-                        {/* Mode Selector */}
-                        <div className="flex gap-2 justify-center">
-                          <button
-                            onClick={() => switchPomodoroMode('work')}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                              pomodoroMode === 'work'
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            Work (25m)
-                          </button>
-                          <button
-                            onClick={() => switchPomodoroMode('shortBreak')}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                              pomodoroMode === 'shortBreak'
-                                ? 'bg-green-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            Short Break (5m)
-                          </button>
-                          <button
-                            onClick={() => switchPomodoroMode('longBreak')}
-                            className={`px-4 py-2 rounded-lg font-medium transition-all ${
-                              pomodoroMode === 'longBreak'
-                                ? 'bg-blue-600 text-white'
-                                : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                          >
-                            Long Break (15m)
-                          </button>
-                        </div>
-
-                        {/* Timer Display */}
-                        <div className="text-center">
-                          <div className={`text-7xl font-bold mb-4 ${
-                            pomodoroMode === 'work' ? 'text-purple-600' :
-                            pomodoroMode === 'shortBreak' ? 'text-green-600' :
-                            'text-blue-600'
+                      {workspaceSource === 'agenda' ? (
+                        /* ── Agenda mode: read-only mirror of the agenda row countdown ── */
+                        <div className="max-w-sm w-full text-center space-y-4">
+                          <h3 className="text-2xl font-bold text-gray-900">⏱️ Row Timer</h3>
+                          <p className="text-sm text-gray-500">This timer is synced with the current agenda row.</p>
+                          <div className={`text-8xl font-bold tabular-nums mt-4 ${
+                            agendaCountdown !== null && agendaCountdown <= 60 && agendaCountdown > 0
+                              ? 'text-red-500'
+                              : agendaCountdown === 0
+                                ? 'text-gray-400'
+                                : 'text-purple-600'
                           }`}>
-                            {formatPomodoroTime(pomodoroTime)}
+                            {agendaCountdown !== null
+                              ? `${String(Math.floor(agendaCountdown / 60)).padStart(2,'0')}:${String(agendaCountdown % 60).padStart(2,'0')}`
+                              : '--:--'
+                            }
                           </div>
-                          <div className="text-sm text-gray-600 mb-6">
-                            Sessions completed today: {pomodoroSessions}
+                          {agendaCountdown === 0 && (
+                            <p className="text-red-500 font-semibold text-sm animate-pulse">⏰ Time's up!</p>
+                          )}
+                          {!agendaRunning && agendaCountdown !== 0 && (
+                            <p className="text-xs text-gray-400">Timer is paused — start it from the agenda view.</p>
+                          )}
+                        </div>
+                      ) : (
+                        /* ── Session mode: free settable timer ── */
+                        <div className="max-w-sm w-full space-y-6">
+                          <div className="text-center">
+                            <h3 className="text-2xl font-bold text-gray-900 mb-1">⏱️ Timer</h3>
+                            <p className="text-sm text-gray-500">Set a custom countdown for your work session.</p>
                           </div>
-                        </div>
 
-                        {/* Controls */}
-                        <div className="flex gap-3">
-                          <button
-                            onClick={isPomodoroRunning ? pausePomodoro : startPomodoro}
-                            className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all ${
-                              isPomodoroRunning
-                                ? 'bg-yellow-600 hover:bg-yellow-700 text-white'
-                                : pomodoroMode === 'work' ? 'bg-purple-600 hover:bg-purple-700 text-white' :
-                                  pomodoroMode === 'shortBreak' ? 'bg-green-600 hover:bg-green-700 text-white' :
-                                  'bg-blue-600 hover:bg-blue-700 text-white'
-                            }`}
-                          >
-                            {isPomodoroRunning ? '⏸ Pause' : '▶ Start'}
-                          </button>
-                          <button
-                            onClick={resetPomodoro}
-                            className="px-6 py-4 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-semibold text-lg transition-all"
-                          >
-                            🔄 Reset
-                          </button>
-                        </div>
+                          {/* Time display */}
+                          <div className="text-center">
+                            <div className={`text-8xl font-bold tabular-nums ${
+                              freeTimerDone ? 'text-green-500' :
+                              freeTimerRunning && freeTimerSecs <= 60 ? 'text-red-500' :
+                              freeTimerRunning ? 'text-purple-600' : 'text-gray-700'
+                            }`}>
+                              {freeTimerRunning || freeTimerSecs > 0
+                                ? `${String(Math.floor(freeTimerSecs / 60)).padStart(2,'0')}:${String(freeTimerSecs % 60).padStart(2,'0')}`
+                                : `${String(parseInt(freeTimerMins) || 0).padStart(2,'0')}:00`
+                              }
+                            </div>
+                            {freeTimerDone && (
+                              <p className="text-green-500 font-semibold text-sm mt-2 animate-pulse">✅ Time's up!</p>
+                            )}
+                          </div>
 
-                        <div className="text-xs text-gray-500 text-center pt-4 border-t">
-                          💡 Tip: After 4 work sessions, take a long break to recharge
+                          {/* Input — only shown when timer is not running */}
+                          {!freeTimerRunning && !freeTimerDone && (
+                            <div className="flex items-center gap-3 justify-center">
+                              <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Minutes:</label>
+                              <input
+                                type="number"
+                                min="1" max="180"
+                                value={freeTimerMins}
+                                onChange={e => setFreeTimerMins(e.target.value.replace(/[^0-9]/g, ''))}
+                                placeholder="e.g. 25"
+                                className="w-28 px-3 py-2 border-2 border-gray-300 rounded-lg text-center text-lg font-semibold focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                              />
+                            </div>
+                          )}
+
+                          {/* Controls */}
+                          <div className="flex gap-3 justify-center">
+                            {!freeTimerRunning && !freeTimerDone ? (
+                              <button
+                                onClick={startFreeTimer}
+                                disabled={!freeTimerMins || parseInt(freeTimerMins) < 1}
+                                className="flex-1 py-3 bg-purple-600 hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-semibold transition-all"
+                              >
+                                ▶ Start
+                              </button>
+                            ) : (
+                              <button
+                                onClick={resetFreeTimer}
+                                className="flex-1 py-3 bg-gray-200 hover:bg-gray-300 text-gray-700 rounded-lg font-semibold transition-all"
+                              >
+                                🔄 Reset
+                              </button>
+                            )}
+                          </div>
+
+                          <p className="text-xs text-gray-400 text-center">This timer is independent from your session timer.</p>
                         </div>
-                      </div>
+                      )}
                     </div>
+
                   ) : null}
                 </div>
               </div>
