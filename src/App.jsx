@@ -284,6 +284,13 @@ const PlanAssist = () => {
   const [courses, setCourses] = useState([]);
   const [courseAverages, setCourseAverages] = useState({});
 
+  // UI theme
+  const [invertColors, setInvertColors] = useState(() => localStorage.getItem('planassist-invert') === 'true');
+  const [showHubExplainer, setShowHubExplainer] = useState(false);
+  const [zoomBanner, setZoomBanner] = useState(null); // { period, zoomNumber, isTutorial }
+  const [lastAutoSync, setLastAutoSync] = useState(null);
+  const [autoSyncToast, setAutoSyncToast] = useState(null); // '3 new tasks added'
+
   // Hub features state
   const [completionFeed, setCompletionFeed] = useState([]);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -1032,6 +1039,37 @@ const PlanAssist = () => {
     }
   };
 
+  // OSG GPA scale: score → GPA points
+  const scoreToGPA = (score) => {
+    if (score == null) return null;
+    const s = parseFloat(score);
+    if (isNaN(s)) return null;
+    if (s >= 93) return 4.00;
+    if (s >= 90) return 3.67;
+    if (s >= 88) return 3.33;
+    if (s >= 83) return 3.00;
+    if (s >= 80) return 2.67;
+    if (s >= 78) return 2.33;
+    if (s >= 73) return 2.00;
+    if (s >= 70) return 1.67;
+    if (s >= 60) return 1.00;
+    return 0.00;
+  };
+
+  const calculateGPA = (courseList) => {
+    const valid = courseList.filter(c => c.current_score != null && parseFloat(c.current_score) > 0);
+    if (valid.length === 0) return null;
+    const sum = valid.reduce((acc, c) => acc + scoreToGPA(c.current_score), 0);
+    return (sum / valid.length).toFixed(2);
+  };
+
+  const calculateYearAverage = (courseList) => {
+    const valid = courseList.filter(c => c.current_score != null && parseFloat(c.current_score) > 0);
+    if (valid.length === 0) return null;
+    const sum = valid.reduce((acc, c) => acc + parseFloat(c.current_score), 0);
+    return (sum / valid.length).toFixed(1);
+  };
+
   const toggleCourseEnabled = async (courseId, enabled) => {
     try {
       await apiCall(`/courses/${courseId}/enabled`, 'PATCH', { enabled });
@@ -1450,8 +1488,17 @@ const PlanAssist = () => {
     if (!currentSessionTask || markingComplete) return;
     setMarkingComplete(true);
     try {
+      // Check if Canvas has also marked this task completed (for leaderboard)
+      let canvasCompleted = false;
+      try {
+        if (currentSessionTask.assignmentId && currentSessionTask.course_id) {
+          const canvasCheck = await apiCall(`/canvas/check-completed/${currentSessionTask.id}`, 'GET');
+          canvasCompleted = canvasCheck?.completed === true;
+        }
+      } catch (e) { /* silent — leaderboard just won't update */ }
       await apiCall(`/tasks/${currentSessionTask.id}/complete`, 'POST', {
-        timeSpent: Math.round(sessionElapsed / 60) // tasks_completed expects minutes
+        timeSpent: Math.round(sessionElapsed / 60),
+        canvasCompleted
       });
       await normalizePriority(); // compact priority_order gaps + null completed tasks
       setIsTimerRunning(false);
@@ -1674,7 +1721,12 @@ const PlanAssist = () => {
       }
 
       // Reassign priority_order sequentially
-      const reordered = merged.map((t, idx) => ({ ...t, priorityOrder: idx + 1, priority_order: idx + 1 }));
+      let activeIdx = 0;
+      const reordered = merged.map(t => {
+        if (t.completed || t.deleted) return { ...t, priorityOrder: null, priority_order: null };
+        activeIdx++;
+        return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
+      });
 
       // Persist new order to server — endpoint expects { taskOrder: [id, id, ...] }
       const taskOrder = reordered
@@ -1921,9 +1973,19 @@ const PlanAssist = () => {
     setAgendaProceedLoading(true);
     const { snappedElapsed } = agendaStopTimer();
     try {
+      // Check if Canvas has also marked this task completed (for leaderboard)
+      let canvasCompleted = false;
+      const rowTask = sessionTasks.find(t => t.id === currentRow.taskId) || tasks.find(t => t.id === currentRow.taskId);
+      try {
+        if (rowTask?.assignmentId && rowTask?.course_id) {
+          const canvasCheck = await apiCall(`/canvas/check-completed/${currentRow.taskId}`, 'GET');
+          canvasCompleted = canvasCheck?.completed === true;
+        }
+      } catch (e) { /* silent */ }
       // Complete the task (marks it done, saves time)
       await apiCall(`/tasks/${currentRow.taskId}/complete`, 'POST', {
-        timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60)
+        timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60),
+        canvasCompleted
       });
       await normalizePriority();
       setTasks(prev => prev.map(t => t.id === currentRow.taskId ? { ...t, completed: true, deleted: true } : t));
@@ -3038,6 +3100,93 @@ const PlanAssist = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isTimerRunning, currentSessionTask, sessionElapsed, agendaRunning]);
 
+  // Feature 1: Period Zoom banner — check every 60s if a period is starting within 2 min
+  useEffect(() => {
+    if (!isAuthenticated || !accountSetup.scheduleEnhanced) return;
+    const PERIOD_TIMES_UTC = {
+      1: { h: 12, m: 25 }, 2: { h: 13, m: 28 }, 3: { h: 14, m: 31 },
+      4: { h: 16, m: 21 }, 5: { h: 18, m: 1  }, 6: { h: 19, m: 4  },
+      7: { h: 20, m: 7  }, 8: { h: 21, m: 37 }
+    };
+    const check = () => {
+      const now = new Date();
+      const nowUTCMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+      for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
+        const periodMins = t.h * 60 + t.m;
+        const diff = periodMins - nowUTCMins;
+        if (diff >= 0 && diff <= 2) {
+          const period = parseInt(p);
+          // Check for tutorial zoom first, then schedule lesson zoom
+          const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
+          const tutorial = tutorials[`${todayStr}-${period}`];
+          const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+          const lesson = scheduleLessons.find(sl => sl.day === todayName && sl.period === period);
+          const zoomNumber = tutorial?.zoom_number || lesson?.zoom_number || null;
+          if (zoomNumber) {
+            setZoomBanner({ period, zoomNumber, isTutorial: !!tutorial?.zoom_number });
+          }
+          break;
+        }
+      }
+    };
+    check();
+    const interval = setInterval(check, 60000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, accountSetup.scheduleEnhanced, scheduleLessons, tutorials]);
+
+  // Feature 6: Auto-sync every 30 minutes while app is visible
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const AUTO_SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutes
+    const runAutoSync = async () => {
+      if (document.hidden) return; // only sync when tab is visible
+      if (isLoadingTasks || newTasksSidebarOpen || ['session-active','agenda-active'].includes(currentPage)) return;
+      try {
+        const check = await apiCall('/canvas/auto-sync', 'POST', {});
+        if (!check?.shouldSync) return;
+        // Run a silent full sync
+        setIsLoadingTasks(true);
+        try {
+          const data = await apiCall('/canvas/sync', 'POST', {});
+          if (!data || !Array.isArray(data.tasks)) return;
+          const formattedTasks = data.tasks.map(t => ({
+            title: t.title, segment: t.segment, class: t.class, description: t.description,
+            url: t.url, deadlineDate: t.deadlineDate, deadlineTime: t.deadlineTime,
+            estimatedTime: t.estimatedTime, courseId: t.courseId ?? null,
+            assignmentId: t.assignmentId ?? null, pointsPossible: t.pointsPossible ?? null,
+            assignmentGroupId: t.assignmentGroupId ?? null, currentScore: t.currentScore ?? null,
+            currentGrade: t.currentGrade ?? null, gradingType: t.gradingType ?? 'points',
+            unlockAt: t.unlockAt ?? null, lockAt: t.lockAt ?? null,
+            submittedAt: t.submittedAt ?? null, isMissing: t.isMissing ?? false,
+            isLate: t.isLate ?? false, completed: t.completed ?? false,
+          }));
+          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
+          if (!saveResult?.stats) return;
+          await loadTasks();
+          await loadCourses();
+          // Run grade mini-sync too
+          apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
+          const newCount = saveResult.stats.new || 0;
+          if (newCount > 0) {
+            // Auto-add all new tasks using smart insertion (no sidebar)
+            await clearAllNewTasks();
+            setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
+          } else {
+            setAutoSyncToast('Auto-sync complete');
+          }
+          setLastAutoSync(new Date());
+          setTimeout(() => setAutoSyncToast(null), 4000);
+        } finally {
+          setIsLoadingTasks(false);
+        }
+      } catch (err) {
+        console.error('Auto-sync error:', err);
+      }
+    };
+    const interval = setInterval(runAutoSync, AUTO_SYNC_INTERVAL);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, isLoadingTasks, newTasksSidebarOpen, currentPage]);
+
   // Handle Escape key to close notes popup
   useEffect(() => {
     const handleEscape = (e) => {
@@ -3420,7 +3569,8 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}>
+    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}
+      style={invertColors ? { filter: 'invert(1) hue-rotate(180deg)', WebkitFilter: 'invert(1) hue-rotate(180deg)' } : {}}>
       <nav className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -3486,6 +3636,40 @@ const PlanAssist = () => {
           </div>
         </div>
       </nav>
+
+      {/* Feature 1: Period Zoom Banner */}
+      {zoomBanner && (
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <Play className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm">
+                Period {zoomBanner.period} is starting!
+                {zoomBanner.isTutorial && <span className="ml-2 text-xs bg-orange-400 text-white px-2 py-0.5 rounded-full">Tutorial</span>}
+              </p>
+              <p className="text-xs text-blue-200">Zoom: {zoomBanner.zoomNumber}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <a href={`https://oneschoolglobal.zoom.us/j/${zoomBanner.zoomNumber.replace(/[\s\-]/g, '')}`}
+              target="_blank" rel="noopener noreferrer"
+              className="bg-white text-blue-600 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+              Join Zoom
+            </a>
+            <button onClick={() => setZoomBanner(null)} className="text-blue-200 hover:text-white"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+      )}
+
+      {/* Feature 6: Auto-sync toast */}
+      {autoSyncToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full shadow-lg z-50 flex items-center gap-2 animate-pulse">
+          <RefreshCw className="w-4 h-4 text-green-400" />
+          {autoSyncToast}
+        </div>
+      )}
 
       {/* PWA Install Banner */}
       {showPwaBanner && isAuthenticated && (
@@ -3756,6 +3940,9 @@ const PlanAssist = () => {
                     <div className="flex items-center gap-2 mb-4">
                       <Trophy className="w-5 h-5 text-yellow-600" />
                       <h2 className="text-xl font-bold text-gray-900">Grade {user.grade} Leaders</h2>
+                      <button onClick={() => setShowHubExplainer(true)} className="ml-auto text-gray-300 hover:text-gray-500 transition-colors" title="How does this work?">
+                        <Info className="w-4 h-4" />
+                      </button>
                     </div>
                     <p className="text-xs text-gray-500 mb-4">Weekly tasks completed • Resets Monday</p>
                     
@@ -3775,10 +3962,10 @@ const PlanAssist = () => {
                       </div>
                     )}
 
-                    {/* Leaderboard List */}
-                    <div className="space-y-2">
+                    {/* Leaderboard List — capped at 5 with scroll */}
+                    <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
                       {leaderboard.length > 0 ? (
-                        leaderboard.map((entry, index) => {
+                        leaderboard.slice(0, 5).map((entry, index) => {
                           const isCurrentUser = entry.user_name === user?.name;
                           const medals = ['🥇', '🥈', '🥉'];
                           
@@ -3841,6 +4028,34 @@ const PlanAssist = () => {
                 </div>
               </div>
             </div>
+
+            {/* Feature 4: Hub Explainer Overlay */}
+            {showHubExplainer && (
+              <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4" onClick={() => setShowHubExplainer(false)}>
+                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => setShowHubExplainer(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                  <h3 className="text-xl font-bold text-gray-900 mb-5 flex items-center gap-2"><Info className="w-5 h-5 text-purple-500" /> How the Hub Works</h3>
+                  <div className="space-y-4 text-sm text-gray-700">
+                    <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+                      <p className="font-semibold text-blue-900 mb-1">📊 Stats (Today / This Week / Study Time / Accuracy / Streak)</p>
+                      <p className="text-blue-800">All tasks completed in PlanAssist count here — whether through a Session, Agenda, or checkbox. Accuracy compares your estimated vs actual time. Streak tracks consecutive days with at least one completion.</p>
+                    </div>
+                    <div className="bg-green-50 rounded-xl p-4 border border-green-100">
+                      <p className="font-semibold text-green-900 mb-1">🟢 Live Activity Feed</p>
+                      <p className="text-green-800">Shows Canvas tasks (not manually created) completed inside a Session or Agenda with more than 0 minutes logged. Users who opt out of the feed won't appear here.</p>
+                    </div>
+                    <div className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
+                      <p className="font-semibold text-yellow-900 mb-1">🏆 Leaderboard</p>
+                      <p className="text-yellow-800">Only counts tasks where Canvas confirms completion — either detected automatically during a Sync, or when you click Mark Complete and Canvas confirms the submission. Resets every Monday. Shows top 5 in your grade.</p>
+                    </div>
+                    <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
+                      <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
+                      <p className="text-purple-800">Start Session begins a timed work block on a specific task. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* No Tasks State */}
             {tasks.length === 0 && (
@@ -5662,6 +5877,18 @@ const PlanAssist = () => {
                     <div className="text-2xl font-bold">{courses.length}</div>
                     <div className="text-xs text-blue-100">Active Courses</div>
                   </div>
+                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
+                    <div className="text-2xl font-bold">
+                      {calculateGPA(courses) ?? 'N/A'}
+                    </div>
+                    <div className="text-xs text-blue-100">Current GPA</div>
+                  </div>
+                  <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
+                    <div className="text-2xl font-bold">
+                      {calculateYearAverage(courses) != null ? calculateYearAverage(courses) + '%' : 'N/A'}
+                    </div>
+                    <div className="text-xs text-blue-100">Year Average</div>
+                  </div>
                 </div>
               )}
             </div>
@@ -6064,6 +6291,25 @@ const PlanAssist = () => {
                             </div>
                           );
                         })}
+                      </div>
+                    </div>
+
+                    {/* Display Settings */}
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Display Settings</h3>
+                      <div className="border border-gray-200 rounded-xl p-4 mb-4">
+                        <div className="flex items-start gap-3">
+                          <input type="checkbox" checked={invertColors}
+                            onChange={(e) => {
+                              setInvertColors(e.target.checked);
+                              localStorage.setItem('planassist-invert', e.target.checked ? 'true' : 'false');
+                            }}
+                            className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                          <div>
+                            <p className="font-medium text-gray-900">Inverted Colours Mode</p>
+                            <p className="text-xs text-gray-500 mt-1">Inverts all colours on the page for a high-contrast alternative appearance. Saved automatically.</p>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
