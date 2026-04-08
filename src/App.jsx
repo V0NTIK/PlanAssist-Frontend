@@ -396,17 +396,30 @@ const PlanAssist = () => {
   };
 
   // API helper
-  const apiCall = async (endpoint, method = 'GET', body = null) => {
+  const apiCall = async (endpoint, method = 'GET', body = null, { retries = 2, retryDelay = 4000 } = {}) => {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
-    const response = await fetch(`${API_URL}${endpoint}`, options);
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || error.message || 'Request failed');
+    let lastError;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(`${API_URL}${endpoint}`, options);
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({ error: 'Request failed' }));
+          throw new Error(error.error || error.message || 'Request failed');
+        }
+        return await response.json();
+      } catch (err) {
+        lastError = err;
+        // Only retry on network errors (cold start), not on HTTP error responses
+        const isNetworkError = err instanceof TypeError && err.message === 'Failed to fetch';
+        if (!isNetworkError || attempt === retries) throw err;
+        // Wait before retrying — server is likely cold-starting
+        await new Promise(res => setTimeout(res, retryDelay));
+      }
     }
-    return response.json();
+    throw lastError;
   };
   
   // Check for existing session on mount
