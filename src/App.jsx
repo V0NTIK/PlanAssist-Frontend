@@ -1674,12 +1674,7 @@ const PlanAssist = () => {
       }
 
       // Reassign priority_order sequentially
-      let activeIdx = 0;
-      const reordered = merged.map(t => {
-        if (t.completed || t.deleted) return { ...t, priorityOrder: null, priority_order: null };
-        activeIdx++;
-        return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
-      });
+      const reordered = merged.map((t, idx) => ({ ...t, priorityOrder: idx + 1, priority_order: idx + 1 }));
 
       // Persist new order to server — endpoint expects { taskOrder: [id, id, ...] }
       const taskOrder = reordered
@@ -2069,7 +2064,14 @@ const PlanAssist = () => {
     try {
       const data = await apiCall(`/tutorials?date=${dateStr}`, 'GET');
       const map = {};
-      (data || []).forEach(t => { map[`${t.date}-${t.period}`] = t; });
+      (data || []).forEach(t => {
+        // Normalize date: pg returns DATE columns as ISO timestamp strings,
+        // extract just the YYYY-MM-DD part so keys match viewDateStr
+        const dateKey = t.date
+          ? (typeof t.date === 'string' ? t.date.split('T')[0] : new Date(t.date).toISOString().split('T')[0])
+          : null;
+        if (dateKey) map[`${dateKey}-${t.period}`] = { ...t, date: dateKey };
+      });
       setTutorials(map);
     } catch (err) {
       console.error('Failed to load tutorials:', err);
@@ -4418,7 +4420,7 @@ const PlanAssist = () => {
               </div>
             ) : (
               <div className="space-y-3">
-                {sessionTasks.filter(t => isCourseEnabled(t)).map(task => {
+                {sessionTasks.map(task => {
                   const hasProgress = task.accumulatedTime > 0;
                   const classColor = getClassColor(task.class);
                   // Use the pre-parsed dueDate from tasks state (already UTC-corrected)
@@ -4643,7 +4645,7 @@ const PlanAssist = () => {
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
                                               >
                                                 <option value="">— pick task —</option>
-                                                {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
+                                                {sessionTasks.map(t => (
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                                 ))}
                                               </select>
@@ -4777,7 +4779,7 @@ const PlanAssist = () => {
                                             <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
-                                              {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
+                                              {sessionTasks.map(t => (
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
                                               ))}
                                             </select>
