@@ -1073,14 +1073,24 @@ const PlanAssist = () => {
   };
 
   const calculateGPA = (courseList) => {
-    const valid = courseList.filter(c => c.current_score != null && parseFloat(c.current_score) > 0);
+    const valid = courseList.filter(c => {
+      const s = c.current_period_score;
+      if (s == null || s === '') return false;
+      const n = parseFloat(s);
+      return !isNaN(n);
+    });
     if (valid.length === 0) return null;
-    const sum = valid.reduce((acc, c) => acc + scoreToGPA(c.current_score), 0);
+    const sum = valid.reduce((acc, c) => acc + scoreToGPA(parseFloat(c.current_period_score)), 0);
     return (sum / valid.length).toFixed(2);
   };
 
   const calculateYearAverage = (courseList) => {
-    const valid = courseList.filter(c => c.current_score != null && parseFloat(c.current_score) > 0);
+    const valid = courseList.filter(c => {
+      const s = c.current_score;
+      if (s == null || s === '') return false;
+      const n = parseFloat(s);
+      return !isNaN(n);
+    });
     if (valid.length === 0) return null;
     const sum = valid.reduce((acc, c) => acc + parseFloat(c.current_score), 0);
     return (sum / valid.length).toFixed(1);
@@ -5899,7 +5909,12 @@ const PlanAssist = () => {
                   <div className="bg-white bg-opacity-20 rounded-lg px-4 py-2">
                     <div className="text-2xl font-bold">
                       {(() => {
-                        const scored = enabledCourses.filter(c => c.current_period_score != null);
+                        const scored = enabledCourses.filter(c => {
+                          const s = c.current_period_score;
+                          if (s == null || s === '') return false;
+                          const n = parseFloat(s);
+                          return !isNaN(n);
+                        });
                         if (scored.length === 0) return 'N/A';
                         const avg = scored.reduce((sum, c) => sum + parseFloat(c.current_period_score), 0) / scored.length;
                         return avg.toFixed(1) + '%';
@@ -6517,7 +6532,8 @@ const PlanAssist = () => {
                             const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
                             return d.toLocaleDateString();
                           })();
-                          const isCompleted = task.completed;
+                          // Completed if PlanAssist marked it done, OR Canvas has a submission date
+                          const isCompleted = task.completed || !!task.submitted_at;
                           const hasSession = task.session_actual_time != null;
                           return (
                             <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
