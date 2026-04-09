@@ -1445,6 +1445,9 @@ const PlanAssist = () => {
           accumulatedTime: (t.accumulated_time || 0) * 60, // DB stores minutes, convert to seconds for timer
           sessionActive: t.session_active || false,
           priorityOrder: t.priority_order,
+          assignmentId: t.assignment_id || null,
+          course_id: t.course_id || null,
+          manuallyCreated: t.manually_created || false,
         };
       });
       setSessionTasks(hydratedTasks);
@@ -3116,23 +3119,23 @@ const PlanAssist = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isTimerRunning, currentSessionTask, sessionElapsed, agendaRunning]);
 
-  // Feature 1: Period Zoom banner — check every 60s if a period is starting within 2 min
+  // Feature 1: Period Zoom banner — check every 30s if a period is starting within 2 min or started within 5 min
   useEffect(() => {
-    if (!isAuthenticated || !accountSetup.scheduleEnhanced) return;
+    if (!isAuthenticated || !accountSetup.presentPeriods) return;
     const PERIOD_TIMES_UTC = {
-      1: { h: 12, m: 25 }, 2: { h: 13, m: 28 }, 3: { h: 14, m: 31 },
-      4: { h: 16, m: 21 }, 5: { h: 18, m: 1  }, 6: { h: 19, m: 4  },
-      7: { h: 20, m: 7  }, 8: { h: 21, m: 37 }
+      1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
+      4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
+      7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
     };
     const check = () => {
       const now = new Date();
       const nowUTCMins = now.getUTCHours() * 60 + now.getUTCMinutes();
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
         const periodMins = t.h * 60 + t.m;
-        const diff = periodMins - nowUTCMins;
-        if (diff >= 0 && diff <= 2) {
+        const diff = periodMins - nowUTCMins; // negative = period already started
+        // Show banner from 2 min before start up to 5 min after start
+        if (diff >= -5 && diff <= 2) {
           const period = parseInt(p);
-          // Check for tutorial zoom first, then schedule lesson zoom
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
@@ -3145,10 +3148,10 @@ const PlanAssist = () => {
         }
       }
     };
-    check();
-    const interval = setInterval(check, 60000);
+    check(); // run immediately on mount / when deps change
+    const interval = setInterval(check, 30000); // check every 30s for tighter window
     return () => clearInterval(interval);
-  }, [isAuthenticated, accountSetup.scheduleEnhanced, scheduleLessons, tutorials]);
+  }, [isAuthenticated, accountSetup.presentPeriods, scheduleLessons, tutorials]);
 
   // Feature 6: Auto-sync every 30 minutes while app is visible
   useEffect(() => {
@@ -3184,7 +3187,9 @@ const PlanAssist = () => {
           apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
           const newCount = saveResult.stats.new || 0;
           if (newCount > 0) {
-            // Auto-add all new tasks using smart insertion (no sidebar)
+            // newTasks state may not have updated yet after loadTasks() —
+            // wait one tick for React to re-render before calling clearAllNewTasks
+            await new Promise(r => setTimeout(r, 100));
             await clearAllNewTasks();
             setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
           } else {
