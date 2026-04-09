@@ -2334,6 +2334,14 @@ const PlanAssist = () => {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
+  const adminUniversalScan = async () => {
+    if (!confirm('This will perform a Tasks Scan on ALL users — clearing all is_new flags and reassigning priority order for everyone. Continue?')) return;
+    try {
+      await apiCall('/admin/tasks-scan-all', 'POST');
+      alert('Universal Tasks Scan complete. All users processed.');
+    } catch (err) { alert('Universal Tasks Scan failed: ' + err.message); }
+  };
+
   const adminTasksScan = async (userId) => {
     if (!confirm('This will clear ALL is_new flags for this user and reassign priority order. Continue?')) return;
     try {
@@ -3133,8 +3141,8 @@ const PlanAssist = () => {
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins; // negative = period already started
-        // Show banner from 2 min before start up to 5 min after start
-        if (diff >= -5 && diff <= 2) {
+        // Show banner from 5 min before start up to 2 min after start
+        if (diff >= -2 && diff <= 5) {
           const period = parseInt(p);
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
@@ -3187,10 +3195,12 @@ const PlanAssist = () => {
           apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
           const newCount = saveResult.stats.new || 0;
           if (newCount > 0) {
-            // newTasks state may not have updated yet after loadTasks() —
-            // wait one tick for React to re-render before calling clearAllNewTasks
-            await new Promise(r => setTimeout(r, 100));
-            await clearAllNewTasks();
+            // Run smart tasks scan server-side — inserts new tasks by deadline order
+            // into the active list without relying on stale React state
+            try {
+              await apiCall('/tasks/smart-scan', 'POST', {});
+            } catch (e) { console.error('Smart scan failed:', e); }
+            await loadTasks(); // reload with correct priority_order
             setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
           } else {
             setAutoSyncToast('Auto-sync complete');
@@ -7166,6 +7176,21 @@ const PlanAssist = () => {
             {/* ── DIAGNOSTICS ── */}
             {adminSection === 'diagnostics' && (
               <div className="space-y-6">
+                {/* Universal Tasks Scan */}
+                <div className="bg-white rounded-xl shadow-sm border border-red-100 p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-gray-900 text-sm">Universal Tasks Scan</h4>
+                      <p className="text-xs text-gray-500 mt-0.5">Clears all is_new flags and reassigns priority order smartly for every user on the platform.</p>
+                    </div>
+                    <button
+                      onClick={adminUniversalScan}
+                      className="text-xs px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1.5 font-semibold flex-shrink-0"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />Run Universal Scan
+                    </button>
+                  </div>
+                </div>
                 {adminLoading && <div className="text-center py-10 text-gray-400">Loading diagnostics...</div>}
                 {adminDiagnostics && (() => {
                   const d = adminDiagnostics;
