@@ -403,6 +403,16 @@ const PlanAssist = () => {
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${API_URL}${endpoint}`, options);
     if (!response.ok) {
+      // Auth failure — token expired or invalid. Clear auth state and redirect to login.
+      if (response.status === 401 || response.status === 403) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('user');
+        setToken(null);
+        setUser(null);
+        setIsAuthenticated(false);
+        setCurrentPage('hub');
+        throw new Error('Session expired. Please log in again.');
+      }
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
       throw new Error(error.error || error.message || 'Request failed');
     }
@@ -1029,9 +1039,15 @@ const PlanAssist = () => {
     finally { setActivityLoading(false); }
   };
 
+  // Run mini-sync then immediately reload the grades list
   const runGradeMiniSync = async () => {
-    try { await apiCall('/canvas/grades/mini-sync', 'POST'); loadCanvasGrades(); }
-    catch (err) { console.error('Grade mini-sync failed:', err); }
+    setGradesLoading(true);
+    try {
+      await apiCall('/canvas/grades/mini-sync', 'POST');
+      const data = await apiCall('/canvas/grades');
+      setGradesItems(Array.isArray(data) ? data : []);
+    } catch (err) { console.error('Grade mini-sync failed:', err); }
+    finally { setGradesLoading(false); }
   };
 
   const loadHelpContent = async () => {
@@ -1109,17 +1125,14 @@ const PlanAssist = () => {
     setAccountTab(tab);
     if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
     if (tab === 'grades') {
-      // Load all sub-tabs upfront; default filter is 'grades'
-      loadCanvasGrades();
+      // Run mini-sync first (shows full-panel loading state), then load other sub-tabs
+      runGradeMiniSync();
       loadCanvasAnnouncements();
       loadCanvasDiscussions();
       loadActivityStream();
       // 5-min polling for activity stream
       const actInterval = setInterval(loadActivityStream, 300000);
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return actInterval; });
-      // 60-min grade mini-sync
-      const gradeInterval = setInterval(runGradeMiniSync, 3600000);
-      setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return gradeInterval; });
     } else {
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
@@ -3203,7 +3216,6 @@ const PlanAssist = () => {
           await loadTasks();
           await loadCourses();
           // Run grade mini-sync too
-          apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
           const newCount = saveResult.stats.new || 0;
           if (newCount > 0) {
             // Smart-scan still runs to ensure correct deadline-sorted priority_order
@@ -6612,6 +6624,21 @@ const PlanAssist = () => {
                     : activityFilter === 'discussions' ? discussionItems
                     : activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation');
 
+                  // Full-panel loading state while mini-sync is running on first open
+                  if (gradesLoading && gradesItems.length === 0) {
+                    return (
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                        <h2 className="text-lg font-bold text-gray-900 mb-1">Canvas Activity</h2>
+                        <p className="text-sm text-gray-500 mb-8">Your recent Canvas activity.</p>
+                        <div className="flex flex-col items-center justify-center py-16 gap-4">
+                          <div className="w-10 h-10 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
+                          <p className="text-sm font-medium text-gray-600">Syncing grades from Canvas…</p>
+                          <p className="text-xs text-gray-400">This may take a few seconds</p>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                       <div className="flex items-center justify-between mb-1">
@@ -6637,10 +6664,8 @@ const PlanAssist = () => {
                       {/* ── Grades sub-tab ── */}
                       {activityFilter === 'grades' && (
                         <div>
-                          {gradesLoading && gradesItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">Loading grades...</p>
-                          ) : gradesItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No graded assignments found yet. Grades appear here after a Sync detects a score change.</p>
+                          {gradesItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No graded assignments found yet. Grades will appear here once Canvas has scored your work.</p>
                           ) : (
                             <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
                               {gradesItems.map(item => {
