@@ -58,7 +58,6 @@ const PlanAssist = () => {
   const [pwaInstallPrompt, setPwaInstallPrompt] = useState(null);   // deferred install event
   const [showPwaBanner, setShowPwaBanner] = useState(false);         // show install banner
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);   // show update available banner
-  const [waitingSW, setWaitingSW] = useState(null);                  // waiting service worker ref
   const [isAppLoading, setIsAppLoading] = useState(false);
   const [loadingMessage, setLoadingMessage] = useState('Loading your plan...');
   // calendarTasks removed - calendar now reads from `tasks` state directly
@@ -545,37 +544,13 @@ const PlanAssist = () => {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  // Detect when a new service worker is waiting (i.e. a new app version is ready)
+  // Detect when a new service worker has installed (event fired from main.jsx via registerSW)
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
-
-    const checkForWaitingSW = (registration) => {
-      if (registration.waiting) {
-        setWaitingSW(registration.waiting);
-        setShowUpdateBanner(true);
-        return;
-      }
-      // Listen for a new SW entering the waiting state
-      registration.addEventListener('updatefound', () => {
-        const newWorker = registration.installing;
-        if (!newWorker) return;
-        newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            setWaitingSW(newWorker);
-            setShowUpdateBanner(true);
-          }
-        });
-      });
+    const handler = () => {
+      setShowUpdateBanner(true);
     };
-
-    navigator.serviceWorker.getRegistration().then(reg => {
-      if (reg) checkForWaitingSW(reg);
-    });
-
-    // Also handle the case where SW was already registered before this effect ran
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      // SW just activated — page will reload momentarily, nothing to do
-    });
+    window.addEventListener('pwa-update-available', handler);
+    return () => window.removeEventListener('pwa-update-available', handler);
   }, []);
 
   // Load user data
@@ -2361,13 +2336,10 @@ const PlanAssist = () => {
     localStorage.setItem('pwa-banner-dismissed', 'true');
   };
 
-  // Tell the waiting SW to take control immediately, then reload to get fresh assets
+  // Reload to load the fresh assets the new SW has already cached
   const handleUpdate = () => {
-    if (!waitingSW) return;
-    waitingSW.postMessage({ type: 'SKIP_WAITING' });
     setShowUpdateBanner(false);
-    // Brief delay so SW can activate before reload
-    setTimeout(() => window.location.reload(), 300);
+    window.location.reload();
   };
 
   const dismissUpdateBanner = () => setShowUpdateBanner(false);
