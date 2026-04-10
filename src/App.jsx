@@ -57,6 +57,8 @@ const PlanAssist = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pwaInstallPrompt, setPwaInstallPrompt] = useState(null);   // deferred install event
   const [showPwaBanner, setShowPwaBanner] = useState(false);         // show install banner
+  const [showUpdateBanner, setShowUpdateBanner] = useState(false);   // show update available banner
+  const [waitingSW, setWaitingSW] = useState(null);                  // waiting service worker ref
   const [isAppLoading, setIsAppLoading] = useState(false);
   // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
@@ -473,6 +475,39 @@ const PlanAssist = () => {
     };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  // Detect when a new service worker is waiting (i.e. a new app version is ready)
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const checkForWaitingSW = (registration) => {
+      if (registration.waiting) {
+        setWaitingSW(registration.waiting);
+        setShowUpdateBanner(true);
+        return;
+      }
+      // Listen for a new SW entering the waiting state
+      registration.addEventListener('updatefound', () => {
+        const newWorker = registration.installing;
+        if (!newWorker) return;
+        newWorker.addEventListener('statechange', () => {
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+            setWaitingSW(newWorker);
+            setShowUpdateBanner(true);
+          }
+        });
+      });
+    };
+
+    navigator.serviceWorker.getRegistration().then(reg => {
+      if (reg) checkForWaitingSW(reg);
+    });
+
+    // Also handle the case where SW was already registered before this effect ran
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      // SW just activated — page will reload momentarily, nothing to do
+    });
   }, []);
 
   // Load user data
@@ -2243,8 +2278,7 @@ const PlanAssist = () => {
     } catch (err) { /* silent */ }
   };
 
-  const handlePwaInstall = async () => {
-    if (!pwaInstallPrompt) return;
+  const handlePwaInstall = async () => {    if (!pwaInstallPrompt) return;
     pwaInstallPrompt.prompt();
     const { outcome } = await pwaInstallPrompt.userChoice;
     setPwaInstallPrompt(null);
@@ -2258,6 +2292,17 @@ const PlanAssist = () => {
     setShowPwaBanner(false);
     localStorage.setItem('pwa-banner-dismissed', 'true');
   };
+
+  // Tell the waiting SW to take control immediately, then reload to get fresh assets
+  const handleUpdate = () => {
+    if (!waitingSW) return;
+    waitingSW.postMessage({ type: 'SKIP_WAITING' });
+    setShowUpdateBanner(false);
+    // Brief delay so SW can activate before reload
+    setTimeout(() => window.location.reload(), 300);
+  };
+
+  const dismissUpdateBanner = () => setShowUpdateBanner(false);
 
   const dismissAnnouncement = async (id) => {
     try {
@@ -3753,6 +3798,36 @@ const PlanAssist = () => {
       )}
 
       {/* PWA Install Banner */}
+      {/* ── Update Available Banner ──────────────────────────────────────── */}
+      {showUpdateBanner && (
+        <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md z-50">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center flex-shrink-0">
+              <RefreshCw className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="font-semibold text-sm leading-tight">Update Available</p>
+              <p className="text-green-100 text-xs">A new version of PlanAssist is ready</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button
+              onClick={handleUpdate}
+              className="bg-white text-green-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors"
+            >
+              Update Now
+            </button>
+            <button
+              onClick={dismissUpdateBanner}
+              className="text-green-200 hover:text-white transition-colors p-1"
+              aria-label="Dismiss"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
+
       {showPwaBanner && isAuthenticated && (
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
           <div className="flex items-center gap-3">
