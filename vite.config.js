@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'prompt',
+      registerType: 'autoUpdate',
       includeAssets: [
         'favicon.ico',
         'favicon-16x16.png',
@@ -71,6 +71,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        skipWaiting: true,      // new SW activates immediately on install
+        clientsClaim: true,     // new SW takes control of all open tabs right away
         // Cache the app shell (HTML, JS, CSS) for instant loads
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
         // Network-first for API calls (always fresh data)
