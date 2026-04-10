@@ -3197,7 +3197,8 @@ const PlanAssist = () => {
             submittedAt: t.submittedAt ?? null, isMissing: t.isMissing ?? false,
             isLate: t.isLate ?? false, completed: t.completed ?? false,
           }));
-          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
+          // Pass autoSync:true so new tasks are NOT flagged is_new — they go straight to list
+          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks, autoSync: true });
           if (!saveResult?.stats) return;
           await loadTasks();
           await loadCourses();
@@ -3205,8 +3206,7 @@ const PlanAssist = () => {
           apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
           const newCount = saveResult.stats.new || 0;
           if (newCount > 0) {
-            // Run smart tasks scan server-side — inserts new tasks by deadline order
-            // into the active list without relying on stale React state
+            // Smart-scan still runs to ensure correct deadline-sorted priority_order
             try {
               await apiCall('/tasks/smart-scan', 'POST', {});
             } catch (e) { console.error('Smart scan failed:', e); }
