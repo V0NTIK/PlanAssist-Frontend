@@ -3295,19 +3295,27 @@ const PlanAssist = () => {
             submittedAt: t.submittedAt ?? null, isMissing: t.isMissing ?? false,
             isLate: t.isLate ?? false, completed: t.completed ?? false,
           }));
-          // Pass autoSync:true so new tasks are NOT flagged is_new — they go straight to list
-          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks, autoSync: true });
+          // Run a silent full sync — do NOT pass autoSync:true so new tasks get is_new=true
+          // which allows smart-scan to insert them at the correct deadline-sorted position
+          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
           if (!saveResult?.stats) return;
-          await loadTasks();
-          await loadCourses();
-          // Run grade mini-sync too
           const newCount = saveResult.stats.new || 0;
           if (newCount > 0) {
-            // Smart-scan still runs to ensure correct deadline-sorted priority_order
+            // Smart-scan inserts new tasks at correct deadline-sorted positions
             try {
               await apiCall('/tasks/smart-scan', 'POST', {});
             } catch (e) { console.error('Smart scan failed:', e); }
-            await loadTasks(); // reload with correct priority_order
+            // Silently clear all is_new flags — no sidebar for auto-sync
+            try {
+              await apiCall('/tasks/clear-all-new-flags', 'POST', {});
+            } catch (e) { console.error('Clear new flags failed:', e); }
+          }
+          // Full UI refresh — Hub, Task List, Sessions all updated
+          await loadTasks();
+          await loadCourses();
+          await loadCompletionFeed();
+          await loadLeaderboard();
+          if (newCount > 0) {
             setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
           } else {
             setAutoSyncToast('Auto-sync complete');
@@ -4028,14 +4036,22 @@ const PlanAssist = () => {
               {/* Left Column - Next Task and Quick Actions */}
               <div className="lg:col-span-2 space-y-6">
                 {/* Next Up Task */}
-                {tasks.filter(t => !t.deleted && !t.completed).length > 0 && (
+                {tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t)).length > 0 && (
                   <div className="bg-white rounded-xl shadow-md p-6">
                     <div className="flex items-center gap-2 mb-4">
                       <TrendingUp className="w-5 h-5 text-purple-600" />
                       <h2 className="text-xl font-bold text-gray-900">Next Up</h2>
                     </div>
                     {(() => {
-                      const nextTask = tasks.filter(t => !t.deleted && !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
+                      const nextTask = tasks
+                        .filter(t => !t.deleted && !t.completed && isCourseEnabled(t))
+                        .sort((a, b) => {
+                          // Priority order first (user-set), then deadline
+                          if (a.priorityOrder != null && b.priorityOrder != null) return a.priorityOrder - b.priorityOrder;
+                          if (a.priorityOrder != null) return -1;
+                          if (b.priorityOrder != null) return 1;
+                          return a.dueDate - b.dueDate;
+                        })[0];
                       return (
                         <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
                           <div className="flex items-start justify-between">
