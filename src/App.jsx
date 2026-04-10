@@ -60,6 +60,7 @@ const PlanAssist = () => {
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);   // show update available banner
   const [waitingSW, setWaitingSW] = useState(null);                  // waiting service worker ref
   const [isAppLoading, setIsAppLoading] = useState(false);
+  const [loadingMessage, setLoadingMessage] = useState('Loading your plan...');
   // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
   const [token, setToken] = useState(null);
@@ -397,28 +398,87 @@ const PlanAssist = () => {
     return grouped;
   };
 
-  // API helper
-  const apiCall = async (endpoint, method = 'GET', body = null) => {
-    const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const options = { method, headers };
-    if (body) options.body = JSON.stringify(body);
-    const response = await fetch(`${API_URL}${endpoint}`, options);
-    if (!response.ok) {
-      // Auth failure — token expired or invalid. Clear auth state and redirect to login.
-      if (response.status === 401 || response.status === 403) {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-        setToken(null);
-        setUser(null);
-        setIsAuthenticated(false);
-        setCurrentPage('hub');
-        throw new Error('Session expired. Please log in again.');
-      }
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || error.message || 'Request failed');
+  // ── Shared helper: ping /health until server responds or timeout ────────────
+  const pingUntilAlive = async (maxWaitMs = 40000, onWaiting = null) => {
+    const POLL_INTERVAL = 2000;
+    const start = Date.now();
+    let notifiedWaiting = false;
+    while (Date.now() - start < maxWaitMs) {
+      try {
+        const resp = await fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' });
+        if (resp.ok) return true;
+      } catch (e) { /* still waking */ }
+      if (!notifiedWaiting && onWaiting) { onWaiting(); notifiedWaiting = true; }
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
     }
-    return response.json();
+    return false; // timed out
+  };
+
+  // API helper — with timeout, retry on transient failures, and auth redirect on 401/403
+  const apiCall = async (endpoint, method = 'GET', body = null) => {
+    const TIMEOUT_MS = 30000;   // 30s per attempt
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 3000;
+
+    const attempt = async () => {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+      try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const options = { method, headers, signal: controller.signal };
+        if (body) options.body = JSON.stringify(body);
+        const response = await fetch(`${API_URL}${endpoint}`, options);
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          // Auth failure — token expired or invalid. Clear auth state and redirect to login.
+          if (response.status === 401 || response.status === 403) {
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            setToken(null);
+            setUser(null);
+            setIsAuthenticated(false);
+            setCurrentPage('hub');
+            throw new Error('__AUTH_FAILURE__');
+          }
+          // Transient server errors — allow retry
+          if (response.status === 502 || response.status === 503 || response.status === 504) {
+            throw new Error(`__TRANSIENT__${response.status}`);
+          }
+          const error = await response.json().catch(() => ({ error: 'Request failed' }));
+          throw new Error(error.error || error.message || 'Request failed');
+        }
+        return response.json();
+      } catch (err) {
+        clearTimeout(timeoutId);
+        throw err;
+      }
+    };
+
+    let lastErr;
+    for (let i = 0; i < MAX_RETRIES; i++) {
+      try {
+        return await attempt();
+      } catch (err) {
+        lastErr = err;
+        // Don't retry auth failures or intentional app errors
+        if (err.message === '__AUTH_FAILURE__') {
+          throw new Error('Session expired. Please log in again.');
+        }
+        const isTransient = err.name === 'AbortError'
+          || err.message.startsWith('__TRANSIENT__')
+          || err.message === 'Failed to fetch'
+          || err.message.includes('NetworkError')
+          || err.message.includes('network');
+        if (!isTransient) throw err;
+        // On last attempt, throw a clean error
+        if (i === MAX_RETRIES - 1) break;
+        // Wait before retrying — loading states stay active during this delay
+        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      }
+    }
+    throw new Error('Request failed after multiple attempts. Please check your connection and try again.');
   };
   
   // Check for existing session on mount — warm up server first to avoid cold-start failures
@@ -434,26 +494,34 @@ const PlanAssist = () => {
       if (savedColors) {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
-      // Ping the health endpoint first — if server is cold this waits for it to wake
-      // before firing all the real data requests, avoiding a flood of 502 errors
-      const warmUp = async () => {
-        const MAX_WAIT = 35000; // 35s max — Render cold starts take up to 30s
-        const POLL_INTERVAL = 2000;
-        const start = Date.now();
-        while (Date.now() - start < MAX_WAIT) {
-          try {
-            const resp = await fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' });
-            if (resp.ok) break; // server is ready
-          } catch (e) { /* still waking */ }
-          await new Promise(r => setTimeout(r, POLL_INTERVAL));
-        }
-      };
-      warmUp().then(() => {
+      pingUntilAlive(40000, () => setLoadingMessage('Waking up the server — this takes up to 30 seconds…')).then(() => {
+        setLoadingMessage('Loading your plan...');
         loadUserData(savedToken).finally(() => setIsAppLoading(false));
         loadAnnouncements(savedToken);
       });
     }
   }, []);
+
+  // Keep-alive ping every 10 minutes while authenticated — prevents Render spin-down
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(() => {
+      fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' }).catch(() => {});
+    }, 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
+
+  // On tab becoming visible after a long absence — re-ping before any actions fire
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (!document.hidden && isAuthenticated) {
+        // Fire-and-forget warm-up ping; any in-flight apiCall retries will handle themselves
+        fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' }).catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [isAuthenticated]);
 
   // Poll for new announcements every 60 seconds while authenticated
   useEffect(() => {
@@ -3657,10 +3725,10 @@ const PlanAssist = () => {
   if (isAppLoading) {
     return (
       <div className="fixed inset-0 bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center z-50">
-        <div className="text-center">
+        <div className="text-center px-6">
           <div className="w-16 h-16 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-800">PlanAssist</h2>
-          <p className="text-gray-500 text-sm mt-1">Loading your plan...</p>
+          <p className="text-gray-500 text-sm mt-1">{loadingMessage}</p>
         </div>
       </div>
     );
