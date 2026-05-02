@@ -57,9 +57,7 @@ const PlanAssist = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [pwaInstallPrompt, setPwaInstallPrompt] = useState(null);   // deferred install event
   const [showPwaBanner, setShowPwaBanner] = useState(false);         // show install banner
-  const [showUpdateBanner, setShowUpdateBanner] = useState(false);   // show update available banner
   const [isAppLoading, setIsAppLoading] = useState(false);
-  const [loadingMessage, setLoadingMessage] = useState('Loading your plan...');
   // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
   const [token, setToken] = useState(null);
@@ -118,6 +116,7 @@ const PlanAssist = () => {
   const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
   const [showAddTask, setShowAddTask] = useState(false);
   const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
+  const [isSortingByDeadline, setIsSortingByDeadline] = useState(false);
   const [isSavingManualTask, setIsSavingManualTask] = useState(false);
 
   // ── Admin state ───────────────────────────────────────────────────────────
@@ -397,87 +396,18 @@ const PlanAssist = () => {
     return grouped;
   };
 
-  // ── Shared helper: ping /health until server responds or timeout ────────────
-  const pingUntilAlive = async (maxWaitMs = 40000, onWaiting = null) => {
-    const POLL_INTERVAL = 2000;
-    const start = Date.now();
-    let notifiedWaiting = false;
-    while (Date.now() - start < maxWaitMs) {
-      try {
-        const resp = await fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' });
-        if (resp.ok) return true;
-      } catch (e) { /* still waking */ }
-      if (!notifiedWaiting && onWaiting) { onWaiting(); notifiedWaiting = true; }
-      await new Promise(r => setTimeout(r, POLL_INTERVAL));
-    }
-    return false; // timed out
-  };
-
-  // API helper — with timeout, retry on transient failures, and auth redirect on 401/403
+  // API helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
-    const TIMEOUT_MS = 30000;   // 30s per attempt
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY_MS = 3000;
-
-    const attempt = async () => {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
-      try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (token) headers['Authorization'] = `Bearer ${token}`;
-        const options = { method, headers, signal: controller.signal };
-        if (body) options.body = JSON.stringify(body);
-        const response = await fetch(`${API_URL}${endpoint}`, options);
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          // Auth failure — token expired or invalid. Clear auth state and redirect to login.
-          if (response.status === 401 || response.status === 403) {
-            localStorage.removeItem('token');
-            localStorage.removeItem('user');
-            setToken(null);
-            setUser(null);
-            setIsAuthenticated(false);
-            setCurrentPage('hub');
-            throw new Error('__AUTH_FAILURE__');
-          }
-          // Transient server errors — allow retry
-          if (response.status === 502 || response.status === 503 || response.status === 504) {
-            throw new Error(`__TRANSIENT__${response.status}`);
-          }
-          const error = await response.json().catch(() => ({ error: 'Request failed' }));
-          throw new Error(error.error || error.message || 'Request failed');
-        }
-        return response.json();
-      } catch (err) {
-        clearTimeout(timeoutId);
-        throw err;
-      }
-    };
-
-    let lastErr;
-    for (let i = 0; i < MAX_RETRIES; i++) {
-      try {
-        return await attempt();
-      } catch (err) {
-        lastErr = err;
-        // Don't retry auth failures or intentional app errors
-        if (err.message === '__AUTH_FAILURE__') {
-          throw new Error('Session expired. Please log in again.');
-        }
-        const isTransient = err.name === 'AbortError'
-          || err.message.startsWith('__TRANSIENT__')
-          || err.message === 'Failed to fetch'
-          || err.message.includes('NetworkError')
-          || err.message.includes('network');
-        if (!isTransient) throw err;
-        // On last attempt, throw a clean error
-        if (i === MAX_RETRIES - 1) break;
-        // Wait before retrying — loading states stay active during this delay
-        await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
-      }
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const options = { method, headers };
+    if (body) options.body = JSON.stringify(body);
+    const response = await fetch(`${API_URL}${endpoint}`, options);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || error.message || 'Request failed');
     }
-    throw new Error('Request failed after multiple attempts. Please check your connection and try again.');
+    return response.json();
   };
   
   // Check for existing session on mount — warm up server first to avoid cold-start failures
@@ -493,34 +423,26 @@ const PlanAssist = () => {
       if (savedColors) {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
-      pingUntilAlive(40000, () => setLoadingMessage('Waking up the server — this takes up to 30 seconds…')).then(() => {
-        setLoadingMessage('Loading your plan...');
+      // Ping the health endpoint first — if server is cold this waits for it to wake
+      // before firing all the real data requests, avoiding a flood of 502 errors
+      const warmUp = async () => {
+        const MAX_WAIT = 35000; // 35s max — Render cold starts take up to 30s
+        const POLL_INTERVAL = 2000;
+        const start = Date.now();
+        while (Date.now() - start < MAX_WAIT) {
+          try {
+            const resp = await fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' });
+            if (resp.ok) break; // server is ready
+          } catch (e) { /* still waking */ }
+          await new Promise(r => setTimeout(r, POLL_INTERVAL));
+        }
+      };
+      warmUp().then(() => {
         loadUserData(savedToken).finally(() => setIsAppLoading(false));
         loadAnnouncements(savedToken);
       });
     }
   }, []);
-
-  // Keep-alive ping every 10 minutes while authenticated — prevents Render spin-down
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    const interval = setInterval(() => {
-      fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' }).catch(() => {});
-    }, 10 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [isAuthenticated]);
-
-  // On tab becoming visible after a long absence — re-ping before any actions fire
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (!document.hidden && isAuthenticated) {
-        // Fire-and-forget warm-up ping; any in-flight apiCall retries will handle themselves
-        fetch(`${API_URL.replace('/api', '')}/health`, { method: 'GET' }).catch(() => {});
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [isAuthenticated]);
 
   // Poll for new announcements every 60 seconds while authenticated
   useEffect(() => {
@@ -542,15 +464,6 @@ const PlanAssist = () => {
     };
     window.addEventListener('beforeinstallprompt', handler);
     return () => window.removeEventListener('beforeinstallprompt', handler);
-  }, []);
-
-  // Detect when a new service worker has installed (event fired from main.jsx via registerSW)
-  useEffect(() => {
-    const handler = () => {
-      setShowUpdateBanner(true);
-    };
-    window.addEventListener('pwa-update-available', handler);
-    return () => window.removeEventListener('pwa-update-available', handler);
   }, []);
 
   // Load user data
@@ -1117,15 +1030,9 @@ const PlanAssist = () => {
     finally { setActivityLoading(false); }
   };
 
-  // Run mini-sync then immediately reload the grades list
   const runGradeMiniSync = async () => {
-    setGradesLoading(true);
-    try {
-      await apiCall('/canvas/grades/mini-sync', 'POST');
-      const data = await apiCall('/canvas/grades');
-      setGradesItems(Array.isArray(data) ? data : []);
-    } catch (err) { console.error('Grade mini-sync failed:', err); }
-    finally { setGradesLoading(false); }
+    try { await apiCall('/canvas/grades/mini-sync', 'POST'); loadCanvasGrades(); }
+    catch (err) { console.error('Grade mini-sync failed:', err); }
   };
 
   const loadHelpContent = async () => {
@@ -1203,14 +1110,17 @@ const PlanAssist = () => {
     setAccountTab(tab);
     if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
     if (tab === 'grades') {
-      // Run mini-sync first (shows full-panel loading state), then load other sub-tabs
-      runGradeMiniSync();
+      // Load all sub-tabs upfront; default filter is 'grades'
+      loadCanvasGrades();
       loadCanvasAnnouncements();
       loadCanvasDiscussions();
       loadActivityStream();
       // 5-min polling for activity stream
       const actInterval = setInterval(loadActivityStream, 300000);
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return actInterval; });
+      // 60-min grade mini-sync
+      const gradeInterval = setInterval(runGradeMiniSync, 3600000);
+      setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return gradeInterval; });
     } else {
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
@@ -2321,7 +2231,8 @@ const PlanAssist = () => {
     } catch (err) { /* silent */ }
   };
 
-  const handlePwaInstall = async () => {    if (!pwaInstallPrompt) return;
+  const handlePwaInstall = async () => {
+    if (!pwaInstallPrompt) return;
     pwaInstallPrompt.prompt();
     const { outcome } = await pwaInstallPrompt.userChoice;
     setPwaInstallPrompt(null);
@@ -2335,14 +2246,6 @@ const PlanAssist = () => {
     setShowPwaBanner(false);
     localStorage.setItem('pwa-banner-dismissed', 'true');
   };
-
-  // Reload to load the fresh assets the new SW has already cached
-  const handleUpdate = () => {
-    setShowUpdateBanner(false);
-    window.location.reload();
-  };
-
-  const dismissUpdateBanner = () => setShowUpdateBanner(false);
 
   const dismissAnnouncement = async (id) => {
     try {
@@ -2567,73 +2470,21 @@ const PlanAssist = () => {
     if (isSavingPlan) return;
     setIsSavingPlan(true);
     try {
-      // Convert tasks from frontend format (dueDate) to backend format (deadlineDate, deadlineTime)
-      const tasksForBackend = tasks.map(task => {
-        // Validate dueDate exists and is valid
-        if (!task.dueDate || isNaN(task.dueDate.getTime())) {
-          console.error('Invalid dueDate for task:', {
-            id: task.id,
-            title: task.title,
-            dueDate: task.dueDate,
-            dueDateType: typeof task.dueDate,
-            rawTask: task
-          });
-          throw new Error(`Task "${task.title}" (ID: ${task.id}) has an invalid date. Please reload the page and try again.`);
-        }
-        
-        // Extract date and time from the Date object — always use UTC methods
-        // so deadlineDate and deadlineTime are a consistent UTC pair matching DB storage
-        const year = task.dueDate.getUTCFullYear();
-        const month = String(task.dueDate.getUTCMonth() + 1).padStart(2, '0');
-        const day = String(task.dueDate.getUTCDate()).padStart(2, '0');
-        const deadlineDate = `${year}-${month}-${day}`;
-        
-        // Validate the resulting date string
-        if (deadlineDate.includes('NaN')) {
-          console.error('NaN in deadlineDate for task:', task);
-          throw new Error(`Task "${task.title}" produced invalid date: ${deadlineDate}. Please reload the page.`);
-        }
-        
-        let deadlineTime = null;
-        // If the task has a specific time (not just date-only), extract it
-        if (task.hasSpecificTime) {
-          // Convert local time to UTC for storage
-          const utcHours = String(task.dueDate.getUTCHours()).padStart(2, '0');
-          const utcMinutes = String(task.dueDate.getUTCMinutes()).padStart(2, '0');
-          const utcSeconds = String(task.dueDate.getUTCSeconds()).padStart(2, '0');
-          deadlineTime = `${utcHours}:${utcMinutes}:${utcSeconds}`;
-          
-          if (deadlineTime.includes('NaN')) {
-            console.error('NaN in deadlineTime for task:', task);
-            throw new Error(`Task "${task.title}" produced invalid time: ${deadlineTime}. Please reload the page.`);
-          }
-        }
-        
-        // Only send fields the backend expects
-        return {
-          id: task.id,
-          title: task.title,
-          segment: task.segment,
-          class: task.class,
-          description: task.description,
-          url: task.url,
-          deadlineDate,
-          deadlineTime,
-          estimatedTime: task.estimatedTime,
-          userEstimate: task.userEstimate,
-          accumulatedTime: task.accumulatedTime,
-          priorityOrder: task.completed ? null : task.priorityOrder,
-          completed: task.completed
-        };
-      });
-      
-      // Save all tasks with their current priority order to backend
-      await apiCall('/tasks', 'POST', { tasks: tasksForBackend });
-      
-      // Reload tasks from server to get fresh data with correct IDs and priority order
+      // Only send the fields the save-plan endpoint needs — no date conversion required
+      const tasksForBackend = tasks.map(task => ({
+        id: task.id,
+        priorityOrder: task.completed ? null : (task.priorityOrder ?? null),
+        segment: task.segment ?? null,
+        userEstimate: task.userEstimate ?? null,
+        accumulatedTime: task.accumulatedTime ?? 0,
+        completed: task.completed ?? false,
+      }));
+
+      await apiCall('/tasks/save-plan', 'POST', { tasks: tasksForBackend });
+
+      // Reload tasks from server to confirm saved state
       await loadTasks();
-      // Session tasks auto-refresh when user navigates to Sessions page
-      
+
       setHasUnsavedChanges(false);
       setNewTasksSidebarOpen(false);
       setCurrentPage('hub');
@@ -2642,6 +2493,22 @@ const PlanAssist = () => {
       alert('Failed to save changes: ' + error.message);
     } finally {
       setIsSavingPlan(false);
+    }
+  };
+
+  // Sort all tasks by deadline — resets priority_order server-side then reloads
+  const handleSortByDeadline = async () => {
+    if (isSortingByDeadline) return;
+    setIsSortingByDeadline(true);
+    try {
+      await apiCall('/tasks/sort-by-deadline', 'POST');
+      await loadTasks();
+      setHasUnsavedChanges(false);
+    } catch (err) {
+      console.error('Sort by deadline failed:', err);
+      alert('Failed to sort by deadline: ' + err.message);
+    } finally {
+      setIsSortingByDeadline(false);
     }
   };
 
@@ -3295,27 +3162,20 @@ const PlanAssist = () => {
             submittedAt: t.submittedAt ?? null, isMissing: t.isMissing ?? false,
             isLate: t.isLate ?? false, completed: t.completed ?? false,
           }));
-          // Run a silent full sync — do NOT pass autoSync:true so new tasks get is_new=true
-          // which allows smart-scan to insert them at the correct deadline-sorted position
-          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
+          // Pass autoSync:true so new tasks are NOT flagged is_new — they go straight to list
+          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks, autoSync: true });
           if (!saveResult?.stats) return;
+          await loadTasks();
+          await loadCourses();
+          // Run grade mini-sync too
+          apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
           const newCount = saveResult.stats.new || 0;
           if (newCount > 0) {
-            // Smart-scan inserts new tasks at correct deadline-sorted positions
+            // Smart-scan still runs to ensure correct deadline-sorted priority_order
             try {
               await apiCall('/tasks/smart-scan', 'POST', {});
             } catch (e) { console.error('Smart scan failed:', e); }
-            // Silently clear all is_new flags — no sidebar for auto-sync
-            try {
-              await apiCall('/tasks/clear-all-new-flags', 'POST', {});
-            } catch (e) { console.error('Clear new flags failed:', e); }
-          }
-          // Full UI refresh — Hub, Task List, Sessions all updated
-          await loadTasks();
-          await loadCourses();
-          await loadCompletionFeed();
-          await loadLeaderboard();
-          if (newCount > 0) {
+            await loadTasks(); // reload with correct priority_order
             setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
           } else {
             setAutoSyncToast('Auto-sync complete');
@@ -3705,10 +3565,10 @@ const PlanAssist = () => {
   if (isAppLoading) {
     return (
       <div className="fixed inset-0 bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center z-50">
-        <div className="text-center px-6">
+        <div className="text-center">
           <div className="w-16 h-16 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-800">PlanAssist</h2>
-          <p className="text-gray-500 text-sm mt-1">{loadingMessage}</p>
+          <p className="text-gray-500 text-sm mt-1">Loading your plan...</p>
         </div>
       </div>
     );
@@ -3846,36 +3706,6 @@ const PlanAssist = () => {
       )}
 
       {/* PWA Install Banner */}
-      {/* ── Update Available Banner ──────────────────────────────────────── */}
-      {showUpdateBanner && (
-        <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md z-50">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center flex-shrink-0">
-              <RefreshCw className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="font-semibold text-sm leading-tight">Update Available</p>
-              <p className="text-green-100 text-xs">A new version of PlanAssist is ready</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <button
-              onClick={handleUpdate}
-              className="bg-white text-green-700 text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-green-50 transition-colors"
-            >
-              Update Now
-            </button>
-            <button
-              onClick={dismissUpdateBanner}
-              className="text-green-200 hover:text-white transition-colors p-1"
-              aria-label="Dismiss"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
       {showPwaBanner && isAuthenticated && (
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
           <div className="flex items-center gap-3">
@@ -4036,22 +3866,14 @@ const PlanAssist = () => {
               {/* Left Column - Next Task and Quick Actions */}
               <div className="lg:col-span-2 space-y-6">
                 {/* Next Up Task */}
-                {tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t)).length > 0 && (
+                {tasks.filter(t => !t.deleted && !t.completed).length > 0 && (
                   <div className="bg-white rounded-xl shadow-md p-6">
                     <div className="flex items-center gap-2 mb-4">
                       <TrendingUp className="w-5 h-5 text-purple-600" />
                       <h2 className="text-xl font-bold text-gray-900">Next Up</h2>
                     </div>
                     {(() => {
-                      const nextTask = tasks
-                        .filter(t => !t.deleted && !t.completed && isCourseEnabled(t))
-                        .sort((a, b) => {
-                          // Priority order first (user-set), then deadline
-                          if (a.priorityOrder != null && b.priorityOrder != null) return a.priorityOrder - b.priorityOrder;
-                          if (a.priorityOrder != null) return -1;
-                          if (b.priorityOrder != null) return 1;
-                          return a.dueDate - b.dueDate;
-                        })[0];
+                      const nextTask = tasks.filter(t => !t.deleted && !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
                       return (
                         <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
                           <div className="flex items-start justify-between">
@@ -4274,6 +4096,18 @@ const PlanAssist = () => {
                         >
                           <Plus className="w-4 h-4" />
                           <span className="hidden sm:inline">Add Task</span>
+                        </button>
+                        <button
+                          onClick={handleSortByDeadline}
+                          disabled={isSortingByDeadline || isLoadingTasks}
+                          title="Sort all tasks by deadline"
+                          className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
+                        >
+                          {isSortingByDeadline ? (
+                            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /><span className="hidden sm:inline">Sorting…</span></>
+                          ) : (
+                            <><LayoutList className="w-4 h-4" /><span className="hidden sm:inline">Sort by Deadline</span></>
+                          )}
                         </button>
                         <button
                           onClick={fetchCanvasTasks}
@@ -6755,21 +6589,6 @@ const PlanAssist = () => {
                     : activityFilter === 'discussions' ? discussionItems
                     : activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation');
 
-                  // Full-panel loading state while mini-sync is running on first open
-                  if (gradesLoading && gradesItems.length === 0) {
-                    return (
-                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                        <h2 className="text-lg font-bold text-gray-900 mb-1">Canvas Activity</h2>
-                        <p className="text-sm text-gray-500 mb-8">Your recent Canvas activity.</p>
-                        <div className="flex flex-col items-center justify-center py-16 gap-4">
-                          <div className="w-10 h-10 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin" />
-                          <p className="text-sm font-medium text-gray-600">Syncing grades from Canvas…</p>
-                          <p className="text-xs text-gray-400">This may take a few seconds</p>
-                        </div>
-                      </div>
-                    );
-                  }
-
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                       <div className="flex items-center justify-between mb-1">
@@ -6795,8 +6614,10 @@ const PlanAssist = () => {
                       {/* ── Grades sub-tab ── */}
                       {activityFilter === 'grades' && (
                         <div>
-                          {gradesItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No graded assignments found yet. Grades will appear here once Canvas has scored your work.</p>
+                          {gradesLoading && gradesItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading grades...</p>
+                          ) : gradesItems.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No graded assignments found yet. Grades appear here after a Sync detects a score change.</p>
                           ) : (
                             <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
                               {gradesItems.map(item => {
