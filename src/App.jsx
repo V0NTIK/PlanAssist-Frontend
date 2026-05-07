@@ -6450,19 +6450,58 @@ const PlanAssist = () => {
                                   </span>
                                 )}
                               </div>
-                              <div className="relative h-7 bg-gray-100 rounded-full overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold`}
-                                  style={{
-                                    width: `${Math.min(userScore, 100)}%`,
-                                    background: userScore >= 80 ? 'linear-gradient(90deg, #7c3aed, #3b82f6)' : userScore >= 60 ? 'linear-gradient(90deg, #f59e0b, #ef4444)' : 'linear-gradient(90deg, #ef4444, #dc2626)',
-                                    transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                                    animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 200}ms both`
-                                  }}
-                                >
-                                  {userScore >= 20 && `${userScore.toFixed(0)}%`}
-                                </div>
-                              </div>
+                              {(() => {
+                                const goalVal = userGoals[String(course.course_id)];
+                                const goalPct = goalVal != null ? Math.min(parseFloat(goalVal), 100) : null;
+                                const isHit = goalPct != null && userScore >= goalPct;
+                                // Bar colour: green if goal hit, amber if goal set but not hit, default purple→blue otherwise
+                                const barBg = goalPct == null
+                                  ? (userScore >= 80 ? 'linear-gradient(90deg, #7c3aed, #3b82f6)' : userScore >= 60 ? 'linear-gradient(90deg, #f59e0b, #ef4444)' : 'linear-gradient(90deg, #ef4444, #dc2626)')
+                                  : isHit
+                                  ? 'linear-gradient(90deg, #10b981, #059669)'
+                                  : 'linear-gradient(90deg, #f59e0b, #fb923c)';
+                                return (
+                                  <div className="relative h-7 bg-gray-100 rounded-full overflow-visible">
+                                    {/* Score fill */}
+                                    <div
+                                      className="absolute top-0 left-0 h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold overflow-hidden"
+                                      style={{
+                                        width: `${Math.min(userScore, 100)}%`,
+                                        background: barBg,
+                                        transition: 'width 1.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                        animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 200}ms both`
+                                      }}
+                                    >
+                                      {userScore >= 20 && `${userScore.toFixed(0)}%`}
+                                    </div>
+                                    {/* Goal barrier line — overlaid directly on this slider */}
+                                    {goalPct != null && (
+                                      <>
+                                        <div
+                                          className="absolute top-0 bottom-0 w-0.5 z-10"
+                                          style={{
+                                            left: `${goalPct}%`,
+                                            transform: 'translateX(-50%)',
+                                            backgroundColor: isHit ? '#059669' : '#d97706',
+                                            boxShadow: isHit ? '0 0 5px #10b981' : '0 0 5px #f59e0b'
+                                          }}
+                                        />
+                                        <span
+                                          className={`absolute -top-5 text-xs font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap z-10 ${
+                                            isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                          }`}
+                                          style={{
+                                            left: `${goalPct}%`,
+                                            transform: 'translateX(-50%)',
+                                          }}
+                                        >
+                                          {isHit ? `✓ ${goalPct}%` : `Goal: ${goalPct}%`}
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })()}
 
                               {/* Class average bar */}
                               {classAverage !== null && studentCount > 1 && (
@@ -6483,56 +6522,6 @@ const PlanAssist = () => {
                                   </div>
                                 </div>
                               )}
-
-                              {/* Goal barrier — shown when user has a goal for this course */}
-                              {(() => {
-                                const goalVal = userGoals[String(course.course_id)];
-                                if (goalVal == null) return null;
-                                const goalPct = Math.min(parseFloat(goalVal), 100);
-                                const isHit = userScore != null && userScore >= goalPct;
-                                return (
-                                  <div className="mt-2">
-                                    <div className="relative h-6 bg-gray-50 rounded-full border border-gray-200 overflow-visible">
-                                      {/* Filled portion up to current score */}
-                                      {userScore != null && (
-                                        <div
-                                          className="absolute top-0 left-0 h-full rounded-full opacity-20"
-                                          style={{
-                                            width: `${Math.min(userScore, 100)}%`,
-                                            background: isHit ? '#10b981' : '#f59e0b',
-                                            transition: 'width 1.2s cubic-bezier(0.4,0,0.2,1)',
-                                            animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 500}ms both`
-                                          }}
-                                        />
-                                      )}
-                                      {/* Goal marker line */}
-                                      <div
-                                        className="absolute top-0 bottom-0 w-0.5 rounded-full z-10"
-                                        style={{
-                                          left: `${goalPct}%`,
-                                          transform: 'translateX(-50%)',
-                                          backgroundColor: isHit ? '#10b981' : '#f59e0b',
-                                          boxShadow: isHit ? '0 0 4px #10b981' : '0 0 4px #f59e0b'
-                                        }}
-                                      />
-                                      {/* Goal label */}
-                                      <div
-                                        className="absolute top-0 bottom-0 flex items-center z-10"
-                                        style={{ left: `${goalPct}%`, transform: 'translateX(-50%)' }}
-                                      >
-                                        <span
-                                          className={`absolute -top-5 text-xs font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${
-                                            isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                          }`}
-                                          style={{ transform: 'translateX(-50%)', left: '50%' }}
-                                        >
-                                          {isHit ? `✓ ${goalPct}%` : `Goal: ${goalPct}%`}
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })()}
                             </div>
                           )}
 
