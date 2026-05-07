@@ -6461,7 +6461,7 @@ const PlanAssist = () => {
                                   ? 'linear-gradient(90deg, #10b981, #059669)'
                                   : 'linear-gradient(90deg, #f59e0b, #fb923c)';
                                 return (
-                                  <div className="relative h-7 bg-gray-100 rounded-full overflow-visible">
+                                  <div className={`relative h-7 bg-gray-100 rounded-full overflow-visible ${goalPct != null ? 'mb-5' : ''}`}>
                                     {/* Score fill */}
                                     <div
                                       className="absolute top-0 left-0 h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold overflow-hidden"
@@ -6487,7 +6487,7 @@ const PlanAssist = () => {
                                           }}
                                         />
                                         <span
-                                          className={`absolute -top-5 text-xs font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap z-10 ${
+                                          className={`absolute top-full mt-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap z-10 ${
                                             isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                                           }`}
                                           style={{
