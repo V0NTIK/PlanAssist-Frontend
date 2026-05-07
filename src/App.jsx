@@ -52,6 +52,156 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
   );
 };
 
+// ── GoalsPanel — standalone component to avoid Rules of Hooks violations ─────
+const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall }) => {
+  const goalCourses = courses.filter(c => c.grading_period_id != null && c.enabled !== false);
+
+  const [localGoals, setLocalGoals] = useState(() => {
+    const init = {};
+    goalCourses.forEach(c => {
+      init[String(c.course_id)] = userGoals[String(c.course_id)] != null ? String(userGoals[String(c.course_id)]) : '';
+    });
+    return init;
+  });
+  const [goalsSaving, setGoalsSaving] = useState(false);
+  const [goalsDiscarding, setGoalsDiscarding] = useState(false);
+
+  const hasExistingGoals = Object.keys(userGoals).length > 0;
+  const allFilled = goalCourses.length > 0 && goalCourses.every(c => {
+    const v = parseFloat(localGoals[String(c.course_id)]);
+    return !isNaN(v) && v >= 45 && v <= 100;
+  });
+
+  const handleSetGoals = async () => {
+    if (!allFilled) return;
+    setGoalsSaving(true);
+    try {
+      const goals = {};
+      goalCourses.forEach(c => { goals[String(c.course_id)] = parseFloat(localGoals[String(c.course_id)]); });
+      await apiCall('/goals', 'POST', { goals });
+      await loadGoals();
+      alert('Goals saved!');
+    } catch (e) {
+      alert('Failed to save goals: ' + e.message);
+    } finally {
+      setGoalsSaving(false);
+    }
+  };
+
+  const handleDiscardGoals = async () => {
+    if (!window.confirm('This will remove all your academic goals and restore the Next Up bubble on the Hub. Are you sure?')) return;
+    setGoalsDiscarding(true);
+    try {
+      await apiCall('/goals', 'DELETE');
+      setUserGoals({});
+      setLocalGoals(() => {
+        const init = {};
+        goalCourses.forEach(c => { init[String(c.course_id)] = ''; });
+        return init;
+      });
+    } catch (e) {
+      alert('Failed to discard goals: ' + e.message);
+    } finally {
+      setGoalsDiscarding(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-lg font-bold text-gray-900">Academic Goals</h2>
+        {hasExistingGoals && (
+          <button onClick={handleDiscardGoals} disabled={goalsDiscarding}
+            className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
+            {goalsDiscarding ? 'Discarding...' : '✕ Discard Goals'}
+          </button>
+        )}
+      </div>
+      <p className="text-sm text-gray-500 mb-6">Set a target percentage for each course. Goals power the Goal Snapshot on the Hub and progress markers on Marks.</p>
+
+      {goalCourses.length === 0 ? (
+        <div className="text-center py-10 text-gray-400">
+          <Target className="w-10 h-10 mx-auto mb-3 opacity-30" />
+          <p className="font-medium">No courses with an active grading period found.</p>
+          <p className="text-sm mt-1">Sync Canvas to populate your courses.</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-4 justify-center mb-8">
+            {goalCourses.map(course => {
+              const color = course.color || '#7c3aed';
+              const courseIdStr = String(course.course_id);
+              const val = localGoals[courseIdStr] ?? '';
+              const num = parseFloat(val);
+              const isValid = !isNaN(num) && num >= 45 && num <= 100;
+              const isInvalid = val !== '' && !isValid;
+              return (
+                <div key={course.course_id}
+                  className="w-48 rounded-2xl border-2 p-4 flex flex-col gap-3 shadow-sm transition-shadow hover:shadow-md"
+                  style={{ borderColor: color + '55', background: color + '0a' }}>
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                    <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{course.name}</p>
+                  </div>
+                  {course.grading_period_title && (
+                    <p className="text-xs text-gray-400 -mt-1">{course.grading_period_title}</p>
+                  )}
+                  <div>
+                    <label className="text-xs text-gray-500 mb-1 block">Target %</label>
+                    <div className="relative">
+                      <input
+                        type="number" min="45" max="100"
+                        value={val}
+                        onChange={e => setLocalGoals(prev => ({ ...prev, [courseIdStr]: e.target.value }))}
+                        placeholder="e.g. 90"
+                        className={`w-full px-3 py-2 border-2 rounded-xl text-sm font-bold text-center focus:outline-none focus:ring-2 ${
+                          isInvalid
+                            ? 'border-red-400 focus:ring-red-300 text-red-600'
+                            : isValid
+                            ? 'border-green-400 focus:ring-green-300 text-green-700'
+                            : 'border-gray-200 focus:ring-purple-300 text-gray-800'
+                        }`}
+                      />
+                      {isValid && <span className="absolute right-3 top-2 text-green-500 text-sm font-bold">%</span>}
+                    </div>
+                    {isInvalid && <p className="text-xs text-red-500 mt-1">Must be 45–100</p>}
+                  </div>
+                  {course.current_period_score != null && (
+                    <div className="text-center">
+                      <span className="text-xs text-gray-400">Current: </span>
+                      <span className="text-xs font-bold text-gray-700">{parseFloat(course.current_period_score).toFixed(1)}%</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex justify-center">
+            <button onClick={handleSetGoals}
+              disabled={!allFilled || goalsSaving}
+              className={`px-8 py-3 rounded-xl font-semibold text-white transition-all shadow-md ${
+                allFilled && !goalsSaving
+                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+                  : 'bg-gray-300 cursor-not-allowed'
+              }`}>
+              {goalsSaving ? (
+                <span className="flex items-center gap-2">
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Saving...
+                </span>
+              ) : hasExistingGoals ? 'Update Goals' : 'Set Goals'}
+            </button>
+          </div>
+          {!allFilled && (
+            <p className="text-center text-xs text-gray-400 mt-3">All courses must have a valid goal (45–100) before saving.</p>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
 const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -7203,152 +7353,15 @@ const PlanAssist = () => {
                 )}
 
                 {/* ── GOALS TAB ── */}
-                {accountTab === 'goals' && (() => {
-                  const goalCourses = courses.filter(c => c.grading_period_id != null && c.enabled !== false);
-                  const [localGoals, setLocalGoals] = React.useState(() => {
-                    const init = {};
-                    goalCourses.forEach(c => {
-                      init[String(c.course_id)] = userGoals[String(c.course_id)] != null ? String(userGoals[String(c.course_id)]) : '';
-                    });
-                    return init;
-                  });
-                  const [goalsSaving, setGoalsSaving] = React.useState(false);
-                  const [goalsDiscarding, setGoalsDiscarding] = React.useState(false);
-                  const hasExistingGoals = Object.keys(userGoals).length > 0;
-                  const allFilled = goalCourses.length > 0 && goalCourses.every(c => {
-                    const v = parseFloat(localGoals[String(c.course_id)]);
-                    return !isNaN(v) && v >= 45 && v <= 100;
-                  });
-
-                  const handleSetGoals = async () => {
-                    if (!allFilled) return;
-                    setGoalsSaving(true);
-                    try {
-                      const goals = {};
-                      goalCourses.forEach(c => { goals[String(c.course_id)] = parseFloat(localGoals[String(c.course_id)]); });
-                      await apiCall('/goals', 'POST', { goals });
-                      await loadGoals();
-                      alert('Goals saved!');
-                    } catch (e) {
-                      alert('Failed to save goals: ' + e.message);
-                    } finally {
-                      setGoalsSaving(false);
-                    }
-                  };
-
-                  const handleDiscardGoals = async () => {
-                    if (!window.confirm('This will remove all your academic goals and restore the Next Up bubble on the Hub. Are you sure?')) return;
-                    setGoalsDiscarding(true);
-                    try {
-                      await apiCall('/goals', 'DELETE');
-                      setUserGoals({});
-                      setLocalGoals(() => {
-                        const init = {};
-                        goalCourses.forEach(c => { init[String(c.course_id)] = ''; });
-                        return init;
-                      });
-                    } catch (e) {
-                      alert('Failed to discard goals: ' + e.message);
-                    } finally {
-                      setGoalsDiscarding(false);
-                    }
-                  };
-
-                  return (
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                      <div className="flex items-center justify-between mb-1">
-                        <h2 className="text-lg font-bold text-gray-900">Academic Goals</h2>
-                        {hasExistingGoals && (
-                          <button onClick={handleDiscardGoals} disabled={goalsDiscarding}
-                            className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
-                            {goalsDiscarding ? 'Discarding...' : '✕ Discard Goals'}
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-sm text-gray-500 mb-6">Set a target percentage for each course. Goals power the Goal Snapshot on the Hub and progress markers on Marks.</p>
-
-                      {goalCourses.length === 0 ? (
-                        <div className="text-center py-10 text-gray-400">
-                          <Target className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                          <p className="font-medium">No courses with an active grading period found.</p>
-                          <p className="text-sm mt-1">Sync Canvas to populate your courses.</p>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex flex-wrap gap-4 justify-center mb-8">
-                            {goalCourses.map(course => {
-                              const color = course.color || '#7c3aed';
-                              const courseIdStr = String(course.course_id);
-                              const val = localGoals[courseIdStr] ?? '';
-                              const num = parseFloat(val);
-                              const isValid = !isNaN(num) && num >= 45 && num <= 100;
-                              const isInvalid = val !== '' && !isValid;
-                              return (
-                                <div key={course.course_id}
-                                  className="w-48 rounded-2xl border-2 p-4 flex flex-col gap-3 shadow-sm transition-shadow hover:shadow-md"
-                                  style={{ borderColor: color + '55', background: color + '0a' }}>
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-                                    <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{course.name}</p>
-                                  </div>
-                                  {course.grading_period_title && (
-                                    <p className="text-xs text-gray-400 -mt-1">{course.grading_period_title}</p>
-                                  )}
-                                  <div>
-                                    <label className="text-xs text-gray-500 mb-1 block">Target %</label>
-                                    <div className="relative">
-                                      <input
-                                        type="number" min="45" max="100"
-                                        value={val}
-                                        onChange={e => setLocalGoals(prev => ({ ...prev, [courseIdStr]: e.target.value }))}
-                                        placeholder="e.g. 90"
-                                        className={`w-full px-3 py-2 border-2 rounded-xl text-sm font-bold text-center focus:outline-none focus:ring-2 ${
-                                          isInvalid
-                                            ? 'border-red-400 focus:ring-red-300 text-red-600'
-                                            : isValid
-                                            ? 'border-green-400 focus:ring-green-300 text-green-700'
-                                            : 'border-gray-200 focus:ring-purple-300 text-gray-800'
-                                        }`}
-                                      />
-                                      {isValid && <span className="absolute right-3 top-2 text-green-500 text-sm font-bold">%</span>}
-                                    </div>
-                                    {isInvalid && <p className="text-xs text-red-500 mt-1">Must be 45–100</p>}
-                                  </div>
-                                  {course.current_period_score != null && (
-                                    <div className="text-center">
-                                      <span className="text-xs text-gray-400">Current: </span>
-                                      <span className="text-xs font-bold text-gray-700">{parseFloat(course.current_period_score).toFixed(1)}%</span>
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          <div className="flex justify-center">
-                            <button onClick={handleSetGoals}
-                              disabled={!allFilled || goalsSaving}
-                              className={`px-8 py-3 rounded-xl font-semibold text-white transition-all shadow-md ${
-                                allFilled && !goalsSaving
-                                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
-                                  : 'bg-gray-300 cursor-not-allowed'
-                              }`}>
-                              {goalsSaving ? (
-                                <span className="flex items-center gap-2">
-                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  Saving...
-                                </span>
-                              ) : hasExistingGoals ? 'Update Goals' : 'Set Goals'}
-                            </button>
-                          </div>
-                          {!allFilled && (
-                            <p className="text-center text-xs text-gray-400 mt-3">All courses must have a valid goal (45–100) before saving.</p>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  );
-                })()}
+                {accountTab === 'goals' && (
+                  <GoalsPanel
+                    courses={courses}
+                    userGoals={userGoals}
+                    setUserGoals={setUserGoals}
+                    loadGoals={loadGoals}
+                    apiCall={apiCall}
+                  />
+                )}
 
                 {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
