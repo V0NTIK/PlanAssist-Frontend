@@ -284,6 +284,10 @@ const PlanAssist = () => {
   // Marks / courses state
   const [courses, setCourses] = useState([]);
   const [courseAverages, setCourseAverages] = useState({});
+  const [gradeImpact, setGradeImpact] = useState({}); // { task_id: 'Low'|'Moderate'|'High' }
+  const [userGoals, setUserGoals] = useState({}); // { course_id: target_score }
+  const [goalsLoaded, setGoalsLoaded] = useState(false);
+  const [sessionViewMode, setSessionViewMode] = useState(() => localStorage.getItem('planassist_session_view') || 'list');
 
   // UI theme
   const [invertColors, setInvertColors] = useState(() => localStorage.getItem('planassist-invert') === 'true');
@@ -3146,36 +3150,16 @@ const PlanAssist = () => {
       try {
         const check = await apiCall('/canvas/auto-sync', 'POST', {});
         if (!check?.shouldSync) return;
-        // Run a silent full sync
+        // Backend now performs the 7-day sync itself and returns counts
         setIsLoadingTasks(true);
         try {
-          const data = await apiCall('/canvas/sync', 'POST', {});
-          if (!data || !Array.isArray(data.tasks)) return;
-          const formattedTasks = data.tasks.map(t => ({
-            title: t.title, segment: t.segment, class: t.class, description: t.description,
-            url: t.url, deadlineDate: t.deadlineDate, deadlineTime: t.deadlineTime,
-            estimatedTime: t.estimatedTime, courseId: t.courseId ?? null,
-            assignmentId: t.assignmentId ?? null, pointsPossible: t.pointsPossible ?? null,
-            assignmentGroupId: t.assignmentGroupId ?? null, currentScore: t.currentScore ?? null,
-            currentGrade: t.currentGrade ?? null, gradingType: t.gradingType ?? 'points',
-            unlockAt: t.unlockAt ?? null, lockAt: t.lockAt ?? null,
-            submittedAt: t.submittedAt ?? null, isMissing: t.isMissing ?? false,
-            isLate: t.isLate ?? false, completed: t.completed ?? false,
-          }));
-          // Pass autoSync:true so new tasks are NOT flagged is_new — they go straight to list
-          const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks, autoSync: true });
-          if (!saveResult?.stats) return;
+          const newCount = check.newCount || 0;
           await loadTasks();
           await loadCourses();
-          // Run grade mini-sync too
-          apiCall('/canvas/grades/mini-sync', 'POST', {}).catch(() => {});
-          const newCount = saveResult.stats.new || 0;
+          await loadGradeImpact();
           if (newCount > 0) {
-            // Smart-scan still runs to ensure correct deadline-sorted priority_order
-            try {
-              await apiCall('/tasks/smart-scan', 'POST', {});
-            } catch (e) { console.error('Smart scan failed:', e); }
-            await loadTasks(); // reload with correct priority_order
+            try { await apiCall('/tasks/smart-scan', 'POST', {}); } catch (e) { console.error('Smart scan failed:', e); }
+            await loadTasks();
             setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
           } else {
             setAutoSyncToast('Auto-sync complete');
@@ -3254,6 +3238,24 @@ const PlanAssist = () => {
       setCourseAverages(averages);
     } catch (error) {
       console.error('Failed to load courses:', error);
+    }
+  };
+
+  const loadGradeImpact = async () => {
+    try {
+      const data = await apiCall('/tasks/grade-impact', 'GET');
+      setGradeImpact(data || {});
+    } catch (e) { console.error('Failed to load grade impact:', e); }
+  };
+
+  const loadGoals = async () => {
+    try {
+      const data = await apiCall('/goals', 'GET');
+      setUserGoals(data || {});
+      setGoalsLoaded(true);
+    } catch (e) {
+      console.error('Failed to load goals:', e);
+      setGoalsLoaded(true);
     }
   };
 
@@ -3389,6 +3391,8 @@ const PlanAssist = () => {
   useEffect(() => {
     if (isAuthenticated && user) {
       loadCourses();
+      loadGradeImpact();
+      loadGoals();
       
       // Delay initial feed/leaderboard load by 2s to let the server warm up
       // (Render free tier spins down after inactivity)
@@ -3814,8 +3818,55 @@ const PlanAssist = () => {
           <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
-              <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.name || 'Student'}!</h1>
-              <p className="text-purple-100">Here's how you're doing today</p>
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.name || 'Student'}!</h1>
+                  <p className="text-purple-100">Here's how you're doing today</p>
+                </div>
+                {/* Insight Box */}
+                {(() => {
+                  const insights = [];
+                  if (hubStats.tasksCompletedToday > 0)
+                    insights.push(`🔥 ${hubStats.tasksCompletedToday} task${hubStats.tasksCompletedToday > 1 ? 's' : ''} done today — keep the momentum!`);
+                  if (hubStats.streak >= 3)
+                    insights.push(`⚡ ${hubStats.streak}-day streak! Consistency is how goals get hit.`);
+                  if (hubStats.tasksCompletedWeek >= 5)
+                    insights.push(`📈 ${hubStats.tasksCompletedWeek} tasks this week — you're in a strong rhythm.`);
+                  if (hubStats.averageAccuracy >= 80)
+                    insights.push(`🎯 Your time accuracy is ${hubStats.averageAccuracy}% — you know yourself well.`);
+                  else if (hubStats.averageAccuracy > 0 && hubStats.averageAccuracy < 60)
+                    insights.push(`⏱ Your time estimates are running off — more sessions will improve accuracy.`);
+                  // Goal insights
+                  if (Object.keys(userGoals).length > 0) {
+                    const coursesWithGoals = courses.filter(c => userGoals[String(c.course_id)] != null && c.current_period_score != null && c.enabled !== false);
+                    const onTrack = coursesWithGoals.filter(c => parseFloat(c.current_period_score) >= parseFloat(userGoals[String(c.course_id)]));
+                    const offTrack = coursesWithGoals.filter(c => parseFloat(c.current_period_score) < parseFloat(userGoals[String(c.course_id)]));
+                    if (onTrack.length > 0)
+                      insights.push(`✅ Hitting your goal in ${onTrack.length} course${onTrack.length > 1 ? 's' : ''}. Don't let up!`);
+                    if (offTrack.length > 0) {
+                      const closest = [...offTrack].sort((a,b) =>
+                        (parseFloat(userGoals[String(a.course_id)]) - parseFloat(a.current_period_score)) -
+                        (parseFloat(userGoals[String(b.course_id)]) - parseFloat(b.current_period_score))
+                      )[0];
+                      const gap = (parseFloat(userGoals[String(closest.course_id)]) - parseFloat(closest.current_period_score)).toFixed(1);
+                      insights.push(`🎯 ${gap}% away from your ${closest.name.split(' ').slice(0,3).join(' ')} goal — your next session could move the needle.`);
+                    }
+                  }
+                  const lowCourses = courses.filter(c => c.current_period_score != null && parseFloat(c.current_period_score) < 70 && c.enabled !== false);
+                  if (lowCourses.length > 0)
+                    insights.push(`⚠️ ${lowCourses[0].name.split(' ').slice(0,3).join(' ')} needs attention — sitting below 70%.`);
+                  if (insights.length === 0)
+                    insights.push('💡 Sync Canvas to get your latest tasks and grades.');
+                  // Rotate every 10 minutes deterministically
+                  const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
+                  return (
+                    <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
+                      <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
+                      <p className="text-sm text-white leading-relaxed">{insight}</p>
+                    </div>
+                  );
+                })()}
+              </div>
             </div>
 
             {/* Enhanced Stats Grid */}
@@ -3865,40 +3916,104 @@ const PlanAssist = () => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               {/* Left Column - Next Task and Quick Actions */}
               <div className="lg:col-span-2 space-y-6">
-                {/* Next Up Task */}
-                {tasks.filter(t => !t.deleted && !t.completed).length > 0 && (
-                  <div className="bg-white rounded-xl shadow-md p-6">
-                    <div className="flex items-center gap-2 mb-4">
-                      <TrendingUp className="w-5 h-5 text-purple-600" />
-                      <h2 className="text-xl font-bold text-gray-900">Next Up</h2>
-                    </div>
-                    {(() => {
-                      const nextTask = tasks.filter(t => !t.deleted && !t.completed).sort((a, b) => a.dueDate - b.dueDate)[0];
-                      return (
-                        <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <h3 className="text-lg font-bold text-gray-900 mb-2">{nextTask.title}</h3>
-                              <div className="flex items-center gap-4 text-sm text-gray-600">
-                                <span className="flex items-center gap-1">
-                                  <Clock className="w-4 h-4" />
-                                  {nextTask.userEstimate || nextTask.estimatedTime} min
-                                </span>
+                {/* Next Up / Goal Snapshot — Goal Snapshot shown when goals are set, Next Up otherwise */}
+                {(() => {
+                  const hasGoals = Object.keys(userGoals).length > 0;
+                  if (hasGoals) {
+                    const goalCourses = courses.filter(c =>
+                      userGoals[String(c.course_id)] != null &&
+                      c.current_period_score != null &&
+                      c.enabled !== false
+                    );
+                    if (goalCourses.length === 0) return null;
+                    // Rotate every 5 minutes
+                    const picked = goalCourses[Math.floor(Date.now() / 1000 / 60 / 5) % goalCourses.length];
+                    const current = parseFloat(picked.current_period_score);
+                    const target = parseFloat(userGoals[String(picked.course_id)]);
+                    const pct = Math.min(100, Math.max(0, (current / target) * 100));
+                    const gap = (target - current).toFixed(1);
+                    const isHit = current >= target;
+                    const color = picked.color || '#7c3aed';
+                    return (
+                      <div className="bg-white rounded-xl shadow-md p-6">
+                        <div className="flex items-center gap-2 mb-4">
+                          <Target className="w-5 h-5" style={{ color }} />
+                          <h2 className="text-xl font-bold text-gray-900">Goal Snapshot</h2>
+                          <span className="text-xs text-gray-400 ml-auto">Rotates every 5 min</span>
+                        </div>
+                        <div className="flex items-start justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-gray-900">{picked.name}</p>
+                            {picked.grading_period_title && <p className="text-xs text-gray-400 mt-0.5">{picked.grading_period_title}</p>}
+                          </div>
+                          <span className={`text-sm font-bold px-3 py-1 rounded-full flex-shrink-0 ml-3 ${isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {isHit ? '✓ Goal Hit!' : `${gap}% to go`}
+                          </span>
+                        </div>
+                        <div className="relative h-5 bg-gray-100 rounded-full overflow-hidden mb-2">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${pct}%`,
+                              background: isHit
+                                ? 'linear-gradient(90deg, #10b981, #059669)'
+                                : `linear-gradient(90deg, ${color}, ${color}bb)`,
+                              transition: 'width 1.2s cubic-bezier(0.4,0,0.2,1)',
+                              animation: 'markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) 200ms both'
+                            }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-500 mb-2">
+                          <span>Current: <strong className="text-gray-800">{current.toFixed(1)}%</strong></span>
+                          <span>Target: <strong className="text-gray-800">{target}%</strong></span>
+                        </div>
+                        {!isHit && (
+                          <p className="text-xs text-gray-400 italic">
+                            {parseFloat(gap) < 2 ? '🔥 So close — one strong assessment could do it.' :
+                             parseFloat(gap) < 5 ? '📈 Within reach — consistent sessions will close this.' :
+                             '💪 A focused stretch of work can close this gap.'}
+                          </p>
+                        )}
+                        <style>{`@keyframes markBarSlide { from { width: 0%; opacity: 0.3; } to { opacity: 1; } }`}</style>
+                      </div>
+                    );
+                  }
+                  // No goals — show original Next Up
+                  const activeTasks = tasks.filter(t => !t.deleted && !t.completed && !t.ignored);
+                  if (activeTasks.length === 0) return null;
+                  const nextTask = activeTasks.sort((a, b) => (a.priorityOrder || 999) - (b.priorityOrder || 999))[0];
+                  const color = getClassColor(nextTask.class);
+                  return (
+                    <div className="bg-white rounded-xl shadow-md p-6">
+                      <div className="flex items-center gap-2 mb-4">
+                        <TrendingUp className="w-5 h-5 text-purple-600" />
+                        <h2 className="text-xl font-bold text-gray-900">Next Up</h2>
+                      </div>
+                      <div className="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-lg p-6">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <h3 className="text-lg font-bold text-gray-900 mb-2">{nextTask.title}</h3>
+                            <div className="flex items-center gap-4 text-sm text-gray-600">
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                {nextTask.userEstimate || nextTask.estimatedTime} min
+                              </span>
+                              {nextTask.dueDate && (
                                 <span className="flex items-center gap-1">
                                   <Calendar className="w-4 h-4" />
                                   Due {nextTask.dueDate.toLocaleDateString()}
                                 </span>
-                              </div>
+                              )}
                             </div>
-                            <button onClick={() => setCurrentPage('tasks')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium transition-colors flex-shrink-0">
-                              View All
-                            </button>
                           </div>
+                          <button onClick={() => setCurrentPage('tasks')} className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium transition-colors flex-shrink-0">
+                            View All
+                          </button>
                         </div>
-                      );
-                    })()}
-                  </div>
-                )}
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Live Completion Feed */}
                 <div className="bg-white rounded-xl shadow-md p-6">
@@ -4282,6 +4397,19 @@ const PlanAssist = () => {
                                               >
                                                 <Edit2 className="w-4 h-4" />
                                               </button>
+                                              {/* Grade Impact Badge */}
+                                              {gradeImpact[task.id] && (
+                                                <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                                  gradeImpact[task.id] === 'High'
+                                                    ? 'bg-red-100 text-red-700'
+                                                    : gradeImpact[task.id] === 'Moderate'
+                                                    ? 'bg-amber-100 text-amber-700'
+                                                    : 'bg-gray-100 text-gray-500'
+                                                }`}>
+                                                  <TrendingUp className="w-3 h-3" />
+                                                  {gradeImpact[task.id]}
+                                                </span>
+                                              )}
                                             </div>
                                           )}
                                         </span>
@@ -4637,9 +4765,27 @@ const PlanAssist = () => {
                 <h2 className="text-2xl font-bold text-gray-900">Sessions</h2>
                 <p className="text-gray-500 text-sm mt-1">Start working on a task — timer runs while you work</p>
               </div>
-              <button onClick={loadSessionTasks} className="p-2 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors" title="Refresh">
-                <RefreshCw className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-1.5">
+                {[
+                  { id: 'list', emoji: '☰', title: 'List' },
+                  { id: 'kanban', emoji: '⬛', title: 'Kanban' },
+                  { id: 'matrix', emoji: '⊞', title: 'Priority Matrix' },
+                  { id: 'timeline', emoji: '⏱', title: 'Timeline' },
+                ].map(v => (
+                  <button key={v.id} title={v.title}
+                    onClick={() => { setSessionViewMode(v.id); localStorage.setItem('planassist_session_view', v.id); }}
+                    className={`px-2.5 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                      sessionViewMode === v.id
+                        ? 'bg-purple-600 text-white shadow-sm'
+                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                    }`}>
+                    {v.emoji}
+                  </button>
+                ))}
+                <button onClick={loadSessionTasks} className="p-2 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors ml-1" title="Refresh">
+                  <RefreshCw className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             {sessionsLoading ? (
               <div className="flex items-center justify-center py-16">
@@ -4652,55 +4798,210 @@ const PlanAssist = () => {
                 <p className="text-sm mt-1">All caught up! Tasks sync from Canvas automatically.</p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {sessionTasks.map(task => {
-                  const hasProgress = task.accumulatedTime > 0;
-                  const classColor = getClassColor(task.class);
-                  // Use the pre-parsed dueDate from tasks state (already UTC-corrected)
-                  // Fall back to deadlineDateRaw+T12 only if dueDate wasn't hydrated
-                  const dueLabel = task.dueDate
-                    ? task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                    : task.deadlineDateRaw
-                      ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                      : '—';
-                  return (
-                    <div key={task.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:border-purple-200 transition-colors overflow-hidden">
-                      <div className="flex items-center gap-4 p-4">
-                        <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                        <div className="flex-1 min-w-0">
-                          <a href={task.url} target="_blank" rel="noopener noreferrer"
-                            className="font-semibold text-gray-900 hover:text-purple-600 hover:underline text-sm line-clamp-1">
-                            {cleanTaskTitle(task)}
-                          </a>
-                          <div className="flex items-center gap-3 mt-1 flex-wrap">
-                            <span className="text-xs text-gray-500">{task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}</span>
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />Due {dueLabel}
-                            </span>
-                            <span className="text-xs text-gray-400 flex items-center gap-1">
-                              <Clock className="w-3 h-3" />{task.userEstimate || task.estimatedTime} min est.
-                            </span>
-                            {hasProgress && (
-                              <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
-                                <Timer className="w-3 h-3" />{task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60)} min logged
-                              </span>
-                            )}
+              <>
+                {/* ── LIST VIEW ── */}
+                {sessionViewMode === 'list' && (
+                  <div className="space-y-3">
+                    {sessionTasks.map(task => {
+                      const hasProgress = task.accumulatedTime > 0;
+                      const classColor = getClassColor(task.class);
+                      const dueLabel = task.dueDate
+                        ? task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                        : task.deadlineDateRaw
+                          ? new Date(task.deadlineDateRaw + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          : '—';
+                      return (
+                        <div key={task.id} className="bg-white rounded-xl shadow-sm border border-gray-100 hover:border-purple-200 transition-colors overflow-hidden">
+                          <div className="flex items-center gap-4 p-4">
+                            <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                            <div className="flex-1 min-w-0">
+                              <a href={task.url} target="_blank" rel="noopener noreferrer"
+                                className="font-semibold text-gray-900 hover:text-purple-600 hover:underline text-sm line-clamp-1">
+                                {cleanTaskTitle(task)}
+                              </a>
+                              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                <span className="text-xs text-gray-500">{task.class ? task.class.replace(/[\[\]]/g, '') : 'No Class'}</span>
+                                <span className="text-xs text-gray-400 flex items-center gap-1">
+                                  <Calendar className="w-3 h-3" />Due {dueLabel}
+                                </span>
+                                <span className="text-xs text-gray-400 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />{task.userEstimate || task.estimatedTime} min est.
+                                </span>
+                                {hasProgress && (
+                                  <span className="text-xs text-blue-600 font-medium flex items-center gap-1">
+                                    <Timer className="w-3 h-3" />{task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60)} min logged
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <button
+                              onClick={() => startTaskSession(task)}
+                              className={`flex-shrink-0 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-1.5 transition-colors ${
+                                hasProgress ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-green-500 text-white hover:bg-green-600'
+                              }`}
+                            >
+                              <Play className="w-4 h-4" />
+                              {hasProgress ? 'Resume' : 'Start'}
+                            </button>
                           </div>
                         </div>
-                        <button
-                          onClick={() => startTaskSession(task)}
-                          className={`flex-shrink-0 px-4 py-2 rounded-lg font-semibold text-sm flex items-center gap-1.5 transition-colors ${
-                            hasProgress ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-green-500 text-white hover:bg-green-600'
-                          }`}
-                        >
-                          <Play className="w-4 h-4" />
-                          {hasProgress ? 'Resume' : 'Start'}
-                        </button>
-                      </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ── KANBAN VIEW ── */}
+                {sessionViewMode === 'kanban' && (
+                  <div className="grid grid-cols-3 gap-3">
+                    {['Now', 'Soon', 'Later'].map((col, colIdx) => {
+                      const third = Math.ceil(sessionTasks.length / 3);
+                      const colTasks = sessionTasks.filter((_, i) =>
+                        colIdx === 0 ? i < third :
+                        colIdx === 1 ? i >= third && i < third * 2 :
+                        i >= third * 2
+                      );
+                      const styles = [
+                        { border: 'border-red-200', bg: 'bg-red-50', header: 'text-red-700', dot: 'bg-red-400' },
+                        { border: 'border-amber-200', bg: 'bg-amber-50', header: 'text-amber-700', dot: 'bg-amber-400' },
+                        { border: 'border-blue-200', bg: 'bg-blue-50', header: 'text-blue-700', dot: 'bg-blue-400' },
+                      ][colIdx];
+                      return (
+                        <div key={col} className={`rounded-xl border-2 ${styles.border} ${styles.bg} p-3`}>
+                          <div className="flex items-center gap-1.5 mb-3">
+                            <div className={`w-2 h-2 rounded-full ${styles.dot}`} />
+                            <h3 className={`font-bold text-sm ${styles.header}`}>{col}</h3>
+                            <span className="ml-auto text-xs text-gray-400">{colTasks.length}</span>
+                          </div>
+                          <div className="space-y-2">
+                            {colTasks.map(task => {
+                              const hasProgress = task.accumulatedTime > 0;
+                              const classColor = getClassColor(task.class);
+                              return (
+                                <div key={task.id} className="bg-white rounded-lg p-3 shadow-sm border border-gray-100 hover:border-purple-200 transition-colors">
+                                  <div className="flex items-start gap-2 mb-2">
+                                    <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                    <p className="font-medium text-gray-900 text-xs leading-snug line-clamp-2">{cleanTaskTitle(task)}</p>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs text-gray-400">{task.userEstimate || task.estimatedTime}m</span>
+                                    <button onClick={() => startTaskSession(task)}
+                                      className={`flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${
+                                        hasProgress ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                      }`}>
+                                      <Play className="w-3 h-3" />
+                                      {hasProgress ? 'Resume' : 'Start'}
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {colTasks.length === 0 && <p className="text-xs text-gray-400 text-center py-3">Empty</p>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ── MATRIX VIEW ── */}
+                {sessionViewMode === 'matrix' && (
+                  <div>
+                    <p className="text-xs text-gray-400 mb-4 text-center">Tasks sorted by priority rank (top half = higher priority) and time (≤30 min = Quick, &gt;30 min = Deep)</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      {[
+                        { label: '🔴 High Priority · Quick', headerColor: 'text-red-700 bg-red-50 border-red-200', filter: (t, i) => i < Math.ceil(sessionTasks.length / 2) && (t.userEstimate || t.estimatedTime || 20) <= 30 },
+                        { label: '🟠 High Priority · Deep', headerColor: 'text-orange-700 bg-orange-50 border-orange-200', filter: (t, i) => i < Math.ceil(sessionTasks.length / 2) && (t.userEstimate || t.estimatedTime || 20) > 30 },
+                        { label: '🟢 Lower Priority · Quick', headerColor: 'text-green-700 bg-green-50 border-green-200', filter: (t, i) => i >= Math.ceil(sessionTasks.length / 2) && (t.userEstimate || t.estimatedTime || 20) <= 30 },
+                        { label: '🔵 Lower Priority · Deep', headerColor: 'text-blue-700 bg-blue-50 border-blue-200', filter: (t, i) => i >= Math.ceil(sessionTasks.length / 2) && (t.userEstimate || t.estimatedTime || 20) > 30 },
+                      ].map(({ label, headerColor, filter }) => {
+                        const quadTasks = sessionTasks.filter(filter);
+                        return (
+                          <div key={label} className={`rounded-xl border-2 p-3 ${headerColor}`}>
+                            <p className="text-xs font-bold mb-3">{label}</p>
+                            <div className="space-y-2">
+                              {quadTasks.slice(0, 4).map(task => (
+                                <div key={task.id} className="flex items-center gap-2 bg-white rounded-lg px-2 py-1.5 shadow-sm">
+                                  <button onClick={() => startTaskSession(task)}
+                                    className="w-6 h-6 bg-purple-100 text-purple-600 rounded-full flex items-center justify-center flex-shrink-0 hover:bg-purple-200 transition-colors">
+                                    <Play className="w-3 h-3" />
+                                  </button>
+                                  <p className="text-xs text-gray-800 truncate flex-1">{cleanTaskTitle(task)}</p>
+                                  <span className="text-xs text-gray-400 flex-shrink-0">{task.userEstimate || task.estimatedTime}m</span>
+                                </div>
+                              ))}
+                              {quadTasks.length === 0 && <p className="text-xs text-gray-400 py-2 text-center">None</p>}
+                              {quadTasks.length > 4 && <p className="text-xs text-gray-400 text-center">+{quadTasks.length - 4} more</p>}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                )}
+
+                {/* ── TIMELINE VIEW ── */}
+                {sessionViewMode === 'timeline' && (
+                  <div>
+                    <p className="text-xs text-gray-400 mb-5 text-center">Tasks in priority order — estimated time shown as blocks</p>
+                    <div className="space-y-0">
+                      {(() => {
+                        const totalMins = sessionTasks.reduce((s, t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
+                        return sessionTasks.map((task, idx) => {
+                          const mins = task.userEstimate || task.estimatedTime || 20;
+                          const barPct = Math.max(4, Math.min(100, (mins / Math.max(totalMins / sessionTasks.length * 2, 60)) * 100));
+                          const hasProgress = task.accumulatedTime > 0;
+                          const classColor = getClassColor(task.class);
+                          const isFirst = idx === 0;
+                          const isLast = idx === sessionTasks.length - 1;
+                          return (
+                            <div key={task.id} className="flex gap-3 group">
+                              {/* Timeline spine */}
+                              <div className="flex flex-col items-center flex-shrink-0 w-5">
+                                <div className={`w-3 h-3 rounded-full border-2 flex-shrink-0 z-10 ${isFirst ? 'border-purple-600 bg-purple-600' : 'border-gray-300 bg-white'}`} style={{ marginTop: '0.85rem' }} />
+                                {!isLast && <div className="w-0.5 flex-1 bg-gray-200 mt-1" />}
+                              </div>
+                              {/* Card */}
+                              <div className={`flex-1 pb-4 ${isLast ? '' : ''}`}>
+                                <div className="bg-white rounded-xl border border-gray-100 hover:border-purple-200 p-3 shadow-sm transition-colors group-hover:shadow-md">
+                                  <div className="flex items-start justify-between gap-2 mb-2">
+                                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                                      <div className="w-2 h-2 rounded-full mt-1.5 flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                      <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-1">{cleanTaskTitle(task)}</p>
+                                    </div>
+                                    <button onClick={() => startTaskSession(task)}
+                                      className={`flex-shrink-0 flex items-center gap-1 text-xs font-semibold px-3 py-1 rounded-lg transition-colors ${
+                                        hasProgress ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                      }`}>
+                                      <Play className="w-3 h-3" />
+                                      {hasProgress ? 'Resume' : 'Start'}
+                                    </button>
+                                  </div>
+                                  {/* Time bar */}
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                      <div
+                                        className="h-full rounded-full"
+                                        style={{
+                                          width: `${barPct}%`,
+                                          background: `linear-gradient(90deg, ${classColor}cc, ${classColor}66)`
+                                        }}
+                                      />
+                                    </div>
+                                    <span className="text-xs text-gray-400 flex-shrink-0 tabular-nums">{mins}m</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
+                    </div>
+                    <div className="text-right text-xs text-gray-400 mt-1">
+                      Total: ~{(() => { const t = sessionTasks.reduce((s,t) => s+(t.userEstimate||t.estimatedTime||20),0); return t >= 60 ? `${Math.floor(t/60)}h ${t%60}m` : `${t}m`; })()}
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
           );
@@ -6032,6 +6333,56 @@ const PlanAssist = () => {
                                   </div>
                                 </div>
                               )}
+
+                              {/* Goal barrier — shown when user has a goal for this course */}
+                              {(() => {
+                                const goalVal = userGoals[String(course.course_id)];
+                                if (goalVal == null) return null;
+                                const goalPct = Math.min(parseFloat(goalVal), 100);
+                                const isHit = userScore != null && userScore >= goalPct;
+                                return (
+                                  <div className="mt-2">
+                                    <div className="relative h-6 bg-gray-50 rounded-full border border-gray-200 overflow-visible">
+                                      {/* Filled portion up to current score */}
+                                      {userScore != null && (
+                                        <div
+                                          className="absolute top-0 left-0 h-full rounded-full opacity-20"
+                                          style={{
+                                            width: `${Math.min(userScore, 100)}%`,
+                                            background: isHit ? '#10b981' : '#f59e0b',
+                                            transition: 'width 1.2s cubic-bezier(0.4,0,0.2,1)',
+                                            animation: `markBarSlide 1.2s cubic-bezier(0.4,0,0.2,1) ${index * 80 + 500}ms both`
+                                          }}
+                                        />
+                                      )}
+                                      {/* Goal marker line */}
+                                      <div
+                                        className="absolute top-0 bottom-0 w-0.5 rounded-full z-10"
+                                        style={{
+                                          left: `${goalPct}%`,
+                                          transform: 'translateX(-50%)',
+                                          backgroundColor: isHit ? '#10b981' : '#f59e0b',
+                                          boxShadow: isHit ? '0 0 4px #10b981' : '0 0 4px #f59e0b'
+                                        }}
+                                      />
+                                      {/* Goal label */}
+                                      <div
+                                        className="absolute top-0 bottom-0 flex items-center z-10"
+                                        style={{ left: `${goalPct}%`, transform: 'translateX(-50%)' }}
+                                      >
+                                        <span
+                                          className={`absolute -top-5 text-xs font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${
+                                            isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                                          }`}
+                                          style={{ transform: 'translateX(-50%)', left: '50%' }}
+                                        >
+                                          {isHit ? `✓ ${goalPct}%` : `Goal: ${goalPct}%`}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                             </div>
                           )}
 
@@ -6098,6 +6449,7 @@ const PlanAssist = () => {
                     { id: 'resolved', label: 'Resolved Tasks', icon: CheckCircle },
                     { id: 'grades', label: 'Activity', icon: BarChart3 },
                     { id: 'schedule', label: 'Schedule', icon: ClipboardList },
+                    { id: 'goals', label: 'Goals', icon: Target },
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
@@ -6849,6 +7201,154 @@ const PlanAssist = () => {
                     </div>
                   </div>
                 )}
+
+                {/* ── GOALS TAB ── */}
+                {accountTab === 'goals' && (() => {
+                  const goalCourses = courses.filter(c => c.grading_period_id != null && c.enabled !== false);
+                  const [localGoals, setLocalGoals] = React.useState(() => {
+                    const init = {};
+                    goalCourses.forEach(c => {
+                      init[String(c.course_id)] = userGoals[String(c.course_id)] != null ? String(userGoals[String(c.course_id)]) : '';
+                    });
+                    return init;
+                  });
+                  const [goalsSaving, setGoalsSaving] = React.useState(false);
+                  const [goalsDiscarding, setGoalsDiscarding] = React.useState(false);
+                  const hasExistingGoals = Object.keys(userGoals).length > 0;
+                  const allFilled = goalCourses.length > 0 && goalCourses.every(c => {
+                    const v = parseFloat(localGoals[String(c.course_id)]);
+                    return !isNaN(v) && v >= 45 && v <= 100;
+                  });
+
+                  const handleSetGoals = async () => {
+                    if (!allFilled) return;
+                    setGoalsSaving(true);
+                    try {
+                      const goals = {};
+                      goalCourses.forEach(c => { goals[String(c.course_id)] = parseFloat(localGoals[String(c.course_id)]); });
+                      await apiCall('/goals', 'POST', { goals });
+                      await loadGoals();
+                      alert('Goals saved!');
+                    } catch (e) {
+                      alert('Failed to save goals: ' + e.message);
+                    } finally {
+                      setGoalsSaving(false);
+                    }
+                  };
+
+                  const handleDiscardGoals = async () => {
+                    if (!window.confirm('This will remove all your academic goals and restore the Next Up bubble on the Hub. Are you sure?')) return;
+                    setGoalsDiscarding(true);
+                    try {
+                      await apiCall('/goals', 'DELETE');
+                      setUserGoals({});
+                      setLocalGoals(() => {
+                        const init = {};
+                        goalCourses.forEach(c => { init[String(c.course_id)] = ''; });
+                        return init;
+                      });
+                    } catch (e) {
+                      alert('Failed to discard goals: ' + e.message);
+                    } finally {
+                      setGoalsDiscarding(false);
+                    }
+                  };
+
+                  return (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                      <div className="flex items-center justify-between mb-1">
+                        <h2 className="text-lg font-bold text-gray-900">Academic Goals</h2>
+                        {hasExistingGoals && (
+                          <button onClick={handleDiscardGoals} disabled={goalsDiscarding}
+                            className="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1 px-3 py-1.5 rounded-lg hover:bg-red-50 transition-colors">
+                            {goalsDiscarding ? 'Discarding...' : '✕ Discard Goals'}
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-sm text-gray-500 mb-6">Set a target percentage for each course. Goals power the Goal Snapshot on the Hub and progress markers on Marks.</p>
+
+                      {goalCourses.length === 0 ? (
+                        <div className="text-center py-10 text-gray-400">
+                          <Target className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                          <p className="font-medium">No courses with an active grading period found.</p>
+                          <p className="text-sm mt-1">Sync Canvas to populate your courses.</p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-4 justify-center mb-8">
+                            {goalCourses.map(course => {
+                              const color = course.color || '#7c3aed';
+                              const courseIdStr = String(course.course_id);
+                              const val = localGoals[courseIdStr] ?? '';
+                              const num = parseFloat(val);
+                              const isValid = !isNaN(num) && num >= 45 && num <= 100;
+                              const isInvalid = val !== '' && !isValid;
+                              return (
+                                <div key={course.course_id}
+                                  className="w-48 rounded-2xl border-2 p-4 flex flex-col gap-3 shadow-sm transition-shadow hover:shadow-md"
+                                  style={{ borderColor: color + '55', background: color + '0a' }}>
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+                                    <p className="font-semibold text-gray-900 text-sm leading-tight line-clamp-2">{course.name}</p>
+                                  </div>
+                                  {course.grading_period_title && (
+                                    <p className="text-xs text-gray-400 -mt-1">{course.grading_period_title}</p>
+                                  )}
+                                  <div>
+                                    <label className="text-xs text-gray-500 mb-1 block">Target %</label>
+                                    <div className="relative">
+                                      <input
+                                        type="number" min="45" max="100"
+                                        value={val}
+                                        onChange={e => setLocalGoals(prev => ({ ...prev, [courseIdStr]: e.target.value }))}
+                                        placeholder="e.g. 90"
+                                        className={`w-full px-3 py-2 border-2 rounded-xl text-sm font-bold text-center focus:outline-none focus:ring-2 ${
+                                          isInvalid
+                                            ? 'border-red-400 focus:ring-red-300 text-red-600'
+                                            : isValid
+                                            ? 'border-green-400 focus:ring-green-300 text-green-700'
+                                            : 'border-gray-200 focus:ring-purple-300 text-gray-800'
+                                        }`}
+                                      />
+                                      {isValid && <span className="absolute right-3 top-2 text-green-500 text-sm font-bold">%</span>}
+                                    </div>
+                                    {isInvalid && <p className="text-xs text-red-500 mt-1">Must be 45–100</p>}
+                                  </div>
+                                  {course.current_period_score != null && (
+                                    <div className="text-center">
+                                      <span className="text-xs text-gray-400">Current: </span>
+                                      <span className="text-xs font-bold text-gray-700">{parseFloat(course.current_period_score).toFixed(1)}%</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="flex justify-center">
+                            <button onClick={handleSetGoals}
+                              disabled={!allFilled || goalsSaving}
+                              className={`px-8 py-3 rounded-xl font-semibold text-white transition-all shadow-md ${
+                                allFilled && !goalsSaving
+                                  ? 'bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700'
+                                  : 'bg-gray-300 cursor-not-allowed'
+                              }`}>
+                              {goalsSaving ? (
+                                <span className="flex items-center gap-2">
+                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                  Saving...
+                                </span>
+                              ) : hasExistingGoals ? 'Update Goals' : 'Set Goals'}
+                            </button>
+                          </div>
+                          {!allFilled && (
+                            <p className="text-center text-xs text-gray-400 mt-3">All courses must have a valid goal (45–100) before saving.</p>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
