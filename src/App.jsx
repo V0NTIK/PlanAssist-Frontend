@@ -205,6 +205,7 @@ const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall }) =>
 const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [pwaInstallPrompt, setPwaInstallPrompt] = useState(null);   // deferred install event
   const [showPwaBanner, setShowPwaBanner] = useState(false);         // show install banner
   const [isAppLoading, setIsAppLoading] = useState(false);
@@ -272,6 +273,8 @@ const PlanAssist = () => {
   // ── Admin state ───────────────────────────────────────────────────────────
   const [announcements, setAnnouncements] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
+  const [adminFilter, setAdminFilter] = useState({ status: 'all', grade: 'all', unsorted: 'all' });
+  const [adminSort, setAdminSort] = useState('name_asc');
   const [adminSelectedUser, setAdminSelectedUser] = useState(null);
   const [adminUserDetail, setAdminUserDetail] = useState(null);
   const [adminDiagnostics, setAdminDiagnostics] = useState(null);
@@ -557,6 +560,11 @@ const PlanAssist = () => {
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${API_URL}${endpoint}`, options);
+    if (response.status === 401) {
+      // JWT expired or invalid — session is dead. Show re-auth prompt.
+      setSessionExpired(true);
+      throw new Error('Session expired');
+    }
     if (!response.ok) {
       const error = await response.json().catch(() => ({ error: 'Request failed' }));
       throw new Error(error.error || error.message || 'Request failed');
@@ -3731,6 +3739,31 @@ const PlanAssist = () => {
   return (
     <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}
       style={invertColors ? { filter: 'invert(1) hue-rotate(180deg)', WebkitFilter: 'invert(1) hue-rotate(180deg)' } : {}}>
+
+      {/* ── Session Expired Modal ── */}
+      {sessionExpired && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[9999] p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center">
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <LogOut className="w-8 h-8 text-amber-600" />
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Session Expired</h2>
+            <p className="text-gray-500 text-sm mb-6">
+              You've been away for a while and your session has expired. Please log in again to continue.
+            </p>
+            <button
+              onClick={() => {
+                setSessionExpired(false);
+                handleLogout();
+              }}
+              className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-xl hover:from-purple-700 hover:to-blue-700 transition-all shadow-md"
+            >
+              Log In Again
+            </button>
+          </div>
+        </div>
+      )}
+
       <nav className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -6443,12 +6476,25 @@ const PlanAssist = () => {
                             <div>
                               {/* Your score bar */}
                               <div className="flex justify-between text-xs text-gray-500 mb-1">
-                                <span className="font-semibold text-gray-700">Your Score</span>
-                                {difference !== null && (
-                                  <span className={`font-bold ${difference >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
-                                    {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs Average
-                                  </span>
-                                )}
+                                <span className="flex items-center gap-2">
+                                  <span className="font-semibold text-gray-700">Your Score</span>
+                                  {difference !== null && (
+                                    <span className={`font-bold ${difference >= 0 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                      {difference >= 0 ? '▲' : '▼'} {Math.abs(difference).toFixed(1)}% vs Average
+                                    </span>
+                                  )}
+                                </span>
+                                {(() => {
+                                  const goalVal = userGoals[String(course.course_id)];
+                                  if (goalVal == null) return null;
+                                  const goalPct = Math.min(parseFloat(goalVal), 100);
+                                  const isHit = userScore >= goalPct;
+                                  return (
+                                    <span className={`font-bold ${isHit ? 'text-green-600' : 'text-amber-600'}`}>
+                                      {isHit ? `✓ Goal: ${goalPct}%` : `Goal: ${goalPct}%`}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                               {(() => {
                                 const goalVal = userGoals[String(course.course_id)];
@@ -6461,7 +6507,7 @@ const PlanAssist = () => {
                                   ? 'linear-gradient(90deg, #10b981, #059669)'
                                   : 'linear-gradient(90deg, #f59e0b, #fb923c)';
                                 return (
-                                  <div className={`relative h-7 bg-gray-100 rounded-full overflow-visible ${goalPct != null ? 'mb-5' : ''}`}>
+                                  <div className="relative h-7 bg-gray-100 rounded-full overflow-visible">
                                     {/* Score fill */}
                                     <div
                                       className="absolute top-0 left-0 h-full rounded-full flex items-center justify-end pr-3 text-white text-xs font-bold overflow-hidden"
@@ -6474,30 +6520,17 @@ const PlanAssist = () => {
                                     >
                                       {userScore >= 20 && `${userScore.toFixed(0)}%`}
                                     </div>
-                                    {/* Goal barrier line — overlaid directly on this slider */}
+                                    {/* Goal barrier line */}
                                     {goalPct != null && (
-                                      <>
-                                        <div
-                                          className="absolute top-0 bottom-0 w-0.5 z-10"
-                                          style={{
-                                            left: `${goalPct}%`,
-                                            transform: 'translateX(-50%)',
-                                            backgroundColor: isHit ? '#059669' : '#d97706',
-                                            boxShadow: isHit ? '0 0 5px #10b981' : '0 0 5px #f59e0b'
-                                          }}
-                                        />
-                                        <span
-                                          className={`absolute top-full mt-0.5 text-xs font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap z-10 ${
-                                            isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
-                                          }`}
-                                          style={{
-                                            left: `${goalPct}%`,
-                                            transform: 'translateX(-50%)',
-                                          }}
-                                        >
-                                          {isHit ? `✓ ${goalPct}%` : `Goal: ${goalPct}%`}
-                                        </span>
-                                      </>
+                                      <div
+                                        className="absolute top-0 bottom-0 w-0.5 z-10"
+                                        style={{
+                                          left: `${goalPct}%`,
+                                          transform: 'translateX(-50%)',
+                                          backgroundColor: isHit ? '#059669' : '#d97706',
+                                          boxShadow: isHit ? '0 0 5px #10b981' : '0 0 5px #f59e0b'
+                                        }}
+                                      />
                                     )}
                                   </div>
                                 );
@@ -7418,7 +7451,8 @@ const PlanAssist = () => {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* User list */}
                 <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100">
-                  <div className="p-4 border-b border-gray-100">
+                  <div className="p-4 border-b border-gray-100 space-y-2">
+                    {/* Search */}
                     <div className="relative">
                       <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
                       <input
@@ -7428,36 +7462,152 @@ const PlanAssist = () => {
                         className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
                       />
                     </div>
+                    {/* Filters */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <select
+                        value={adminFilter.status}
+                        onChange={e => setAdminFilter(f => ({ ...f, status: e.target.value }))}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
+                      >
+                        <option value="all">All Users</option>
+                        <option value="new">New Users</option>
+                        <option value="not_new">Not New</option>
+                        <option value="active">Active Now</option>
+                        <option value="not_active">Not Active</option>
+                        <option value="banned">Banned</option>
+                      </select>
+                      <select
+                        value={adminFilter.grade}
+                        onChange={e => setAdminFilter(f => ({ ...f, grade: e.target.value }))}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
+                      >
+                        <option value="all">All Grades</option>
+                        {[...new Set(adminUsers.map(u => u.grade).filter(Boolean))].sort().map(g => (
+                          <option key={g} value={String(g)}>Grade {g}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={adminFilter.unsorted}
+                        onChange={e => setAdminFilter(f => ({ ...f, unsorted: e.target.value }))}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
+                      >
+                        <option value="all">Any Unsorted</option>
+                        <option value="has_unsorted">Has Unsorted Tasks</option>
+                        <option value="no_unsorted">No Unsorted Tasks</option>
+                      </select>
+                      <select
+                        value={adminSort}
+                        onChange={e => setAdminSort(e.target.value)}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
+                      >
+                        <option value="name_asc">A → Z</option>
+                        <option value="name_desc">Z → A</option>
+                        <option value="joined_newest">Newest First</option>
+                        <option value="joined_oldest">Oldest First</option>
+                        <option value="grade_asc">Grade ↑</option>
+                        <option value="grade_desc">Grade ↓</option>
+                        <option value="active_tasks_desc">Most Tasks</option>
+                        <option value="active_tasks_asc">Fewest Tasks</option>
+                        <option value="completions_desc">Most Completions</option>
+                        <option value="completions_asc">Fewest Completions</option>
+                        <option value="unsorted_desc">Most Unsorted</option>
+                      </select>
+                    </div>
+                    {/* Active filter summary */}
+                    {(() => {
+                      const filtered = adminUsers
+                        .filter(u => !adminSearch || u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase()) || u.grade?.toString().includes(adminSearch))
+                        .filter(u => {
+                          if (adminFilter.status === 'new') return u.is_new_user;
+                          if (adminFilter.status === 'not_new') return !u.is_new_user;
+                          if (adminFilter.status === 'active') return u.in_session;
+                          if (adminFilter.status === 'not_active') return !u.in_session;
+                          if (adminFilter.status === 'banned') return u.is_banned;
+                          return true;
+                        })
+                        .filter(u => adminFilter.grade === 'all' || String(u.grade) === adminFilter.grade)
+                        .filter(u => {
+                          if (adminFilter.unsorted === 'has_unsorted') return parseInt(u.new_tasks) > 0;
+                          if (adminFilter.unsorted === 'no_unsorted') return parseInt(u.new_tasks) === 0;
+                          return true;
+                        });
+                      const hasFilters = adminFilter.status !== 'all' || adminFilter.grade !== 'all' || adminFilter.unsorted !== 'all' || adminSearch;
+                      return (
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-400">{filtered.length} of {adminUsers.length} users</span>
+                          {hasFilters && (
+                            <button
+                              onClick={() => { setAdminFilter({ status: 'all', grade: 'all', unsorted: 'all' }); setAdminSearch(''); }}
+                              className="text-xs text-red-500 hover:text-red-700 font-medium"
+                            >
+                              Clear filters
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div className="overflow-y-auto max-h-[600px]">
                     {adminLoading && <div className="p-4 text-center text-gray-400 text-sm">Loading...</div>}
-                    {adminUsers
-                      .filter(u => !adminSearch || u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase()) || u.grade?.toString().includes(adminSearch))
-                      .map(u => (
-                        <div
-                          key={u.id}
-                          onClick={() => { setAdminSelectedUser(u.id); loadAdminUserDetail(u.id); }}
-                          className={`p-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${adminSelectedUser === u.id ? 'bg-red-50 border-l-2 border-l-red-500' : ''}`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
-                              <p className="text-xs text-gray-400">{u.email}</p>
-                            </div>
-                            <div className="flex flex-col items-end gap-1">
-                              <span className="text-xs text-gray-500">Gr {u.grade || '?'}</span>
-                              <div className="flex gap-1 flex-wrap justify-end">
-                                {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
-                                {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
-                                {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
-                                {parseInt(u.new_tasks) > 0 && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded font-medium">{u.new_tasks} unsorted</span>}
-                                {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>Active</span>}
+                    {(() => {
+                      const sortFn = (a, b) => {
+                        switch (adminSort) {
+                          case 'name_desc': return (b.name || '').localeCompare(a.name || '');
+                          case 'joined_newest': return new Date(b.created_at) - new Date(a.created_at);
+                          case 'joined_oldest': return new Date(a.created_at) - new Date(b.created_at);
+                          case 'grade_asc': return (parseInt(a.grade) || 0) - (parseInt(b.grade) || 0);
+                          case 'grade_desc': return (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0);
+                          case 'active_tasks_desc': return (parseInt(b.active_tasks) || 0) - (parseInt(a.active_tasks) || 0);
+                          case 'active_tasks_asc': return (parseInt(a.active_tasks) || 0) - (parseInt(b.active_tasks) || 0);
+                          case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
+                          case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
+                          case 'unsorted_desc': return (parseInt(b.new_tasks) || 0) - (parseInt(a.new_tasks) || 0);
+                          default: return (a.name || '').localeCompare(b.name || '');
+                        }
+                      };
+                      return adminUsers
+                        .filter(u => !adminSearch || u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase()) || u.grade?.toString().includes(adminSearch))
+                        .filter(u => {
+                          if (adminFilter.status === 'new') return u.is_new_user;
+                          if (adminFilter.status === 'not_new') return !u.is_new_user;
+                          if (adminFilter.status === 'active') return u.in_session;
+                          if (adminFilter.status === 'not_active') return !u.in_session;
+                          if (adminFilter.status === 'banned') return u.is_banned;
+                          return true;
+                        })
+                        .filter(u => adminFilter.grade === 'all' || String(u.grade) === adminFilter.grade)
+                        .filter(u => {
+                          if (adminFilter.unsorted === 'has_unsorted') return parseInt(u.new_tasks) > 0;
+                          if (adminFilter.unsorted === 'no_unsorted') return parseInt(u.new_tasks) === 0;
+                          return true;
+                        })
+                        .sort(sortFn)
+                        .map(u => (
+                          <div
+                            key={u.id}
+                            onClick={() => { setAdminSelectedUser(u.id); loadAdminUserDetail(u.id); }}
+                            className={`p-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${adminSelectedUser === u.id ? 'bg-red-50 border-l-2 border-l-red-500' : ''}`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
+                                <p className="text-xs text-gray-400">{u.email}</p>
+                              </div>
+                              <div className="flex flex-col items-end gap-1">
+                                <span className="text-xs text-gray-500">Gr {u.grade || '?'}</span>
+                                <div className="flex gap-1 flex-wrap justify-end">
+                                  {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
+                                  {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
+                                  {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
+                                  {parseInt(u.new_tasks) > 0 && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded font-medium">{u.new_tasks} unsorted</span>}
+                                  {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>Active</span>}
+                                </div>
                               </div>
                             </div>
+                            <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</p>
                           </div>
-                          <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed</p>
-                        </div>
-                      ))}
+                        ));
+                    })()}
                   </div>
                 </div>
 
