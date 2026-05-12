@@ -556,7 +556,7 @@ const PlanAssist = () => {
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${API_URL}${endpoint}`, options);
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       // JWT expired or invalid — session is dead. Show re-auth prompt.
       setSessionExpired(true);
       throw new Error('Session expired');
@@ -695,7 +695,7 @@ const PlanAssist = () => {
         headers: { 'Authorization': `Bearer ${authToken}` }
       }).then(r => r.json());
 
-      if (tasksData.length > 0) {
+      if (Array.isArray(tasksData) && tasksData.length > 0) {
         setTasks(tasksData.map(hydrateTask));
       }
 
@@ -706,13 +706,15 @@ const PlanAssist = () => {
         headers: { 'Authorization': `Bearer ${authToken}` }
       }).then(r => r.json());
 
-      setCompletionHistory(historyData.map(h => ({
-        taskTitle: h.task_title,
-        type: h.task_type,
-        estimatedTime: h.estimated_time,
-        actualTime: h.actual_time,
-        date: new Date(h.completed_at)
-      })));
+      if (Array.isArray(historyData)) {
+        setCompletionHistory(historyData.map(h => ({
+          taskTitle: h.task_title,
+          type: h.task_type,
+          estimatedTime: h.estimated_time,
+          actualTime: h.actual_time,
+          date: new Date(h.completed_at)
+        })));
+      }
 
       // Load accumulated times from tasks (stored in tasks.accumulated_time)
       const partialTimes = {};
@@ -768,8 +770,9 @@ const PlanAssist = () => {
   const loadTasks = async () => {
     try {
       const tasksData = await apiCall('/tasks', 'GET');
-      const loadedTasks = tasksData.map(hydrateTask);
-      setTasks(loadedTasks);
+      if (Array.isArray(tasksData)) {
+        setTasks(tasksData.map(hydrateTask));
+      }
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
@@ -1364,6 +1367,7 @@ const PlanAssist = () => {
     setSessionsLoading(true);
     try {
       const data = await apiCall('/sessions/tasks', 'GET');
+      if (!Array.isArray(data)) return;
       const hydratedTasks = data.map(t => {
         const local = tasks.find(lt => lt.id === t.id);
         return {
