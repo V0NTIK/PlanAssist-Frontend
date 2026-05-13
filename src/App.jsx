@@ -441,7 +441,7 @@ const PlanAssist = () => {
   const [goalsLoaded, setGoalsLoaded] = useState(false);
 
   // UI theme
-  const [invertColors, setInvertColors] = useState(() => localStorage.getItem('planassist-invert') === 'true');
+  const [colorTheme, setColorTheme] = useState(() => localStorage.getItem('planassist-theme') || 'system');
   const [showHubExplainer, setShowHubExplainer] = useState(false);
   const [zoomBanner, setZoomBanner] = useState(null); // { period, zoomNumber, isTutorial }
   const [lastAutoSync, setLastAutoSync] = useState(null);
@@ -2923,6 +2923,315 @@ const PlanAssist = () => {
     }
   };
 
+
+  // ── Theme CSS injection ──────────────────────────────────────────────────
+  useEffect(() => {
+    // color-scheme on html for browser native elements
+    document.documentElement.style.colorScheme = colorTheme === 'dark' ? 'dark' : 'light';
+
+    // Inject or update the theme stylesheet
+    let styleEl = document.getElementById('planassist-theme-styles');
+    if (!styleEl) {
+      styleEl = document.createElement('style');
+      styleEl.id = 'planassist-theme-styles';
+      document.head.appendChild(styleEl);
+    }
+
+    const themes = {
+      system: `
+        :root { color-scheme: light; }
+        [data-planassist-theme="system"] { --pa-bg-page: #f0f4ff; --pa-bg-page2: #eff6ff; }
+      `,
+      warm: `
+        :root { color-scheme: light; }
+        [data-planassist-theme="warm"] {
+          --pa-surface: #fffbf5;
+          --pa-surface2: #fef9f0;
+          --pa-subtle: #fdf3e3;
+          --pa-muted: #f5e6ce;
+          --pa-border: #e8d5b7;
+          --pa-border-subtle: #f0e4cc;
+          --pa-text-primary: #3d2c1e;
+          --pa-text-secondary: #7a5c3e;
+          --pa-text-muted: #b08a68;
+          --pa-accent: #b45309;
+          --pa-accent-hover: #92400e;
+          --pa-accent-light: #fef3c7;
+          --pa-accent-text: #92400e;
+          --pa-nav: #fffbf5;
+          --pa-nav-border: #e8d5b7;
+          --pa-page-bg: linear-gradient(135deg, #fdf8f0 0%, #fef3e2 100%);
+          --pa-hover: #fdf0dc;
+          --pa-active-nav: #fef3c7;
+          --pa-active-nav-text: #92400e;
+          --pa-shadow: rgba(100,60,20,0.10);
+          --pa-spinner: #b45309;
+        }
+        [data-planassist-theme="warm"] [data-theme="warm"] { background: var(--pa-page-bg) !important; }
+        [data-planassist-theme="warm"] .bg-white { background-color: var(--pa-surface) !important; }
+        [data-planassist-theme="warm"] .bg-gray-50 { background-color: var(--pa-subtle) !important; }
+        [data-planassist-theme="warm"] .bg-gray-100 { background-color: var(--pa-muted) !important; }
+        [data-planassist-theme="warm"] .bg-gray-200 { background-color: #e8d5b7 !important; }
+        [data-planassist-theme="warm"] .text-gray-900 { color: var(--pa-text-primary) !important; }
+        [data-planassist-theme="warm"] .text-gray-800 { color: #4a3420 !important; }
+        [data-planassist-theme="warm"] .text-gray-700 { color: #6b4c2e !important; }
+        [data-planassist-theme="warm"] .text-gray-600 { color: var(--pa-text-secondary) !important; }
+        [data-planassist-theme="warm"] .text-gray-500 { color: #9a7050 !important; }
+        [data-planassist-theme="warm"] .text-gray-400 { color: var(--pa-text-muted) !important; }
+        [data-planassist-theme="warm"] .text-gray-300 { color: #c9a87c !important; }
+        [data-planassist-theme="warm"] .border-gray-100 { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="warm"] .border-gray-200 { border-color: var(--pa-border) !important; }
+        [data-planassist-theme="warm"] .border-gray-300 { border-color: #d4b896 !important; }
+        [data-planassist-theme="warm"] .hover\:bg-gray-50:hover { background-color: var(--pa-hover) !important; }
+        [data-planassist-theme="warm"] .hover\:bg-gray-100:hover { background-color: var(--pa-muted) !important; }
+        [data-planassist-theme="warm"] nav.bg-white { background-color: var(--pa-nav) !important; border-color: var(--pa-nav-border) !important; }
+        [data-planassist-theme="warm"] .bg-purple-100 { background-color: var(--pa-active-nav) !important; }
+        [data-planassist-theme="warm"] .text-purple-700 { color: var(--pa-active-nav-text) !important; }
+        [data-planassist-theme="warm"] .bg-purple-50 { background-color: var(--pa-accent-light) !important; }
+        [data-planassist-theme="warm"] .text-purple-600 { color: var(--pa-accent) !important; }
+        [data-planassist-theme="warm"] .border-purple-200 { border-color: #f0c674 !important; }
+        [data-planassist-theme="warm"] .bg-purple-600 { background-color: var(--pa-accent) !important; }
+        [data-planassist-theme="warm"] .hover\:bg-purple-700:hover { background-color: var(--pa-accent-hover) !important; }
+        [data-planassist-theme="warm"] .focus\:ring-purple-500:focus { --tw-ring-color: var(--pa-accent) !important; }
+        [data-planassist-theme="warm"] input:focus, [data-planassist-theme="warm"] select:focus, [data-planassist-theme="warm"] textarea:focus { border-color: var(--pa-accent) !important; }
+        [data-planassist-theme="warm"] .from-gray-50 { --tw-gradient-from: #fdf8f0 !important; }
+        [data-planassist-theme="warm"] .to-blue-50 { --tw-gradient-to: #fef9ee !important; }
+        [data-planassist-theme="warm"] .divide-y > * + * { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="warm"] .from-yellow-50 { --tw-gradient-from: #fdf8ef !important; }
+        [data-planassist-theme="warm"] .via-purple-50 { --tw-gradient-via: #fdf3e8 !important; }
+        [data-planassist-theme="warm"] .bg-gradient-to-br.from-yellow-50 { background: linear-gradient(135deg, #fdf8ef, #fef3e2) !important; }
+      `,
+      cool: `
+        :root { color-scheme: light; }
+        [data-planassist-theme="cool"] {
+          --pa-surface: #f5f9ff;
+          --pa-surface2: #eef4ff;
+          --pa-subtle: #e8f0fe;
+          --pa-muted: #d6e4ff;
+          --pa-border: #b8d0f5;
+          --pa-border-subtle: #d0e3f8;
+          --pa-text-primary: #0f2044;
+          --pa-text-secondary: #2d4a7a;
+          --pa-text-muted: #6688b5;
+          --pa-accent: #1d4ed8;
+          --pa-accent-hover: #1e40af;
+          --pa-accent-light: #dbeafe;
+          --pa-accent-text: #1e40af;
+          --pa-nav: #f0f6ff;
+          --pa-nav-border: #b8d0f5;
+          --pa-page-bg: linear-gradient(135deg, #e8f0fe 0%, #dbeafe 100%);
+          --pa-hover: #ddeeff;
+          --pa-active-nav: #dbeafe;
+          --pa-active-nav-text: #1e40af;
+          --pa-shadow: rgba(15,60,140,0.10);
+          --pa-spinner: #1d4ed8;
+        }
+        [data-planassist-theme="cool"] .bg-white { background-color: var(--pa-surface) !important; }
+        [data-planassist-theme="cool"] .bg-gray-50 { background-color: var(--pa-subtle) !important; }
+        [data-planassist-theme="cool"] .bg-gray-100 { background-color: var(--pa-muted) !important; }
+        [data-planassist-theme="cool"] .bg-gray-200 { background-color: #c0d5f0 !important; }
+        [data-planassist-theme="cool"] .text-gray-900 { color: var(--pa-text-primary) !important; }
+        [data-planassist-theme="cool"] .text-gray-800 { color: #17305a !important; }
+        [data-planassist-theme="cool"] .text-gray-700 { color: #254880 !important; }
+        [data-planassist-theme="cool"] .text-gray-600 { color: var(--pa-text-secondary) !important; }
+        [data-planassist-theme="cool"] .text-gray-500 { color: #4d72a8 !important; }
+        [data-planassist-theme="cool"] .text-gray-400 { color: var(--pa-text-muted) !important; }
+        [data-planassist-theme="cool"] .text-gray-300 { color: #8aabcf !important; }
+        [data-planassist-theme="cool"] .border-gray-100 { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="cool"] .border-gray-200 { border-color: var(--pa-border) !important; }
+        [data-planassist-theme="cool"] .border-gray-300 { border-color: #9bbce8 !important; }
+        [data-planassist-theme="cool"] .hover\:bg-gray-50:hover { background-color: var(--pa-hover) !important; }
+        [data-planassist-theme="cool"] .hover\:bg-gray-100:hover { background-color: var(--pa-muted) !important; }
+        [data-planassist-theme="cool"] nav.bg-white { background-color: var(--pa-nav) !important; border-color: var(--pa-nav-border) !important; }
+        [data-planassist-theme="cool"] .bg-purple-100 { background-color: var(--pa-active-nav) !important; }
+        [data-planassist-theme="cool"] .text-purple-700 { color: var(--pa-active-nav-text) !important; }
+        [data-planassist-theme="cool"] .bg-purple-50 { background-color: var(--pa-accent-light) !important; }
+        [data-planassist-theme="cool"] .text-purple-600 { color: var(--pa-accent) !important; }
+        [data-planassist-theme="cool"] .border-purple-200 { border-color: #93c5fd !important; }
+        [data-planassist-theme="cool"] .bg-purple-600 { background-color: var(--pa-accent) !important; }
+        [data-planassist-theme="cool"] .hover\:bg-purple-700:hover { background-color: var(--pa-accent-hover) !important; }
+        [data-planassist-theme="cool"] .focus\:ring-purple-500:focus { --tw-ring-color: var(--pa-accent) !important; }
+        [data-planassist-theme="cool"] input:focus, [data-planassist-theme="cool"] select:focus, [data-planassist-theme="cool"] textarea:focus { border-color: var(--pa-accent) !important; }
+        [data-planassist-theme="cool"] .from-gray-50 { --tw-gradient-from: #e8f0fe !important; }
+        [data-planassist-theme="cool"] .to-blue-50 { --tw-gradient-to: #dbeafe !important; }
+        [data-planassist-theme="cool"] .divide-y > * + * { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="cool"] .from-yellow-50 { --tw-gradient-from: #e8f0fe !important; }
+        [data-planassist-theme="cool"] .via-purple-50 { --tw-gradient-via: #dbeafe !important; }
+        [data-planassist-theme="cool"] .bg-gradient-to-br.from-yellow-50 { background: linear-gradient(135deg, #e8f0fe, #dbeafe) !important; }
+      `,
+      dark: `
+        :root { color-scheme: dark; }
+        [data-planassist-theme="dark"] {
+          --pa-surface: #1e2130;
+          --pa-surface2: #252838;
+          --pa-subtle: #2a2d3e;
+          --pa-muted: #323549;
+          --pa-border: #3d4160;
+          --pa-border-subtle: #2e3150;
+          --pa-text-primary: #e8eaf6;
+          --pa-text-secondary: #a0a8cc;
+          --pa-text-muted: #5a6290;
+          --pa-accent: #7c6ef5;
+          --pa-accent-hover: #6c5ce7;
+          --pa-accent-light: #2d2b52;
+          --pa-accent-text: #a89cf5;
+          --pa-nav: #161824;
+          --pa-nav-border: #2e3150;
+          --pa-page-bg: linear-gradient(135deg, #141620 0%, #1a1c2e 100%);
+          --pa-hover: #2d3048;
+          --pa-active-nav: #2d2b52;
+          --pa-active-nav-text: #a89cf5;
+          --pa-shadow: rgba(0,0,0,0.40);
+          --pa-spinner: #7c6ef5;
+        }
+        [data-planassist-theme="dark"] { background: var(--pa-page-bg) !important; color: var(--pa-text-primary); }
+        [data-planassist-theme="dark"] .bg-white { background-color: var(--pa-surface) !important; }
+        [data-planassist-theme="dark"] .bg-gray-50 { background-color: var(--pa-subtle) !important; }
+        [data-planassist-theme="dark"] .bg-gray-100 { background-color: var(--pa-muted) !important; }
+        [data-planassist-theme="dark"] .bg-gray-200 { background-color: #3d4160 !important; }
+        [data-planassist-theme="dark"] .bg-gray-700 { background-color: #2d3048 !important; }
+        [data-planassist-theme="dark"] .bg-black { background-color: #0d0f18 !important; }
+        [data-planassist-theme="dark"] .text-gray-900 { color: var(--pa-text-primary) !important; }
+        [data-planassist-theme="dark"] .text-gray-800 { color: #d0d4ec !important; }
+        [data-planassist-theme="dark"] .text-gray-700 { color: #b0b8d8 !important; }
+        [data-planassist-theme="dark"] .text-gray-600 { color: var(--pa-text-secondary) !important; }
+        [data-planassist-theme="dark"] .text-gray-500 { color: #7880a8 !important; }
+        [data-planassist-theme="dark"] .text-gray-400 { color: var(--pa-text-muted) !important; }
+        [data-planassist-theme="dark"] .text-gray-300 { color: #4a5278 !important; }
+        [data-planassist-theme="dark"] .border-gray-100 { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .border-gray-200 { border-color: var(--pa-border) !important; }
+        [data-planassist-theme="dark"] .border-gray-300 { border-color: #454870 !important; }
+        [data-planassist-theme="dark"] .border-t { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .border-b { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .border-r { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .border-l { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .divide-y > * + * { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-gray-50:hover { background-color: var(--pa-hover) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-gray-100:hover { background-color: var(--pa-muted) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-gray-200:hover { background-color: #454870 !important; }
+        [data-planassist-theme="dark"] nav { background-color: var(--pa-nav) !important; border-color: var(--pa-nav-border) !important; }
+        [data-planassist-theme="dark"] nav.bg-white { background-color: var(--pa-nav) !important; }
+        [data-planassist-theme="dark"] .bg-purple-100 { background-color: var(--pa-active-nav) !important; }
+        [data-planassist-theme="dark"] .text-purple-700 { color: var(--pa-active-nav-text) !important; }
+        [data-planassist-theme="dark"] .bg-purple-50 { background-color: var(--pa-accent-light) !important; }
+        [data-planassist-theme="dark"] .text-purple-600 { color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .text-purple-500 { color: #9988f5 !important; }
+        [data-planassist-theme="dark"] .text-purple-400 { color: #8070e8 !important; }
+        [data-planassist-theme="dark"] .border-purple-200 { border-color: #3d3870 !important; }
+        [data-planassist-theme="dark"] .border-purple-100 { border-color: #2d2b52 !important; }
+        [data-planassist-theme="dark"] .bg-purple-600 { background-color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-purple-700:hover { background-color: var(--pa-accent-hover) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-purple-600:hover { background-color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .bg-blue-50 { background-color: #1e2540 !important; }
+        [data-planassist-theme="dark"] .bg-blue-100 { background-color: #242d4e !important; }
+        [data-planassist-theme="dark"] .text-blue-600 { color: #6ab1f5 !important; }
+        [data-planassist-theme="dark"] .text-blue-700 { color: #5aa0e8 !important; }
+        [data-planassist-theme="dark"] .border-blue-200 { border-color: #2d3a5e !important; }
+        [data-planassist-theme="dark"] .border-blue-100 { border-color: #253050 !important; }
+        [data-planassist-theme="dark"] .bg-green-50 { background-color: #1a2c20 !important; }
+        [data-planassist-theme="dark"] .bg-green-100 { background-color: #1e3525 !important; }
+        [data-planassist-theme="dark"] .text-green-600 { color: #5cc87a !important; }
+        [data-planassist-theme="dark"] .text-green-700 { color: #4db568 !important; }
+        [data-planassist-theme="dark"] .border-green-200 { border-color: #2a4530 !important; }
+        [data-planassist-theme="dark"] .bg-amber-50 { background-color: #2c2510 !important; }
+        [data-planassist-theme="dark"] .bg-amber-100 { background-color: #352c14 !important; }
+        [data-planassist-theme="dark"] .text-amber-600 { color: #f0b840 !important; }
+        [data-planassist-theme="dark"] .border-amber-200 { border-color: #4a3d18 !important; }
+        [data-planassist-theme="dark"] .bg-red-50 { background-color: #2c1a1a !important; }
+        [data-planassist-theme="dark"] .bg-red-100 { background-color: #361e1e !important; }
+        [data-planassist-theme="dark"] .text-red-600 { color: #f07070 !important; }
+        [data-planassist-theme="dark"] .text-red-500 { color: #e86060 !important; }
+        [data-planassist-theme="dark"] .border-red-200 { border-color: #4a2828 !important; }
+        [data-planassist-theme="dark"] .bg-orange-50 { background-color: #2c2018 !important; }
+        [data-planassist-theme="dark"] .bg-orange-100 { background-color: #35271c !important; }
+        [data-planassist-theme="dark"] .text-orange-600 { color: #f09060 !important; }
+        [data-planassist-theme="dark"] .text-orange-500 { color: #e88050 !important; }
+        [data-planassist-theme="dark"] .border-orange-200 { border-color: #4a3225 !important; }
+        [data-planassist-theme="dark"] .bg-yellow-50 { background-color: #2c2510 !important; }
+        [data-planassist-theme="dark"] .text-yellow-600 { color: #e8c840 !important; }
+        [data-planassist-theme="dark"] .shadow-md { box-shadow: 0 4px 12px var(--pa-shadow) !important; }
+        [data-planassist-theme="dark"] .shadow-sm { box-shadow: 0 1px 6px var(--pa-shadow) !important; }
+        [data-planassist-theme="dark"] .shadow-lg { box-shadow: 0 8px 24px var(--pa-shadow) !important; }
+        [data-planassist-theme="dark"] .shadow-xl { box-shadow: 0 12px 32px var(--pa-shadow) !important; }
+        [data-planassist-theme="dark"] .shadow-2xl { box-shadow: 0 20px 48px var(--pa-shadow) !important; }
+        [data-planassist-theme="dark"] .border-white { border-color: rgba(255,255,255,0.12) !important; }
+        [data-planassist-theme="dark"] .from-gray-50 { --tw-gradient-from: #1a1c2e !important; }
+        [data-planassist-theme="dark"] .to-blue-50 { --tw-gradient-to: #1e2040 !important; }
+        [data-planassist-theme="dark"] .from-purple-50 { --tw-gradient-from: #2a2550 !important; }
+        [data-planassist-theme="dark"] .to-blue-50.from-purple-50 { --tw-gradient-to: #1e2540 !important; }
+        [data-planassist-theme="dark"] input, [data-planassist-theme="dark"] select, [data-planassist-theme="dark"] textarea {
+          background-color: var(--pa-subtle) !important;
+          color: var(--pa-text-primary) !important;
+          border-color: var(--pa-border) !important;
+        }
+        [data-planassist-theme="dark"] input:focus, [data-planassist-theme="dark"] select:focus, [data-planassist-theme="dark"] textarea:focus {
+          border-color: var(--pa-accent) !important;
+          background-color: var(--pa-surface) !important;
+        }
+        [data-planassist-theme="dark"] input::placeholder, [data-planassist-theme="dark"] textarea::placeholder { color: var(--pa-text-muted) !important; }
+        [data-planassist-theme="dark"] input[type="checkbox"] { accent-color: var(--pa-accent); }
+        [data-planassist-theme="dark"] input[type="range"] { accent-color: var(--pa-accent); }
+        [data-planassist-theme="dark"] input[type="color"] { background-color: transparent !important; border-color: var(--pa-border) !important; }
+        [data-planassist-theme="dark"] .bg-opacity-50 { background-color: rgba(0,0,0,0.65) !important; }
+        [data-planassist-theme="dark"] .bg-black.bg-opacity-50 { background-color: rgba(0,0,0,0.75) !important; }
+        [data-planassist-theme="dark"] .border-b-2.border-purple-600 { border-color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .text-blue-200 { color: #7ab8f0 !important; }
+        [data-planassist-theme="dark"] .text-blue-100 { color: #9dcaf8 !important; }
+        [data-planassist-theme="dark"] .animate-spin { border-color: var(--pa-accent) !important; border-top-color: transparent !important; }
+        [data-planassist-theme="dark"] .border-purple-500 { border-color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .border-purple-400 { border-color: rgba(124,110,245,0.6) !important; }
+        [data-planassist-theme="dark"] .ring-purple-500 { --tw-ring-color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .prose { color: var(--pa-text-secondary) !important; }
+        [data-planassist-theme="dark"] .prose h1, [data-planassist-theme="dark"] .prose h2, [data-planassist-theme="dark"] .prose h3 { color: var(--pa-text-primary) !important; }
+        [data-planassist-theme="dark"] .text-purple-900 { color: #c8bcf8 !important; }
+        [data-planassist-theme="dark"] .bg-purple-900 { background-color: #2d2b52 !important; }
+        [data-planassist-theme="dark"] .text-blue-900 { color: #a0c8f8 !important; }
+        [data-planassist-theme="dark"] .text-green-900 { color: #80d898 !important; }
+        [data-planassist-theme="dark"] .text-red-900 { color: #f09898 !important; }
+        [data-planassist-theme="dark"] .text-orange-900 { color: #f0b090 !important; }
+        [data-planassist-theme="dark"] .text-yellow-900 { color: #f0d870 !important; }
+        [data-planassist-theme="dark"] .bg-indigo-600 { background-color: #5c52c8 !important; }
+        [data-planassist-theme="dark"] .bg-gradient-to-br.from-gray-50.to-purple-50 { background: linear-gradient(135deg, #1a1c2e, #1e2040) !important; }
+        [data-planassist-theme="dark"] .backdrop-blur-sm { backdrop-filter: blur(8px); }
+        [data-planassist-theme="dark"] .bg-white\/10 { background-color: rgba(255,255,255,0.07) !important; }
+        [data-planassist-theme="dark"] .bg-white\/5 { background-color: rgba(255,255,255,0.04) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-white\/10:hover { background-color: rgba(255,255,255,0.10) !important; }
+        [data-planassist-theme="dark"] .bg-white\/20 { background-color: rgba(255,255,255,0.10) !important; }
+        [data-planassist-theme="dark"] table thead { background-color: var(--pa-subtle) !important; }
+        [data-planassist-theme="dark"] table tbody tr { border-color: var(--pa-border-subtle) !important; }
+        [data-planassist-theme="dark"] .from-yellow-50 { --tw-gradient-from: #1e1c30 !important; }
+        [data-planassist-theme="dark"] .via-purple-50 { --tw-gradient-via: #1a1c2e !important; }
+        [data-planassist-theme="dark"] .to-blue-50 { --tw-gradient-to: #1a1e36 !important; }
+        [data-planassist-theme="dark"] .bg-gradient-to-br { background-image: linear-gradient(135deg, var(--tw-gradient-from), var(--tw-gradient-to)) !important; }
+        [data-planassist-theme="dark"] .bg-\[opacity-50\] { opacity: 0.15; }
+        [data-planassist-theme="dark"] .bg-white.rounded-2xl { background-color: var(--pa-surface) !important; }
+        [data-planassist-theme="dark"] .text-purple-600.font-semibold { color: var(--pa-accent-text) !important; }
+        [data-planassist-theme="dark"] button[type="submit"].bg-gradient-to-r { background-image: none !important; background-color: var(--pa-accent) !important; }
+        [data-planassist-theme="dark"] .bg-gray-100.p-1 { background-color: var(--pa-subtle) !important; }
+        [data-planassist-theme="dark"] .bg-white.shadow { background-color: var(--pa-surface) !important; }
+        [data-planassist-theme="dark"] .bg-red-50 { background-color: rgba(100,30,30,0.4) !important; }
+        [data-planassist-theme="dark"] .border-red-200 { border-color: rgba(150,50,50,0.5) !important; }
+        [data-planassist-theme="dark"] .text-red-700 { color: #f09090 !important; }
+        [data-planassist-theme="dark"] .bg-amber-100 { background-color: #352c14 !important; }
+        [data-planassist-theme="dark"] .text-amber-600 { color: #f0b840 !important; }
+        [data-planassist-theme="dark"] .bg-purple-100 { background-color: var(--pa-active-nav) !important; }
+      `,
+    };
+
+    styleEl.textContent = themes[colorTheme] || themes.system;
+    
+    // Apply page background
+    const appDiv = document.querySelector('[data-planassist-theme]');
+    if (appDiv) {
+      const themeData = { warm: 'linear-gradient(135deg,#fdf8f0,#fef3e2)', cool: 'linear-gradient(135deg,#e8f0fe,#dbeafe)', dark: 'linear-gradient(135deg,#141620,#1a1c2e)' };
+      if (themeData[colorTheme]) {
+        document.body.style.background = themeData[colorTheme];
+      } else {
+        document.body.style.background = '';
+      }
+    }
+  }, [colorTheme]);
+
   const loadCompletionHistory = async () => {
     try {
       const historyData = await apiCall('/learning', 'GET');
@@ -3164,7 +3473,7 @@ const PlanAssist = () => {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-6">
+      <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-6" data-planassist-theme={colorTheme}>
         <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8">
           <div className="text-center mb-8">
             <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-2xl flex items-center justify-center">
@@ -3252,7 +3561,7 @@ const PlanAssist = () => {
   // Full-page loading screen on refresh (fix 3+4)
   if (isAppLoading) {
     return (
-      <div className="fixed inset-0 bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center z-50">
+      <div className={`fixed inset-0 bg-gradient-to-br from-gray-50 to-blue-50 flex items-center justify-center z-50`} data-planassist-theme={colorTheme}>
         <div className="text-center">
           <div className="w-16 h-16 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-800">PlanAssist</h2>
@@ -3263,8 +3572,7 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`}
-      style={invertColors ? { filter: 'invert(1) hue-rotate(180deg)', WebkitFilter: 'invert(1) hue-rotate(180deg)' } : {}}>
+    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`} data-theme={colorTheme} data-planassist-theme={colorTheme}>
 
       {/* ── Session Expired Modal ── */}
       {sessionExpired && (
@@ -6489,17 +6797,39 @@ const PlanAssist = () => {
                     <div>
                       <h3 className="text-sm font-semibold text-gray-700 mb-3">Display Settings</h3>
                       <div className="border border-gray-200 rounded-xl p-4 mb-4">
-                        <div className="flex items-start gap-3">
-                          <input type="checkbox" checked={invertColors}
-                            onChange={(e) => {
-                              setInvertColors(e.target.checked);
-                              localStorage.setItem('planassist-invert', e.target.checked ? 'true' : 'false');
-                            }}
-                            className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
-                          <div>
-                            <p className="font-medium text-gray-900">Inverted Colours Mode</p>
-                            <p className="text-xs text-gray-500 mt-1">Inverts all colours on the page for a high-contrast alternative appearance. Saved automatically.</p>
-                          </div>
+                        <p className="font-medium text-gray-900 mb-1">Colour Theme</p>
+                        <p className="text-xs text-gray-500 mb-3">Choose a coloration for PlanAssist. Saved automatically.</p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: 'system', label: 'System', emoji: '☀️', desc: 'Default clean look' },
+                            { id: 'warm',   label: 'Warm',   emoji: '🌅', desc: 'Settling amber tones' },
+                            { id: 'cool',   label: 'Cool',   emoji: '❄️', desc: 'Focus-invoking blues' },
+                            { id: 'dark',   label: 'Dark',   emoji: '🌙', desc: 'Tranquil & minimal' },
+                          ].map(t => (
+                            <button
+                              key={t.id}
+                              onClick={() => {
+                                setColorTheme(t.id);
+                                localStorage.setItem('planassist-theme', t.id);
+                              }}
+                              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                                colorTheme === t.id
+                                  ? 'border-purple-500 bg-purple-50'
+                                  : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                              }`}
+                            >
+                              <span className="text-xl flex-shrink-0">{t.emoji}</span>
+                              <div className="min-w-0">
+                                <p className={`font-semibold text-sm ${colorTheme === t.id ? 'text-purple-700' : 'text-gray-800'}`}>{t.label}</p>
+                                <p className="text-xs text-gray-500 mt-0.5">{t.desc}</p>
+                              </div>
+                              {colorTheme === t.id && (
+                                <div className="ml-auto w-4 h-4 rounded-full bg-purple-600 flex-shrink-0 flex items-center justify-center">
+                                  <div className="w-2 h-2 rounded-full bg-white" />
+                                </div>
+                              )}
+                            </button>
+                          ))}
                         </div>
                       </div>
                     </div>
