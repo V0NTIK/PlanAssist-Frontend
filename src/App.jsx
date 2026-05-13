@@ -347,6 +347,7 @@ const PlanAssist = () => {
   const [sessionPrioritiesPickerOpen, setSessionPrioritiesPickerOpen] = useState(false);
   const [sessionPickerSel, setSessionPickerSel] = useState([]); // selected task IDs in picker modal
   const [sessionDashView, setSessionDashView] = useState('timeline'); // 'timeline' | 'kanban' | 'focus'
+  const [sessionStartingId, setSessionStartingId] = useState(null); // task ID currently being started
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
@@ -1399,6 +1400,7 @@ const PlanAssist = () => {
   };
 
   const startTaskSession = async (task) => {
+    setSessionStartingId(task.id);
     try {
       await apiCall(`/sessions/start/${task.id}`, 'POST');
       setSessionTasks(prev => prev.map(t =>
@@ -1413,6 +1415,8 @@ const PlanAssist = () => {
     } catch (err) {
       console.error('Failed to start session:', err);
       alert('Failed to start session: ' + err.message);
+    } finally {
+      setSessionStartingId(null);
     }
   };
 
@@ -1516,7 +1520,6 @@ const PlanAssist = () => {
 
       setEditingTimeTaskId(null);
       setTempTimeValue('');
-      setHasUnsavedChanges(true); // Trigger "Save and Adjust Plan" warning
     } catch (error) {
       console.error('Error updating time estimate:', error);
       alert('Error updating time estimate: ' + error.message);
@@ -2920,6 +2923,23 @@ const PlanAssist = () => {
     }
   };
 
+  const loadCompletionHistory = async () => {
+    try {
+      const historyData = await apiCall('/learning', 'GET');
+      if (Array.isArray(historyData)) {
+        setCompletionHistory(historyData.map(h => ({
+          taskTitle: h.task_title,
+          type: h.task_type,
+          estimatedTime: h.estimated_time,
+          actualTime: h.actual_time,
+          date: new Date(h.completed_at)
+        })));
+      }
+    } catch (error) {
+      console.error('Failed to refresh completion history:', error);
+    }
+  };
+
   const loadCompletionFeed = async () => {
     try {
       const data = await apiCall('/completion-feed', 'GET');
@@ -3062,10 +3082,11 @@ const PlanAssist = () => {
         loadLeaderboard();
       }, 2000);
       
-      // Refresh feed and leaderboard every 2 minutes (not 30s - reduces cold-start hammering)
+      // Refresh feed, leaderboard, and hub stats every 2 minutes
       const interval = setInterval(() => {
         loadCompletionFeed();
         loadLeaderboard();
+        loadCompletionHistory();
       }, 120000);
       
       return () => {
@@ -3083,6 +3104,7 @@ const PlanAssist = () => {
   useEffect(() => {
     if (currentPage === 'hub') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      loadCompletionHistory();
     }
     if (currentPage === 'marks') {
       loadCourses();
@@ -4028,10 +4050,11 @@ const PlanAssist = () => {
                                     {/* Start/Resume Session — prominent, distinct from management buttons */}
                                     {!className.toLowerCase().includes('homeroom') && (() => {
                                       const hasProgress = (task.accumulatedTime || 0) > 0;
+                                      const isStarting = sessionStartingId === task.id;
                                       return (
                                         <button
                                           onClick={() => {
-                                            // Hydrate a session-compatible task object and start
+                                            if (isStarting) return;
                                             const sessionTask = {
                                               id: task.id, title: task.title, segment: task.segment,
                                               class: task.class, url: task.url,
@@ -4043,12 +4066,14 @@ const PlanAssist = () => {
                                             };
                                             startTaskSession(sessionTask);
                                           }}
-                                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm hover:shadow-md ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
+                                          disabled={isStarting}
+                                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${isStarting ? 'opacity-80 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
                                           title={hasProgress ? `Resume session (${task.accumulatedTime}m logged)` : 'Start a timed session on this task'}
                                         >
-                                          <Play className="w-3.5 h-3.5" />
-                                          <span className="hidden sm:inline">{hasProgress ? 'Resume' : 'Start'}</span>
-                                          {hasProgress && <span className="hidden sm:inline text-blue-200 text-xs font-normal ml-0.5">({task.accumulatedTime}m)</span>}
+                                          {isStarting
+                                            ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /><span className="hidden sm:inline">Loading…</span></>
+                                            : <><Play className="w-3.5 h-3.5" /><span className="hidden sm:inline">{hasProgress ? 'Resume' : 'Start'}</span>{hasProgress && <span className="hidden sm:inline text-blue-200 text-xs font-normal ml-0.5">({task.accumulatedTime}m)</span>}</>
+                                          }
                                         </button>
                                       );
                                     })()}
@@ -4414,7 +4439,7 @@ const PlanAssist = () => {
                                 <div className="flex items-start gap-2">
                                   <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{idx + 1}</span>
                                   <div className="flex-1 min-w-0">
-                                    <p className="text-gray-900 text-xs font-semibold line-clamp-2 leading-snug">{cleanTaskTitle(task)}</p>
+                                    <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-900 text-xs font-semibold line-clamp-2 leading-snug hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
                                     <p className="text-gray-500 text-xs mt-0.5 truncate">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                                       <span className={`text-xs ${dueColor}`}>{dueLabel}</span>
@@ -4429,10 +4454,11 @@ const PlanAssist = () => {
                                   </div>
                                 </div>
                                 <button
-                                  onClick={() => startTaskSession(task)}
-                                  className={`mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
+                                  onClick={() => { if (sessionStartingId !== task.id) startTaskSession(task); }}
+                                  disabled={sessionStartingId === task.id}
+                                  className={`mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${sessionStartingId === task.id ? 'opacity-75 cursor-not-allowed' : ''} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
                                 >
-                                  <Play className="w-3 h-3" />{hasProgress ? 'Resume' : 'Start'}
+                                  {sessionStartingId === task.id ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</> : <><Play className="w-3 h-3" />{hasProgress ? 'Resume' : 'Start'}</>}
                                 </button>
                               </div>
                             );
@@ -4459,7 +4485,7 @@ const PlanAssist = () => {
                                   return (
                                     <div key={task.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 group">
                                       <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                      <span className="text-gray-800 text-xs flex-1 truncate">{cleanTaskTitle(task)}</span>
+                                      <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-800 text-xs flex-1 truncate hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
                                       <span className={`text-xs flex-shrink-0 ${urgency === 'overdue' || urgency === 'today' ? 'text-red-500 font-bold' : 'text-gray-400'}`}>{dueLabel}</span>
                                     </div>
                                   );
@@ -4529,7 +4555,7 @@ const PlanAssist = () => {
                                         <div className="flex-1 p-4">
                                           <div className="flex items-start justify-between gap-3">
                                             <div className="flex-1 min-w-0">
-                                              <p className="text-gray-900 font-semibold text-sm line-clamp-2 leading-snug">{cleanTaskTitle(task)}</p>
+                                              <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-900 font-semibold text-sm line-clamp-2 leading-snug hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
                                               <div className="flex items-center gap-3 mt-1 flex-wrap">
                                                 <span className="text-xs text-gray-500 flex items-center gap-1">
                                                   <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: classColor }} />
@@ -4538,9 +4564,10 @@ const PlanAssist = () => {
                                                 <span className={`text-xs ${dueColor}`}>{dueLabel}</span>
                                               </div>
                                             </div>
-                                            <button onClick={() => startTaskSession(task)}
-                                              className={`flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm transition-all ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
-                                              <Play className="w-4 h-4" />{hasProgress ? 'Resume' : 'Start'}
+                                            <button onClick={() => { if (sessionStartingId !== task.id) startTaskSession(task); }}
+                                              disabled={sessionStartingId === task.id}
+                                              className={`flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm transition-all ${sessionStartingId === task.id ? 'opacity-75 cursor-not-allowed' : ''} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
+                                              {sessionStartingId === task.id ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</> : <><Play className="w-4 h-4" />{hasProgress ? 'Resume' : 'Start'}</>}
                                             </button>
                                           </div>
                                           {/* Time info row */}
@@ -4613,7 +4640,7 @@ const PlanAssist = () => {
                                             <div className="flex items-start gap-2 mb-2">
                                               <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
                                               <div className="flex-1 min-w-0">
-                                                <p className="text-gray-900 text-xs font-semibold line-clamp-2">{cleanTaskTitle(task)}</p>
+                                                <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-900 text-xs font-semibold line-clamp-2 hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
                                                 <p className="text-gray-400 text-xs mt-0.5 truncate">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
                                               </div>
                                             </div>
@@ -4630,9 +4657,10 @@ const PlanAssist = () => {
                                                 <p className="text-right text-xs text-gray-400 mt-0.5">{pct}%</p>
                                               </div>
                                             )}
-                                            <button onClick={() => startTaskSession(task)}
-                                              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
-                                              <Play className="w-3 h-3" />{hasProgress ? 'Resume' : 'Start'}
+                                            <button onClick={() => { if (sessionStartingId !== task.id) startTaskSession(task); }}
+                                              disabled={sessionStartingId === task.id}
+                                              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${sessionStartingId === task.id ? 'opacity-75 cursor-not-allowed' : ''} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
+                                              {sessionStartingId === task.id ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</> : <><Play className="w-3 h-3" />{hasProgress ? 'Resume' : 'Start'}</>}
                                             </button>
                                           </div>
                                         );
@@ -4673,7 +4701,7 @@ const PlanAssist = () => {
                                     <span className="text-xs font-medium text-gray-500">{nextUp.class?.replace(/[\[\]]/g, '') || 'No class'}</span>
                                     <span className="ml-auto text-xs font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Up Next</span>
                                   </div>
-                                  <h2 className="text-xl font-bold text-gray-900 mb-2 leading-snug">{cleanTaskTitle(nextUp)}</h2>
+                                  <a href={nextUp.url} target="_blank" rel="noopener noreferrer" className="block text-xl font-bold text-gray-900 mb-2 leading-snug hover:text-purple-700 hover:underline">{cleanTaskTitle(nextUp)}</a>
                                   <div className="flex items-center gap-4 mb-5 flex-wrap">
                                     <span className={`text-sm ${dueColor}`}>{dueLabel}</span>
                                     <span className="text-sm text-gray-500 flex items-center gap-1"><Clock className="w-4 h-4" />{estMins}m estimated</span>
@@ -4687,9 +4715,10 @@ const PlanAssist = () => {
                                       </div>
                                     </div>
                                   )}
-                                  <button onClick={() => startTaskSession(nextUp)}
-                                    className={`w-full py-3.5 rounded-2xl font-bold text-base transition-all flex items-center justify-center gap-2 shadow-md ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
-                                    <Play className="w-5 h-5" />{hasProgress ? 'Resume Session' : 'Start Session'}
+                                  <button onClick={() => { if (sessionStartingId !== nextUp.id) startTaskSession(nextUp); }}
+                                    disabled={sessionStartingId === nextUp.id}
+                                    className={`w-full py-3.5 rounded-2xl font-bold text-base transition-all flex items-center justify-center gap-2 shadow-md ${sessionStartingId === nextUp.id ? 'opacity-75 cursor-not-allowed' : ''} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
+                                    {sessionStartingId === nextUp.id ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</> : <><Play className="w-5 h-5" />{hasProgress ? 'Resume Session' : 'Start Session'}</>}
                                   </button>
                                 </div>
                                 {/* Remaining tasks mini list */}
@@ -4705,7 +4734,7 @@ const PlanAssist = () => {
                                           <div key={task.id} className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-3 py-2.5">
                                             <span className="text-xs text-gray-400 w-4">#{i+2}</span>
                                             <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: tc }} />
-                                            <span className="flex-1 text-sm text-gray-700 truncate font-medium">{cleanTaskTitle(task)}</span>
+                                            <a href={task.url} target="_blank" rel="noopener noreferrer" className="flex-1 text-sm text-gray-700 truncate font-medium hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
                                             <span className={`text-xs flex-shrink-0 ${urg === 'overdue' || urg === 'today' ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{dl}</span>
                                             {lm > 0 && <span className="text-xs text-blue-500 flex-shrink-0">{lm}m</span>}
                                           </div>
