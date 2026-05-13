@@ -2180,10 +2180,15 @@ const PlanAssist = () => {
 
 
   // ── Session priorities functions ──────────────────────────────────────────
+  const getLocalDateStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
+
   const loadSessionPriorities = async () => {
     setSessionPrioritiesLoading(true);
     try {
-      const data = await apiCall('/session-priorities/today', 'GET');
+      const data = await apiCall(`/session-priorities/today?date=${getLocalDateStr()}`, 'GET');
       setSessionPriorities(data.taskIds ? data.taskIds.map(Number) : null); // null if not set today
     } catch (err) {
       console.error('Failed to load session priorities:', err);
@@ -2195,7 +2200,7 @@ const PlanAssist = () => {
   const saveSessionPriorities = async (taskIds) => {
     try {
       const ids = taskIds.map(Number);
-      await apiCall('/session-priorities/today', 'POST', { taskIds: ids });
+      await apiCall('/session-priorities/today', 'POST', { taskIds: ids, date: getLocalDateStr() });
       setSessionPriorities(ids);
     } catch (err) {
       console.error('Failed to save session priorities:', err);
@@ -2204,7 +2209,7 @@ const PlanAssist = () => {
 
   const clearSessionPriorities = async () => {
     try {
-      await apiCall('/session-priorities/today', 'DELETE');
+      await apiCall(`/session-priorities/today?date=${getLocalDateStr()}`, 'DELETE');
       setSessionPriorities(null);
     } catch (err) {
       console.error('Failed to clear session priorities:', err);
@@ -4019,29 +4024,33 @@ const PlanAssist = () => {
                                   </div>
                                   
                                   <div className="flex gap-2 flex-shrink-0 items-center">
-                                    {/* Start Session — prominent, distinct from management buttons */}
-                                    {!className.toLowerCase().includes('homeroom') && (
-                                      <button
-                                        onClick={() => {
-                                          // Hydrate a session-compatible task object and start
-                                          const sessionTask = {
-                                            id: task.id, title: task.title, segment: task.segment,
-                                            class: task.class, url: task.url,
-                                            dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
-                                            estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
-                                            accumulatedTime: (task.accumulatedTime || 0) * 60,
-                                            sessionActive: false, assignmentId: task.assignmentId,
-                                            course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
-                                          };
-                                          startTaskSession(sessionTask);
-                                        }}
-                                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-all bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-sm hover:shadow-md"
-                                        title="Start a timed session on this task"
-                                      >
-                                        <Play className="w-3.5 h-3.5" />
-                                        <span className="hidden sm:inline">Start</span>
-                                      </button>
-                                    )}
+                                    {/* Start/Resume Session — prominent, distinct from management buttons */}
+                                    {!className.toLowerCase().includes('homeroom') && (() => {
+                                      const hasProgress = (task.accumulatedTime || 0) > 0;
+                                      return (
+                                        <button
+                                          onClick={() => {
+                                            // Hydrate a session-compatible task object and start
+                                            const sessionTask = {
+                                              id: task.id, title: task.title, segment: task.segment,
+                                              class: task.class, url: task.url,
+                                              dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
+                                              estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
+                                              accumulatedTime: (task.accumulatedTime || 0) * 60,
+                                              sessionActive: false, assignmentId: task.assignmentId,
+                                              course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
+                                            };
+                                            startTaskSession(sessionTask);
+                                          }}
+                                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm hover:shadow-md ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
+                                          title={hasProgress ? `Resume session (${task.accumulatedTime}m logged)` : 'Start a timed session on this task'}
+                                        >
+                                          <Play className="w-3.5 h-3.5" />
+                                          <span className="hidden sm:inline">{hasProgress ? 'Resume' : 'Start'}</span>
+                                          {hasProgress && <span className="hidden sm:inline text-blue-200 text-xs font-normal ml-0.5">({task.accumulatedTime}m)</span>}
+                                        </button>
+                                      );
+                                    })()}
                                     <button 
                                       onClick={() => setShowTaskDescription(task)}
                                       className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
