@@ -346,6 +346,7 @@ const PlanAssist = () => {
   const [sessionPrioritiesLoading, setSessionPrioritiesLoading] = useState(false);
   const [sessionPrioritiesPickerOpen, setSessionPrioritiesPickerOpen] = useState(false);
   const [sessionPickerSel, setSessionPickerSel] = useState([]); // selected task IDs in picker modal
+  const [sessionDashView, setSessionDashView] = useState('timeline'); // 'timeline' | 'kanban' | 'focus'
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
@@ -4051,6 +4052,14 @@ const PlanAssist = () => {
                                         </button>
                                       );
                                     })()}
+                                    {!className.toLowerCase().includes('homeroom') && (
+                                      <button 
+                                        onClick={() => setShowSplitTask(task.id)}
+                                        className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
+                                      >
+                                        Split
+                                      </button>
+                                    )}
                                     <button 
                                       onClick={() => setShowTaskDescription(task)}
                                       className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
@@ -4069,14 +4078,6 @@ const PlanAssist = () => {
                                         <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" title="Has notes" />
                                       )}
                                     </button>
-                                    {!className.toLowerCase().includes('homeroom') && (
-                                      <button 
-                                        onClick={() => setShowSplitTask(task.id)}
-                                        className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
-                                      >
-                                        Split
-                                      </button>
-                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -4317,248 +4318,486 @@ const PlanAssist = () => {
             ? eligibleTasks.filter(t => todayFocusIds.includes(t.id))
                 .sort((a, b) => todayFocusIds.indexOf(a.id) - todayFocusIds.indexOf(b.id))
             : null;
-          const totalMins = (focusTasks || eligibleTasks).reduce((s, t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
-          const urgentCount = eligibleTasks.filter(t => t.dueDate && (t.dueDate - new Date()) / (1000*60*60*24) <= 1).length;
-          const suggested = [...eligibleTasks].filter(t => !todayFocusIds?.includes(t.id)).slice(0, 5);
+          const now = new Date();
+          const totalFocusMins = (focusTasks || []).reduce((s, t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
+          const totalLoggedMins = (focusTasks || []).reduce((s, t) => s + Math.floor((t.accumulatedTime || 0) / 60), 0);
+          const urgentCount = eligibleTasks.filter(t => t.dueDate && (t.dueDate - now) / (1000*60*60*24) <= 1).length;
+          const suggested = [...eligibleTasks]
+            .sort((a, b) => {
+              const aD = a.dueDate ? a.dueDate - now : Infinity;
+              const bD = b.dueDate ? b.dueDate - now : Infinity;
+              return aD - bD;
+            })
+            .filter(t => !todayFocusIds?.includes(t.id))
+            .slice(0, 8);
+
+          const getDueInfo = (task) => {
+            if (!task.dueDate) return { label: 'No deadline', color: 'text-gray-400', urgency: 'none' };
+            const diff = (task.dueDate - now) / (1000*60*60*24);
+            if (diff <= 0) return { label: 'Overdue', color: 'text-red-600 font-semibold', urgency: 'overdue' };
+            if (diff < 1) return { label: 'Due today', color: 'text-orange-600 font-semibold', urgency: 'today' };
+            if (diff < 2) return { label: 'Due tomorrow', color: 'text-amber-600', urgency: 'soon' };
+            if (diff < 4) return { label: `Due ${task.dueDate.toLocaleDateString('en-US', { weekday: 'short' })}`, color: 'text-yellow-600', urgency: 'soon' };
+            return { label: task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), color: 'text-gray-500', urgency: 'normal' };
+          };
+
+          const getProgressPct = (task) => {
+            const est = (task.userEstimate || task.estimatedTime || 20) * 60;
+            return Math.min(100, Math.round(((task.accumulatedTime || 0) / est) * 100));
+          };
 
           return (
-          <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-950 to-slate-900">
-            <div className="px-6 pt-8 pb-4">
-              <div className="max-w-3xl mx-auto">
-                <div className="flex items-start justify-between mb-2">
-                  <div>
-                    <h1 className="text-3xl font-bold text-white tracking-tight">Today's Sessions</h1>
-                    <p className="text-purple-300 text-sm mt-1">{new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
-                  </div>
-                  <button onClick={() => { loadSessionTasks(); loadSessionPriorities(); }} className="p-2 rounded-lg text-purple-400 hover:text-white hover:bg-white/10 transition-colors" title="Refresh"><RefreshCw className="w-5 h-5" /></button>
+            <div className="h-full bg-gray-50">
+              {/* Header bar */}
+              <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+                <div>
+                  <h1 className="text-xl font-bold text-gray-900">Today's Sessions</h1>
+                  <p className="text-gray-500 text-xs mt-0.5">{now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
                 </div>
-                <div className="flex gap-3 mt-4 flex-wrap">
-                  <div className="bg-white/10 backdrop-blur rounded-xl px-4 py-2.5 flex items-center gap-2">
-                    <Timer className="w-4 h-4 text-purple-300" />
-                    <span className="text-white text-sm font-semibold">{totalMins >= 60 ? `${Math.floor(totalMins/60)}h ${totalMins%60}m` : `${totalMins}m`}</span>
-                    <span className="text-purple-400 text-xs">{focusTasks ? 'focused' : 'total'}</span>
-                  </div>
+                <div className="flex items-center gap-3">
                   {urgentCount > 0 && (
-                    <div className="bg-red-500/20 backdrop-blur rounded-xl px-4 py-2.5 flex items-center gap-2">
-                      <AlertCircle className="w-4 h-4 text-red-400" />
-                      <span className="text-red-300 text-sm font-semibold">{urgentCount} due today</span>
-                    </div>
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full">
+                      <AlertCircle className="w-3.5 h-3.5" />{urgentCount} urgent
+                    </span>
                   )}
-                  <div className="bg-white/10 backdrop-blur rounded-xl px-4 py-2.5 flex items-center gap-2">
-                    <ClipboardList className="w-4 h-4 text-purple-300" />
-                    <span className="text-white text-sm font-semibold">{eligibleTasks.length}</span>
-                    <span className="text-purple-400 text-xs">tasks</span>
-                  </div>
+                  {focusTasks && focusTasks.length > 0 && (
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border border-purple-200 px-2.5 py-1 rounded-full">
+                      <Timer className="w-3.5 h-3.5" />{totalFocusMins >= 60 ? `${Math.floor(totalFocusMins/60)}h ${totalFocusMins%60}m` : `${totalFocusMins}m`} focus
+                    </span>
+                  )}
+                  <button onClick={() => { loadSessionTasks(); loadSessionPriorities(); }} className="p-1.5 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors" title="Refresh"><RefreshCw className="w-4 h-4" /></button>
                 </div>
               </div>
-            </div>
 
-            <div className="px-6 pb-8 max-w-3xl mx-auto">
               {sessionsLoading || sessionPrioritiesLoading ? (
-                <div className="flex items-center justify-center py-20"><div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" /></div>
-              ) : eligibleTasks.length === 0 ? (
-                <div className="text-center py-20">
-                  <Check className="w-16 h-16 text-green-400 mx-auto mb-4" />
-                  <p className="text-white text-xl font-bold">All caught up!</p>
-                  <p className="text-purple-400 mt-1">No tasks to work on right now.</p>
-                </div>
+                <div className="flex items-center justify-center py-32"><div className="w-10 h-10 border-4 border-purple-400 border-t-transparent rounded-full animate-spin" /></div>
               ) : (
-                <>
-                  {/* TODAY'S FOCUS */}
-                  <div className="mt-6">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <Zap className="w-5 h-5 text-yellow-400" />
-                        <h2 className="text-white font-bold text-lg">{focusTasks ? "Today's Focus" : "Pick Today's Focus"}</h2>
+                <div className="flex h-full" style={{ minHeight: 'calc(100vh - 120px)' }}>
+
+                  {/* ── LEFT PANEL: Focus Picker ── */}
+                  <div className="w-72 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col" style={{ minWidth: '220px', maxWidth: '300px' }}>
+                    <div className="p-4 border-b border-gray-100">
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <Zap className="w-4 h-4 text-yellow-500" />
+                          <span className="font-bold text-gray-900 text-sm">Today's Focus</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {focusTasks && focusTasks.length > 0 && (
+                            <button onClick={clearSessionPriorities} title="Reset focus list" className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => { setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []); setSessionPrioritiesPickerOpen(true); }}
+                            className="flex items-center gap-1 text-xs bg-purple-600 hover:bg-purple-700 text-white px-2 py-1 rounded-lg font-semibold transition-colors"
+                          >
+                            <Edit2 className="w-3 h-3" />{focusTasks ? 'Edit' : 'Set'}
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        {focusTasks && focusTasks.length > 0 && (
-                          <button onClick={clearSessionPriorities} className="text-xs text-purple-400 hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-white/10">Reset</button>
-                        )}
-                        <button onClick={() => {
-                          setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []);
-                          setSessionPrioritiesPickerOpen(true);
-                        }}
-                          className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1">
-                          <Edit2 className="w-3 h-3" />
-                          {focusTasks ? 'Edit' : 'Set priorities'}
-                        </button>
-                      </div>
+                      {focusTasks && focusTasks.length > 0 && (
+                        <p className="text-xs text-gray-400">{focusTasks.length} task{focusTasks.length !== 1 ? 's' : ''} · {totalFocusMins}m est · {totalLoggedMins}m logged</p>
+                      )}
                     </div>
 
-                    {focusTasks && focusTasks.length > 0 ? (
-                      <div className="space-y-2">
-                        {focusTasks.map((task, idx) => {
-                          const classColor = getClassColor(task.class);
-                          const hasProgress = task.accumulatedTime > 0;
-                          const dueLabel = task.dueDate ? task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
-                          return (
-                            <div key={task.id} className="bg-white/10 backdrop-blur border border-white/20 rounded-xl p-4 flex items-center gap-4 hover:bg-white/15 transition-colors">
-                              <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-                                <span className="text-white text-xs font-bold">{idx + 1}</span>
-                              </div>
-                              <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                              <div className="flex-1 min-w-0">
-                                <p className="text-white font-semibold text-sm line-clamp-1">{cleanTaskTitle(task)}</p>
-                                <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                                  <span className="text-purple-300 text-xs">{task.class?.replace(/[\[\]]/g, '') || ''}</span>
-                                  <span className="text-purple-400 text-xs flex items-center gap-1"><Calendar className="w-3 h-3" />{dueLabel}</span>
-                                  <span className="text-purple-400 text-xs">{task.userEstimate || task.estimatedTime}m</span>
-                                  {hasProgress && <span className="text-blue-400 text-xs flex items-center gap-1"><Timer className="w-3 h-3" />{Math.floor(task.accumulatedTime/60)}m logged</span>}
-                                </div>
-                              </div>
-                              <button onClick={() => startTaskSession(task)}
-                                className={`flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-lg font-bold text-sm transition-all shadow-lg ${hasProgress ? 'bg-blue-500 hover:bg-blue-400 text-white' : 'bg-gradient-to-r from-green-400 to-emerald-500 hover:from-green-300 hover:to-emerald-400 text-white'}`}>
-                                <Play className="w-4 h-4" />
-                                {hasProgress ? 'Resume' : 'Start'}
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : focusTasks && focusTasks.length === 0 ? (
-                      <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
-                        <p className="text-purple-300 text-sm">No tasks in today's focus list.</p>
-                        <button onClick={() => {
-                          setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []);
-                          setSessionPrioritiesPickerOpen(true);
-                        }} className="mt-3 text-purple-400 hover:text-white text-sm underline underline-offset-2">Set your priorities →</button>
-                      </div>
-                    ) : (
-                      <div className="bg-white/5 border border-dashed border-purple-500/50 rounded-xl p-5">
-                        <div className="flex items-center gap-2 mb-3">
-                          <Brain className="w-4 h-4 text-purple-400" />
-                          <span className="text-purple-300 text-sm font-semibold">Suggested for today</span>
-                        </div>
-                        <div className="space-y-2 mb-4">
-                          {suggested.map((task) => {
+                    <div className="flex-1 overflow-y-auto">
+                      {focusTasks && focusTasks.length > 0 ? (
+                        <div className="p-2 space-y-1">
+                          {focusTasks.map((task, idx) => {
                             const classColor = getClassColor(task.class);
-                            const isUrgent = task.dueDate && (task.dueDate - new Date()) / (1000*60*60*24) <= 1;
+                            const { label: dueLabel, color: dueColor } = getDueInfo(task);
+                            const hasProgress = (task.accumulatedTime || 0) > 0;
+                            const pct = getProgressPct(task);
                             return (
-                              <div key={task.id} className="flex items-center gap-3">
-                                <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                <span className="text-white text-sm flex-1 truncate">{cleanTaskTitle(task)}</span>
-                                {isUrgent && <span className="text-red-400 text-xs font-bold flex-shrink-0">DUE TODAY</span>}
-                                <span className="text-purple-400 text-xs flex-shrink-0">{task.userEstimate || task.estimatedTime}m</span>
+                              <div key={task.id} className="rounded-xl border border-gray-100 bg-gray-50 hover:bg-purple-50 hover:border-purple-200 transition-colors p-3 group">
+                                <div className="flex items-start gap-2">
+                                  <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{idx + 1}</span>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-gray-900 text-xs font-semibold line-clamp-2 leading-snug">{cleanTaskTitle(task)}</p>
+                                    <p className="text-gray-500 text-xs mt-0.5 truncate">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
+                                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                      <span className={`text-xs ${dueColor}`}>{dueLabel}</span>
+                                      <span className="text-gray-400 text-xs">{task.userEstimate || task.estimatedTime}m</span>
+                                      {hasProgress && <span className="text-blue-500 text-xs font-medium">{Math.floor((task.accumulatedTime||0)/60)}m done</span>}
+                                    </div>
+                                    {hasProgress && (
+                                      <div className="mt-1.5 h-1 bg-gray-200 rounded-full overflow-hidden">
+                                        <div className="h-full rounded-full bg-blue-400 transition-all" style={{ width: `${pct}%`, backgroundColor: classColor }} />
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => startTaskSession(task)}
+                                  className={`mt-2 w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}
+                                >
+                                  <Play className="w-3 h-3" />{hasProgress ? 'Resume' : 'Start'}
+                                </button>
                               </div>
                             );
                           })}
-                          {eligibleTasks.length > 5 && <p className="text-purple-500 text-xs pl-4">+{eligibleTasks.length - 5} more tasks</p>}
                         </div>
-                        <button onClick={() => {
-                          setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []);
-                          setSessionPrioritiesPickerOpen(true);
-                        }}
-                          className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2">
-                          <Target className="w-4 h-4" />
-                          Set My Priorities for Today
-                        </button>
+                      ) : (
+                        <div className="p-3">
+                          {eligibleTasks.length === 0 ? (
+                            <div className="text-center py-8">
+                              <Check className="w-10 h-10 text-green-400 mx-auto mb-2" />
+                              <p className="text-gray-700 text-sm font-semibold">All caught up!</p>
+                              <p className="text-gray-400 text-xs mt-1">No tasks remaining.</p>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-1.5 mb-2">
+                                <Brain className="w-3.5 h-3.5 text-purple-400" />
+                                <span className="text-xs font-semibold text-gray-700">Suggested for today</span>
+                              </div>
+                              <div className="space-y-1 mb-3">
+                                {suggested.map((task) => {
+                                  const { label: dueLabel, color: dueColor, urgency } = getDueInfo(task);
+                                  const classColor = getClassColor(task.class);
+                                  return (
+                                    <div key={task.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 group">
+                                      <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                      <span className="text-gray-800 text-xs flex-1 truncate">{cleanTaskTitle(task)}</span>
+                                      <span className={`text-xs flex-shrink-0 ${urgency === 'overdue' || urgency === 'today' ? 'text-red-500 font-bold' : 'text-gray-400'}`}>{dueLabel}</span>
+                                    </div>
+                                  );
+                                })}
+                                {eligibleTasks.length > 8 && <p className="text-gray-400 text-xs pl-3">+{eligibleTasks.length - 8} more</p>}
+                              </div>
+                              <button
+                                onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
+                                className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-1.5"
+                              >
+                                <Target className="w-3.5 h-3.5" />Set My Priorities for Today
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* ── RIGHT PANEL: Dashboard ── */}
+                  <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                    {focusTasks && focusTasks.length > 0 ? (
+                      <>
+                        {/* View toggle tabs */}
+                        <div className="bg-white border-b border-gray-200 px-5 py-2 flex items-center gap-1">
+                          {[
+                            { id: 'timeline', label: 'Session Plan', icon: LayoutList },
+                            { id: 'kanban', label: 'Progress Board', icon: BarChart3 },
+                            { id: 'focus', label: 'Focus Mode', icon: Target },
+                          ].map(({ id, label, icon: Icon }) => (
+                            <button
+                              key={id}
+                              onClick={() => setSessionDashView(id)}
+                              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${sessionDashView === id ? 'bg-purple-100 text-purple-700' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'}`}
+                            >
+                              <Icon className="w-4 h-4" />{label}
+                            </button>
+                          ))}
+                        </div>
+
+                        <div className="flex-1 overflow-y-auto p-5">
+
+                          {/* ── VIEW: Session Plan (timeline-style work blocks) ── */}
+                          {sessionDashView === 'timeline' && (() => {
+                            let cumMins = 0;
+                            return (
+                              <div className="max-w-2xl mx-auto space-y-3">
+                                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-4">Planned work blocks for today</p>
+                                {focusTasks.map((task, idx) => {
+                                  const classColor = getClassColor(task.class);
+                                  const { label: dueLabel, color: dueColor, urgency } = getDueInfo(task);
+                                  const estMins = task.userEstimate || task.estimatedTime || 20;
+                                  const loggedMins = Math.floor((task.accumulatedTime || 0) / 60);
+                                  const hasProgress = loggedMins > 0;
+                                  const pct = getProgressPct(task);
+                                  const blockStart = cumMins;
+                                  cumMins += estMins;
+                                  const startLabel = blockStart === 0 ? 'Start' : `+${blockStart}m`;
+                                  return (
+                                    <div key={task.id} className={`bg-white rounded-2xl border-2 shadow-sm transition-all hover:shadow-md ${urgency === 'overdue' ? 'border-red-200' : urgency === 'today' ? 'border-orange-200' : 'border-gray-100'}`}>
+                                      <div className="flex items-stretch">
+                                        {/* Color bar + index */}
+                                        <div className="w-12 flex-shrink-0 flex flex-col items-center justify-center py-4 rounded-l-xl" style={{ backgroundColor: classColor + '22' }}>
+                                          <span className="text-xs font-bold" style={{ color: classColor }}>#{idx+1}</span>
+                                          <span className="text-xs text-gray-400 mt-1">{startLabel}</span>
+                                        </div>
+                                        <div className="flex-1 p-4">
+                                          <div className="flex items-start justify-between gap-3">
+                                            <div className="flex-1 min-w-0">
+                                              <p className="text-gray-900 font-semibold text-sm line-clamp-2 leading-snug">{cleanTaskTitle(task)}</p>
+                                              <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                                <span className="text-xs text-gray-500 flex items-center gap-1">
+                                                  <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: classColor }} />
+                                                  {task.class?.replace(/[\[\]]/g, '') || '—'}
+                                                </span>
+                                                <span className={`text-xs ${dueColor}`}>{dueLabel}</span>
+                                              </div>
+                                            </div>
+                                            <button onClick={() => startTaskSession(task)}
+                                              className={`flex-shrink-0 flex items-center gap-1.5 px-4 py-2 rounded-xl font-bold text-sm transition-all ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
+                                              <Play className="w-4 h-4" />{hasProgress ? 'Resume' : 'Start'}
+                                            </button>
+                                          </div>
+                                          {/* Time info row */}
+                                          <div className="flex items-center gap-4 mt-3">
+                                            <div className="flex items-center gap-1.5">
+                                              <Clock className="w-3.5 h-3.5 text-gray-400" />
+                                              <span className="text-xs text-gray-500">{estMins}m estimated</span>
+                                            </div>
+                                            {hasProgress && (
+                                              <div className="flex items-center gap-1.5">
+                                                <Timer className="w-3.5 h-3.5 text-blue-400" />
+                                                <span className="text-xs text-blue-600 font-medium">{loggedMins}m logged</span>
+                                              </div>
+                                            )}
+                                          </div>
+                                          {/* Progress bar */}
+                                          <div className="mt-2 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                            <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: hasProgress ? classColor : '#e5e7eb' }} />
+                                          </div>
+                                          {hasProgress && <p className="text-xs text-gray-400 mt-0.5 text-right">{pct}% done</p>}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                                {/* Total time summary */}
+                                <div className="bg-purple-50 border border-purple-100 rounded-2xl p-4 flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <Timer className="w-4 h-4 text-purple-500" />
+                                    <span className="text-sm font-semibold text-purple-700">Total session time</span>
+                                  </div>
+                                  <div className="text-right">
+                                    <span className="text-lg font-bold text-purple-700">{totalFocusMins >= 60 ? `${Math.floor(totalFocusMins/60)}h ${totalFocusMins%60}m` : `${totalFocusMins}m`}</span>
+                                    {totalLoggedMins > 0 && <p className="text-xs text-purple-400">{totalLoggedMins}m completed</p>}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* ── VIEW: Progress Board (kanban-style columns) ── */}
+                          {sessionDashView === 'kanban' && (() => {
+                            const notStarted = focusTasks.filter(t => (t.accumulatedTime || 0) === 0);
+                            const inProgress = focusTasks.filter(t => (t.accumulatedTime || 0) > 0 && getProgressPct(t) < 100);
+                            const nearDone = focusTasks.filter(t => getProgressPct(t) >= 100);
+                            const columns = [
+                              { key: 'todo', label: 'To Do', tasks: notStarted, accent: 'border-gray-200 bg-gray-50', badge: 'bg-gray-200 text-gray-600' },
+                              { key: 'progress', label: 'In Progress', tasks: inProgress, accent: 'border-blue-200 bg-blue-50', badge: 'bg-blue-200 text-blue-700' },
+                              { key: 'done', label: 'Over Estimated', tasks: nearDone, accent: 'border-green-200 bg-green-50', badge: 'bg-green-200 text-green-700' },
+                            ];
+                            return (
+                              <div className="flex gap-4 h-full min-h-0" style={{ alignItems: 'flex-start' }}>
+                                {columns.map(col => (
+                                  <div key={col.key} className={`flex-1 min-w-0 rounded-2xl border-2 ${col.accent} p-3 flex flex-col gap-2`}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                      <span className="font-bold text-gray-700 text-sm">{col.label}</span>
+                                      <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${col.badge}`}>{col.tasks.length}</span>
+                                    </div>
+                                    {col.tasks.length === 0 ? (
+                                      <div className="py-6 text-center text-gray-400 text-xs">Empty</div>
+                                    ) : (
+                                      col.tasks.map(task => {
+                                        const classColor = getClassColor(task.class);
+                                        const { label: dueLabel, urgency } = getDueInfo(task);
+                                        const loggedMins = Math.floor((task.accumulatedTime || 0) / 60);
+                                        const pct = getProgressPct(task);
+                                        const hasProgress = loggedMins > 0;
+                                        return (
+                                          <div key={task.id} className="bg-white rounded-xl border border-gray-100 p-3 shadow-sm">
+                                            <div className="flex items-start gap-2 mb-2">
+                                              <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                              <div className="flex-1 min-w-0">
+                                                <p className="text-gray-900 text-xs font-semibold line-clamp-2">{cleanTaskTitle(task)}</p>
+                                                <p className="text-gray-400 text-xs mt-0.5 truncate">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
+                                              </div>
+                                            </div>
+                                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                              <span className={`text-xs ${urgency === 'overdue' || urgency === 'today' ? 'text-red-500 font-bold' : 'text-gray-400'}`}>{dueLabel}</span>
+                                              <span className="text-gray-400 text-xs">{task.userEstimate || task.estimatedTime}m</span>
+                                              {hasProgress && <span className="text-blue-500 text-xs">{loggedMins}m done</span>}
+                                            </div>
+                                            {hasProgress && (
+                                              <div className="mb-2">
+                                                <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+                                                  <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: classColor }} />
+                                                </div>
+                                                <p className="text-right text-xs text-gray-400 mt-0.5">{pct}%</p>
+                                              </div>
+                                            )}
+                                            <button onClick={() => startTaskSession(task)}
+                                              className={`w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-bold transition-all ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
+                                              <Play className="w-3 h-3" />{hasProgress ? 'Resume' : 'Start'}
+                                            </button>
+                                          </div>
+                                        );
+                                      })
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
+                          {/* ── VIEW: Focus Mode (one task at a time spotlight) ── */}
+                          {sessionDashView === 'focus' && (() => {
+                            const nextUp = focusTasks.find(t => (t.accumulatedTime || 0) === 0) || focusTasks[0];
+                            const remaining = focusTasks.filter(t => t.id !== nextUp?.id);
+                            const totalDone = focusTasks.filter(t => getProgressPct(t) >= 100).length;
+                            if (!nextUp) return null;
+                            const classColor = getClassColor(nextUp.class);
+                            const { label: dueLabel, color: dueColor, urgency } = getDueInfo(nextUp);
+                            const loggedMins = Math.floor((nextUp.accumulatedTime || 0) / 60);
+                            const estMins = nextUp.userEstimate || nextUp.estimatedTime || 20;
+                            const pct = getProgressPct(nextUp);
+                            const hasProgress = loggedMins > 0;
+                            return (
+                              <div className="max-w-lg mx-auto">
+                                {/* Progress summary */}
+                                <div className="flex items-center justify-between mb-6">
+                                  <span className="text-sm text-gray-500">{totalDone}/{focusTasks.length} completed</span>
+                                  <div className="flex-1 mx-4 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                    <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${Math.round((totalDone/focusTasks.length)*100)}%` }} />
+                                  </div>
+                                  <span className="text-sm font-semibold text-purple-600">{Math.round((totalDone/focusTasks.length)*100)}%</span>
+                                </div>
+                                {/* Spotlight card */}
+                                <div className={`rounded-3xl border-2 p-8 mb-5 shadow-lg ${urgency === 'overdue' ? 'border-red-200 bg-red-50' : urgency === 'today' ? 'border-orange-200 bg-orange-50' : 'bg-white border-gray-100'}`}>
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: classColor }} />
+                                    <span className="text-xs font-medium text-gray-500">{nextUp.class?.replace(/[\[\]]/g, '') || 'No class'}</span>
+                                    <span className="ml-auto text-xs font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">Up Next</span>
+                                  </div>
+                                  <h2 className="text-xl font-bold text-gray-900 mb-2 leading-snug">{cleanTaskTitle(nextUp)}</h2>
+                                  <div className="flex items-center gap-4 mb-5 flex-wrap">
+                                    <span className={`text-sm ${dueColor}`}>{dueLabel}</span>
+                                    <span className="text-sm text-gray-500 flex items-center gap-1"><Clock className="w-4 h-4" />{estMins}m estimated</span>
+                                    {hasProgress && <span className="text-sm text-blue-600 font-medium flex items-center gap-1"><Timer className="w-4 h-4" />{loggedMins}m logged</span>}
+                                  </div>
+                                  {hasProgress && (
+                                    <div className="mb-5">
+                                      <div className="flex justify-between text-xs text-gray-400 mb-1"><span>Progress</span><span>{pct}%</span></div>
+                                      <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                                        <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: classColor }} />
+                                      </div>
+                                    </div>
+                                  )}
+                                  <button onClick={() => startTaskSession(nextUp)}
+                                    className={`w-full py-3.5 rounded-2xl font-bold text-base transition-all flex items-center justify-center gap-2 shadow-md ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
+                                    <Play className="w-5 h-5" />{hasProgress ? 'Resume Session' : 'Start Session'}
+                                  </button>
+                                </div>
+                                {/* Remaining tasks mini list */}
+                                {remaining.length > 0 && (
+                                  <div>
+                                    <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-2">Still to do</p>
+                                    <div className="space-y-1.5">
+                                      {remaining.map((task, i) => {
+                                        const tc = getClassColor(task.class);
+                                        const { label: dl, urgency: urg } = getDueInfo(task);
+                                        const lm = Math.floor((task.accumulatedTime||0)/60);
+                                        return (
+                                          <div key={task.id} className="flex items-center gap-3 bg-white border border-gray-100 rounded-xl px-3 py-2.5">
+                                            <span className="text-xs text-gray-400 w-4">#{i+2}</span>
+                                            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: tc }} />
+                                            <span className="flex-1 text-sm text-gray-700 truncate font-medium">{cleanTaskTitle(task)}</span>
+                                            <span className={`text-xs flex-shrink-0 ${urg === 'overdue' || urg === 'today' ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{dl}</span>
+                                            {lm > 0 && <span className="text-xs text-blue-500 flex-shrink-0">{lm}m</span>}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
+                        </div>
+                      </>
+                    ) : (
+                      /* No focus set yet — right panel prompt */
+                      <div className="flex-1 flex items-center justify-center p-8">
+                        <div className="text-center max-w-sm">
+                          <div className="w-20 h-20 rounded-full bg-purple-100 flex items-center justify-center mx-auto mb-4">
+                            <Target className="w-10 h-10 text-purple-400" />
+                          </div>
+                          <h2 className="text-xl font-bold text-gray-800 mb-2">No focus list set</h2>
+                          <p className="text-gray-500 text-sm mb-6">Pick your priority tasks for today using the panel on the left to unlock the session dashboard.</p>
+                          <button
+                            onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
+                            className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl font-bold transition-colors flex items-center gap-2 mx-auto"
+                          >
+                            <Zap className="w-5 h-5" />Set Today's Priorities
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  {/* ALL TASKS */}
-                  <div className="mt-8">
-                    <div className="flex items-center gap-2 mb-3">
-                      <ClipboardList className="w-5 h-5 text-purple-400" />
-                      <h2 className="text-white font-bold text-lg">All Tasks</h2>
-                      <span className="text-purple-500 text-sm">— sorted by deadline</span>
+                </div>
+              )}
+
+              {/* PRIORITIES PICKER MODAL */}
+              {sessionPrioritiesPickerOpen && (
+                <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+                  <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl">
+                    <div className="p-5 border-b border-gray-100 flex items-center justify-between">
+                      <div>
+                        <h3 className="text-gray-900 text-xl font-bold">Set Today's Priorities</h3>
+                        <p className="text-gray-500 text-sm mt-0.5">Pick 1–10 tasks to focus on ({sessionPickerSel.length}/10)</p>
+                      </div>
+                      <button onClick={() => setSessionPrioritiesPickerOpen(false)} className="text-gray-400 hover:text-gray-600 p-1"><X className="w-5 h-5" /></button>
                     </div>
-                    <div className="space-y-2">
+                    <div className="flex-1 overflow-y-auto p-4 space-y-1.5">
                       {eligibleTasks.map((task) => {
                         const classColor = getClassColor(task.class);
-                        const hasProgress = task.accumulatedTime > 0;
-                        const isInFocus = todayFocusIds?.includes(task.id);
-                        const dueDate = task.dueDate;
-                        const now = new Date();
-                        const diffDays = dueDate ? (dueDate - now) / (1000*60*60*24) : null;
-                        const urgency = diffDays !== null && diffDays <= 0 ? 'overdue' : diffDays !== null && diffDays <= 1 ? 'today' : diffDays !== null && diffDays <= 3 ? 'soon' : 'normal';
-                        const urgencyClasses = { overdue: 'border-red-500/60 bg-red-500/10', today: 'border-orange-500/40 bg-orange-500/5', soon: 'border-yellow-500/30 bg-yellow-500/5', normal: 'border-white/10 bg-white/5' };
-                        const dueLabel = !dueDate ? '—' : diffDays !== null && diffDays <= 0 ? 'Overdue' : diffDays < 1 ? 'Due today' : diffDays < 2 ? 'Due tomorrow' : dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                        const dueColor = urgency === 'overdue' ? 'text-red-400' : urgency === 'today' ? 'text-orange-400' : urgency === 'soon' ? 'text-yellow-400' : 'text-purple-400';
+                        const isSelected = sessionPickerSel.includes(task.id);
+                        const selIdx = sessionPickerSel.indexOf(task.id);
+                        const { label: dueLabel, urgency } = getDueInfo(task);
                         return (
-                          <div key={task.id} className={`border rounded-xl p-3.5 flex items-center gap-3 hover:bg-white/10 transition-colors ${urgencyClasses[urgency]} ${isInFocus ? 'ring-1 ring-purple-500/50' : ''}`}>
-                            <div className="w-1 self-stretch rounded-full flex-shrink-0 min-h-[2rem]" style={{ backgroundColor: classColor }} />
+                          <button key={task.id}
+                            disabled={!isSelected && sessionPickerSel.length >= 10}
+                            onClick={() => {
+                              if (isSelected) setSessionPickerSel(sessionPickerSel.filter(id => id !== task.id));
+                              else if (sessionPickerSel.length < 10) setSessionPickerSel([...sessionPickerSel, task.id]);
+                            }}
+                            className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${isSelected ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-white hover:bg-gray-50'} ${!isSelected && sessionPickerSel.length >= 10 ? 'opacity-40 cursor-not-allowed' : ''}`}>
+                            <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold ${isSelected ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-400'}`}>
+                              {isSelected ? selIdx + 1 : ''}
+                            </div>
+                            <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
                             <div className="flex-1 min-w-0">
-                              <p className="text-white text-sm font-semibold line-clamp-1">{cleanTaskTitle(task)}</p>
-                              <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                                <span className={`text-xs font-medium ${dueColor}`}>{dueLabel}</span>
-                                <span className="text-purple-500 text-xs">{task.userEstimate || task.estimatedTime}m</span>
-                                {hasProgress && <span className="text-blue-400 text-xs">{Math.floor(task.accumulatedTime/60)}m logged</span>}
-                                {isInFocus && <span className="text-purple-400 text-xs font-semibold">⚡ In focus</span>}
+                              <p className="text-gray-900 text-sm font-semibold line-clamp-1">{cleanTaskTitle(task)}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className={`text-xs ${urgency === 'overdue' || urgency === 'today' ? 'text-red-500 font-semibold' : 'text-gray-400'}`}>{dueLabel}</span>
+                                <span className="text-gray-400 text-xs">{task.userEstimate || task.estimatedTime}m</span>
                               </div>
                             </div>
-                            <button onClick={() => startTaskSession(task)}
-                              className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-xs transition-all ${hasProgress ? 'bg-blue-600/80 hover:bg-blue-600 text-white' : 'bg-white/20 hover:bg-white/30 text-white'}`}>
-                              <Play className="w-3.5 h-3.5" />
-                              {hasProgress ? 'Resume' : 'Start'}
-                            </button>
-                          </div>
+                            {isSelected && <Check className="w-4 h-4 text-purple-500 flex-shrink-0" />}
+                          </button>
                         );
                       })}
                     </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* PRIORITIES PICKER MODAL */}
-            {sessionPrioritiesPickerOpen && (
-              <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                <div className="bg-slate-900 border border-white/20 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col">
-                  <div className="p-5 border-b border-white/10 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-white text-xl font-bold">Set Today's Priorities</h3>
-                      <p className="text-purple-400 text-sm mt-0.5">Pick 1–10 tasks to focus on ({sessionPickerSel.length}/10)</p>
+                    <div className="p-4 border-t border-gray-100 flex gap-3">
+                      {sessionPickerSel.length > 0 && (
+                        <button onClick={() => setSessionPickerSel([])} className="px-4 py-2.5 text-gray-500 hover:text-gray-700 text-sm transition-colors">Clear</button>
+                      )}
+                      <button onClick={() => setSessionPrioritiesPickerOpen(false)} className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold text-sm transition-colors">Cancel</button>
+                      <button onClick={() => { saveSessionPriorities(sessionPickerSel); setSessionPrioritiesPickerOpen(false); }}
+                        className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-sm transition-colors">
+                        Save Focus List
+                      </button>
                     </div>
-                    <button onClick={() => setSessionPrioritiesPickerOpen(false)} className="text-purple-400 hover:text-white"><X className="w-6 h-6" /></button>
-                  </div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-2">
-                    {eligibleTasks.map((task) => {
-                      const classColor = getClassColor(task.class);
-                      const isSelected = sessionPickerSel.includes(task.id);
-                      const selIdx = sessionPickerSel.indexOf(task.id);
-                      const dueLabel = task.dueDate ? task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
-                      const isUrgent = task.dueDate && (task.dueDate - new Date()) / (1000*60*60*24) <= 1;
-                      return (
-                        <button key={task.id}
-                          disabled={!isSelected && sessionPickerSel.length >= 10}
-                          onClick={() => {
-                            if (isSelected) setSessionPickerSel(sessionPickerSel.filter(id => id !== task.id));
-                            else if (sessionPickerSel.length < 10) setSessionPickerSel([...sessionPickerSel, task.id]);
-                          }}
-                          className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${isSelected ? 'border-purple-500 bg-purple-500/20' : 'border-white/10 bg-white/5 hover:bg-white/10'} ${!isSelected && sessionPickerSel.length >= 10 ? 'opacity-40 cursor-not-allowed' : ''}`}>
-                          <div className={`w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 text-sm font-bold ${isSelected ? 'bg-purple-500 text-white' : 'bg-white/10 text-white/30'}`}>
-                            {isSelected ? selIdx + 1 : ''}
-                          </div>
-                          <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-white text-sm font-semibold line-clamp-1">{cleanTaskTitle(task)}</p>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-purple-400 text-xs">{dueLabel}</span>
-                              <span className="text-purple-500 text-xs">{task.userEstimate || task.estimatedTime}m</span>
-                              {isUrgent && <span className="text-red-400 text-xs font-bold">DUE TODAY</span>}
-                            </div>
-                          </div>
-                          {isSelected && <Check className="w-4 h-4 text-purple-400 flex-shrink-0" />}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div className="p-4 border-t border-white/10 flex gap-3">
-                    {sessionPickerSel.length > 0 && (
-                      <button onClick={() => setSessionPickerSel([])} className="px-4 py-2.5 text-purple-400 hover:text-white text-sm transition-colors">Clear</button>
-                    )}
-                    <button onClick={() => setSessionPrioritiesPickerOpen(false)} className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-semibold text-sm transition-colors">Cancel</button>
-                    <button onClick={() => { saveSessionPriorities(sessionPickerSel); setSessionPrioritiesPickerOpen(false); }}
-                      className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold text-sm transition-colors">
-                      Save Focus List
-                    </button>
                   </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
           );
         })()}
 
