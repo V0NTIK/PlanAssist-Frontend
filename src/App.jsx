@@ -3491,7 +3491,7 @@ const PlanAssist = () => {
           </div>
         </div>
       )}
-      <div className="py-6">
+      <div className={currentPage === 'sessions' ? '' : 'py-6'}>
         {currentPage === 'hub' && (
           <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
@@ -4897,8 +4897,6 @@ const PlanAssist = () => {
                       )}
                     </div>
                   );
-                })()}
-
                 })()}
 
         {currentPage === 'agenda-active' && currentAgenda && (() => {
@@ -6781,7 +6779,6 @@ const PlanAssist = () => {
                         <option value="active_tasks_asc">Fewest Tasks</option>
                         <option value="completions_desc">Most Completions</option>
                         <option value="completions_asc">Fewest Completions</option>
-                        <option value="unsorted_desc">Most Unsorted</option>
                       </select>
                     </div>
                     {/* Active filter summary */}
@@ -6830,7 +6827,6 @@ const PlanAssist = () => {
                           case 'active_tasks_asc': return (parseInt(a.active_tasks) || 0) - (parseInt(b.active_tasks) || 0);
                           case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
                           case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
-                          case 'unsorted_desc': return (parseInt(b.new_tasks) || 0) - (parseInt(a.new_tasks) || 0);
                           default: return (a.name || '').localeCompare(b.name || '');
                         }
                       };
