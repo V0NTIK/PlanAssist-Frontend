@@ -2184,7 +2184,7 @@ const PlanAssist = () => {
     setSessionPrioritiesLoading(true);
     try {
       const data = await apiCall('/session-priorities/today', 'GET');
-      setSessionPriorities(data.taskIds); // null if not set today
+      setSessionPriorities(data.taskIds ? data.taskIds.map(Number) : null); // null if not set today
     } catch (err) {
       console.error('Failed to load session priorities:', err);
     } finally {
@@ -2194,8 +2194,9 @@ const PlanAssist = () => {
 
   const saveSessionPriorities = async (taskIds) => {
     try {
-      await apiCall('/session-priorities/today', 'POST', { taskIds });
-      setSessionPriorities(taskIds);
+      const ids = taskIds.map(Number);
+      await apiCall('/session-priorities/today', 'POST', { taskIds: ids });
+      setSessionPriorities(ids);
     } catch (err) {
       console.error('Failed to save session priorities:', err);
     }
@@ -4551,6 +4552,90 @@ const PlanAssist = () => {
           </div>
           );
         })()}
+
+        {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete) && (
+          showSessionComplete ? (
+            <div className="max-w-lg mx-auto p-6">
+              <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
+                <Check className="w-16 h-16 mx-auto mb-4" />
+                <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
+                <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
+                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
+                <div className="text-gray-500">Total time spent</div>
+              </div>
+              <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
+                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                Back to Sessions
+              </button>
+            </div>
+          ) : (
+            <div className="max-w-lg mx-auto p-6">
+              <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white rounded-xl p-8 mb-5">
+                <div className="text-center mb-6">
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(currentSessionTask.class) }} />
+                    <span className="text-purple-200 text-sm font-medium">
+                      {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g, '') : 'No Class'}
+                    </span>
+                  </div>
+                  <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer"
+                    className="block text-xl font-bold mb-6 hover:underline">{cleanTaskTitle(currentSessionTask)}</a>
+                  <div className="text-7xl font-bold mb-1 tabular-nums">{formatTime(sessionElapsed)}</div>
+                  <p className="text-purple-200 text-sm">Time on this task</p>
+                </div>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={() => {
+                      if (isTimerRunning) {
+                        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+                        const snapped = timerBaseElapsedRef.current + wallElapsed;
+                        setSessionElapsed(snapped);
+                        timerBaseElapsedRef.current = snapped;
+                      }
+                      setIsTimerRunning(prev => !prev);
+                    }}
+                    className="bg-white bg-opacity-20 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-opacity-30 flex items-center gap-2"
+                  >
+                    {isTimerRunning ? <><Pause className="w-4 h-4" /> Pause Timer</> : <><Play className="w-4 h-4" /> Resume Timer</>}
+                  </button>
+                  <button onClick={pauseTaskSession} disabled={savingSession}
+                    className="bg-purple-800 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
+                    {savingSession
+                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                      : <><X className="w-4 h-4" /> Save & Exit</>}
+                  </button>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-md p-6">
+                <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
+                  <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
+                  {currentSessionTask.deadlineDateRaw && (
+                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
+                      Due {(currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                  {currentSessionTask.accumulatedTime > 0 && (
+                    <span className="flex items-center gap-1 text-blue-600 font-medium">
+                      <Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
+                    </span>
+                  )}
+                </div>
+                <button onClick={completeTaskSession} disabled={markingComplete}
+                  className="w-full bg-green-500 text-white py-3.5 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 mb-3">
+                  {markingComplete
+                    ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
+                    : <><Check className="w-5 h-5" /> Mark Complete</>}
+                </button>
+                <button onClick={() => openWorkspace(currentSessionTask, 'session')}
+                  className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
+                  <BookOpen className="w-4 h-4" /> Open Workspace
+                </button>
+              </div>
+            </div>
+          )
+        )}
 
                 {currentPage === 'agendas' && (() => {
                   return (
