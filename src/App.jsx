@@ -2,7 +2,7 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, GripVertical, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -267,12 +267,13 @@ const PlanAssist = () => {
   const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
   const [showAddTask, setShowAddTask] = useState(false);
   const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
+  const [isSortingByDeadline, setIsSortingByDeadline] = useState(false);
   const [isSavingManualTask, setIsSavingManualTask] = useState(false);
 
   // ── Admin state ───────────────────────────────────────────────────────────
   const [announcements, setAnnouncements] = useState([]);
   const [adminUsers, setAdminUsers] = useState([]);
-  const [adminFilter, setAdminFilter] = useState({ status: 'all', grade: 'all' });
+  const [adminFilter, setAdminFilter] = useState({ status: 'all', grade: 'all', unsorted: 'all' });
   const [adminSort, setAdminSort] = useState('name_asc');
   const [adminSelectedUser, setAdminSelectedUser] = useState(null);
   const [adminUserDetail, setAdminUserDetail] = useState(null);
@@ -340,13 +341,15 @@ const PlanAssist = () => {
 
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [showSplitTask, setShowSplitTask] = useState(null);
+  const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1' }]);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [sessionPriorities, setSessionPriorities] = useState(null); // null=not set today, []=empty, [...ids]=set
+  const [sessionPriorities, setSessionPriorities] = useState(null);
   const [sessionPrioritiesLoading, setSessionPrioritiesLoading] = useState(false);
   const [sessionPrioritiesPickerOpen, setSessionPrioritiesPickerOpen] = useState(false);
-  const [sessionPickerSel, setSessionPickerSel] = useState([]); // selected task IDs in picker modal
-  const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]);
+  const [sessionPickerSel, setSessionPickerSel] = useState([]);
   const [showTutorial, setShowTutorial] = useState(false);
   const [tutorialStep, setTutorialStep] = useState(0);
   const [showAddSessionModal, setShowAddSessionModal] = useState(false);
@@ -354,7 +357,11 @@ const PlanAssist = () => {
   const [showFeedbackForm, setShowFeedbackForm] = useState(false);
   const [feedbackText, setFeedbackText] = useState('');
   const [feedbackSending, setFeedbackSending] = useState(false);
+  const [draggedTask, setDraggedTask] = useState(null);
+  const [dragOverTask, setDragOverTask] = useState(null);
+  const [newTasks, setNewTasks] = useState([]);
   const [showTaskDescription, setShowTaskDescription] = useState(null);
+  const [newTasksSidebarOpen, setNewTasksSidebarOpen] = useState(false);
   const savedCanvasTokenRef = React.useRef(''); // tracks last-saved token to avoid unnecessary syncs
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [editingTimeTaskId, setEditingTimeTaskId] = useState(null);
@@ -437,6 +444,7 @@ const PlanAssist = () => {
   const [gradeImpact, setGradeImpact] = useState({}); // { task_id: 'Low'|'Moderate'|'High' }
   const [userGoals, setUserGoals] = useState({}); // { course_id: target_score }
   const [goalsLoaded, setGoalsLoaded] = useState(false);
+  const [sessionViewMode, setSessionViewMode] = useState(() => localStorage.getItem('planassist_session_view') || 'list');
 
   // UI theme
   const [invertColors, setInvertColors] = useState(() => localStorage.getItem('planassist-invert') === 'true');
@@ -695,10 +703,133 @@ const PlanAssist = () => {
         headers: { 'Authorization': `Bearer ${authToken}` }
       }).then(r => r.json());
 
-      if (Array.isArray(tasksData) && tasksData.length > 0) {
-        setTasks(tasksData.map(hydrateTask));
+      if (tasksData.length > 0) {
+        const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
+          // Convert deadline_date and deadline_time to local Date object
+          let dueDate;
+          let hasSpecificTime = false;
+          
+          // Handle new format (deadline_date + deadline_time)
+          if (t.deadline_date) {
+            // PostgreSQL DATE columns come back as ISO timestamps
+            let dateString = t.deadline_date;
+            if (typeof dateString !== 'string') {
+              dateString = new Date(dateString).toISOString();
+            }
+            const datePart = dateString.split('T')[0]; // "2025-11-24"
+            
+            if (t.deadline_time !== null && t.deadline_time !== undefined) {
+              // Has specific time - convert from UTC to local
+              const utcDatetime = `${datePart}T${t.deadline_time}Z`;
+              dueDate = new Date(utcDatetime);
+              hasSpecificTime = true;
+            } else {
+              // Date-only task - use 23:59:00 in local timezone
+              dueDate = new Date(`${datePart}T23:59:00`);
+              hasSpecificTime = false;
+            }
+          }
+          // Fallback for old format (single deadline column) - should not happen after migration
+          else if (t.deadline) {
+            console.warn('Task using old deadline format:', t.id, t.title);
+            dueDate = new Date(t.deadline);
+            hasSpecificTime = true;
+          }
+          // No deadline at all - use today as fallback
+          else {
+            console.error('Task missing deadline:', t.id, t.title);
+            dueDate = new Date();
+            hasSpecificTime = false;
+          }
+          
+          return {
+            id: t.id,
+            title: t.title,
+            segment: t.segment,
+            class: t.class,
+            description: t.description,
+            url: t.url,
+            dueDate: dueDate,
+            hasSpecificTime: hasSpecificTime,
+            estimatedTime: t.estimated_time,
+            userEstimate: t.user_estimated_time,
+            accumulatedTime: t.accumulated_time || 0,
+            priorityOrder: t.priority_order,
+            completed: t.completed,
+            deleted: t.deleted || false,
+            submittedAt: t.submitted_at || null,
+            deadlineDateRaw: t.deadline_date
+              ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+              : null
+          };
+        });
+        
+        const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => {
+          // Convert deadline_date and deadline_time to local Date object
+          let dueDate;
+          let hasSpecificTime = false;
+          
+          // Handle new format (deadline_date + deadline_time)
+          if (t.deadline_date) {
+            // PostgreSQL DATE columns come back as ISO timestamps
+            let dateString = t.deadline_date;
+            if (typeof dateString !== 'string') {
+              dateString = new Date(dateString).toISOString();
+            }
+            const datePart = dateString.split('T')[0]; // "2025-11-24"
+            
+            if (t.deadline_time !== null && t.deadline_time !== undefined) {
+              // Has specific time - convert from UTC to local
+              const utcDatetime = `${datePart}T${t.deadline_time}Z`;
+              dueDate = new Date(utcDatetime);
+              hasSpecificTime = true;
+            } else {
+              // Date-only task - use 23:59:00 in local timezone
+              dueDate = new Date(`${datePart}T23:59:00`);
+              hasSpecificTime = false;
+            }
+          }
+          // Fallback for old format (single deadline column)
+          else if (t.deadline) {
+            console.warn('Task using old deadline format:', t.id, t.title);
+            dueDate = new Date(t.deadline);
+            hasSpecificTime = true;
+          }
+          // No deadline at all - use today as fallback
+          else {
+            console.error('Task missing deadline:', t.id, t.title);
+            dueDate = new Date();
+            hasSpecificTime = false;
+          }
+          
+          return {
+            id: t.id,
+            title: t.title,
+            segment: t.segment,
+            class: t.class,
+            description: t.description,
+            url: t.url,
+            dueDate: dueDate,
+            hasSpecificTime: hasSpecificTime,
+            estimatedTime: t.estimated_time,
+            userEstimate: t.user_estimated_time,
+            accumulatedTime: t.accumulated_time || 0,
+            priorityOrder: t.priority_order,
+            completed: t.completed,
+            deleted: t.deleted || false,
+            submittedAt: t.submitted_at || null,
+            deadlineDateRaw: t.deadline_date
+              ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+              : null
+          };
+        });
+        
+        // generateSessions and task list only use active (non-deleted) tasks
+        const activeTasks = loadedTasks.filter(t => !t.deleted);
+        setTasks(loadedTasks); // full set for calendar
+        setNewTasks(loadedNewTasks);
+        // Session tasks loaded on demand when user navigates to Sessions page
       }
-
 
 
 
@@ -706,15 +837,13 @@ const PlanAssist = () => {
         headers: { 'Authorization': `Bearer ${authToken}` }
       }).then(r => r.json());
 
-      if (Array.isArray(historyData)) {
-        setCompletionHistory(historyData.map(h => ({
-          taskTitle: h.task_title,
-          type: h.task_type,
-          estimatedTime: h.estimated_time,
-          actualTime: h.actual_time,
-          date: new Date(h.completed_at)
-        })));
-      }
+      if (Array.isArray(historyData)) setCompletionHistory(historyData.map(h => ({
+        taskTitle: h.task_title,
+        type: h.task_type,
+        estimatedTime: h.estimated_time,
+        actualTime: h.actual_time,
+        date: new Date(h.completed_at)
+      })));
 
       // Load accumulated times from tasks (stored in tasks.accumulated_time)
       const partialTimes = {};
@@ -770,15 +899,141 @@ const PlanAssist = () => {
   const loadTasks = async () => {
     try {
       const tasksData = await apiCall('/tasks', 'GET');
-      if (Array.isArray(tasksData)) {
-        setTasks(tasksData.map(hydrateTask));
-      }
+      
+      
+      const loadedTasks = tasksData.filter(t => !t.is_new).map(t => {
+        // Convert deadline_date and deadline_time to local Date object
+        let dueDate;
+        let hasSpecificTime = false;
+        
+        // Handle new format (deadline_date + deadline_time)
+        if (t.deadline_date) {
+          // PostgreSQL DATE columns come back as ISO timestamps like "2025-11-24T00:00:00.000Z"
+          // Extract just the date part
+          let dateString = t.deadline_date;
+          if (typeof dateString !== 'string') {
+            dateString = new Date(dateString).toISOString();
+          }
+          const datePart = dateString.split('T')[0]; // "2025-11-24"
+          
+          if (t.deadline_time !== null && t.deadline_time !== undefined) {
+            // Has specific time - convert from UTC to local
+            const utcDatetime = `${datePart}T${t.deadline_time}Z`;
+            dueDate = new Date(utcDatetime);
+            hasSpecificTime = true;
+          } else {
+            // Date-only task - use 23:59:00 in local timezone
+            const localDatetime = `${datePart}T23:59:00`;
+            dueDate = new Date(localDatetime);
+            hasSpecificTime = false;
+          }
+        }
+        // Fallback for old format (single deadline column)
+        else if (t.deadline) {
+          console.warn('Task using old deadline format:', t.id, t.title);
+          dueDate = new Date(t.deadline);
+          hasSpecificTime = true;
+        }
+        // No deadline at all - use today as fallback
+        else {
+          console.error('Task missing deadline:', t.id, t.title);
+          dueDate = new Date();
+          hasSpecificTime = false;
+        }
+        
+        return {
+          id: t.id,
+          title: t.title,
+          segment: t.segment,
+          class: t.class,
+          description: t.description,
+          url: t.url,
+          dueDate: dueDate,
+          hasSpecificTime: hasSpecificTime,
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
+          priorityOrder: t.priority_order,
+          completed: t.completed,
+          deleted: t.deleted || false,
+          submittedAt: t.submitted_at || null,
+          deadlineDateRaw: t.deadline_date
+            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+            : null
+        };
+      });
+      
+      const loadedNewTasks = tasksData.filter(t => t.is_new).map(t => {
+        // Convert deadline_date and deadline_time to local Date object
+        let dueDate;
+        let hasSpecificTime = false;
+        
+        // Handle new format (deadline_date + deadline_time)
+        if (t.deadline_date) {
+          // PostgreSQL DATE columns come back as ISO timestamps
+          let dateString = t.deadline_date;
+          if (typeof dateString !== 'string') {
+            dateString = new Date(dateString).toISOString();
+          }
+          const datePart = dateString.split('T')[0]; // "2025-11-24"
+          
+          if (t.deadline_time !== null && t.deadline_time !== undefined) {
+            // Has specific time - convert from UTC to local
+            const utcDatetime = `${datePart}T${t.deadline_time}Z`;
+            dueDate = new Date(utcDatetime);
+            hasSpecificTime = true;
+          } else {
+            // Date-only task - use 23:59:00 in local timezone
+            dueDate = new Date(`${datePart}T23:59:00`);
+            hasSpecificTime = false;
+          }
+        }
+        // Fallback for old format (single deadline column)
+        else if (t.deadline) {
+          console.warn('Task using old deadline format:', t.id, t.title);
+          dueDate = new Date(t.deadline);
+          hasSpecificTime = true;
+        }
+        // No deadline at all - use today as fallback
+        else {
+          console.error('Task missing deadline:', t.id, t.title);
+          dueDate = new Date();
+          hasSpecificTime = false;
+        }
+        
+        return {
+          id: t.id,
+          title: t.title,
+          segment: t.segment,
+          class: t.class,
+          description: t.description,
+          url: t.url,
+          dueDate: dueDate,
+          hasSpecificTime: hasSpecificTime,
+          estimatedTime: t.estimated_time,
+          userEstimate: t.user_estimated_time,
+          accumulatedTime: t.accumulated_time || 0,
+          priorityOrder: t.priority_order,
+          completed: t.completed,
+          deleted: t.deleted || false,
+          submittedAt: t.submitted_at || null,
+          deadlineDateRaw: t.deadline_date
+            ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
+            : null
+        };
+      });
+      
+      const activeTasks = loadedTasks.filter(t => !t.deleted);
+      setTasks(loadedTasks); // full set for calendar
+      setNewTasks(loadedNewTasks);
+
+
+
     } catch (error) {
       console.error('Failed to load tasks:', error);
     }
   };
 
-  // Auth handlers
   // Auth handlers
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -1167,7 +1422,7 @@ const PlanAssist = () => {
         t.title.includes(' - Segment ')
       );
       
-      const parsedTaskObjs = parsedTasks.map((t, idx) => ({
+      const newTasks = parsedTasks.map((t, idx) => ({
         id: Date.now() + idx,
         title: t.title,
         description: t.description,
@@ -1178,7 +1433,7 @@ const PlanAssist = () => {
         type: detectTaskType(t.title),
       }));
       
-      const filteredNewTasks = parsedTaskObjs.filter(newTask => {
+      const filteredNewTasks = newTasks.filter(newTask => {
         return !existingSplitTasks.some(splitTask => {
           const baseTitle = splitTask.title
             .split('  - Part ')[0]
@@ -1200,7 +1455,13 @@ const PlanAssist = () => {
       // This ensures deleted tasks are properly filtered out
       await loadTasks();
       
-      alert(`Loaded ${filteredNewTasks.length} tasks from file!`);
+      const newTasksCount = saveResult.stats?.new || 0;
+      
+      if (newTasksCount > 0) {
+        alert(`Loaded ${filteredNewTasks.length} tasks. ${newTasksCount} new tasks are in the sidebar.`);
+      } else {
+        alert(`Loaded ${filteredNewTasks.length} tasks from file!`);
+      }
     } catch (error) {
       alert('Failed to parse calendar file: ' + error.message);
     } finally {
@@ -1266,13 +1527,25 @@ const PlanAssist = () => {
       await loadCourses(); // Refresh course grades after sync
       
       // Check how many new tasks we got
+      const newTasksCount = saveResult.stats.new || 0;
       const cleanedCount = saveResult.stats.cleaned || 0;
+      
+      // Build notification message
       let message = `Sync complete! ${saveResult.stats.updated} tasks updated`;
+      if (newTasksCount > 0) {
+        message += `, ${newTasksCount} new tasks in sidebar`;
+      }
       if (cleanedCount > 0) {
         message += `, ${cleanedCount} past-due tasks removed`;
       }
       message += '.';
-
+      
+      // Don't open sidebar on first sync — server auto-accepts all tasks directly to list
+      const isFirstSync = saveResult.stats.firstSync === true;
+      if (newTasksCount > 0 && !isFirstSync) {
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true);
+      }
       
       alert(message);
     } catch (error) {
@@ -1382,8 +1655,9 @@ const PlanAssist = () => {
           dueDate: local?.dueDate || null,
           estimatedTime: t.estimated_time,
           userEstimate: t.user_estimated_time,
-          accumulatedTime: (t.accumulated_time || 0) * 60,
+          accumulatedTime: (t.accumulated_time || 0) * 60, // DB stores minutes, convert to seconds for timer
           sessionActive: t.session_active || false,
+          priorityOrder: t.priority_order,
           assignmentId: t.assignment_id || null,
           course_id: t.course_id || null,
           manuallyCreated: t.manually_created || false,
@@ -1458,11 +1732,12 @@ const PlanAssist = () => {
         timeSpent: Math.round(sessionElapsed / 60),
         canvasCompleted
       });
+      await normalizePriority(); // compact priority_order gaps + null completed tasks
       setIsTimerRunning(false);
       setSessionTasks(prev => prev.filter(t => t.id !== currentSessionTask.id));
       setTasks(prev => prev.map(t =>
         t.id === currentSessionTask.id
-          ? { ...t, completed: true, deleted: true }
+          ? { ...t, completed: true, deleted: true, priorityOrder: null, priority_order: null }
           : t
       ));
       setShowSessionComplete({ task: currentSessionTask, timeSpent: sessionElapsed }); // seconds
@@ -1531,26 +1806,21 @@ const PlanAssist = () => {
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
-      const segments = splitSegments.map(seg => ({
-        name: seg.name,
-        deadlineDate: seg.deadlineDate || null,
-        deadlineTime: seg.deadlineTime || null,
-      }));
-      const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segments.map(s => s.name) });
+      
+      // Call the backend split endpoint
+      const segmentNames = splitSegments.map(seg => seg.name);
+      const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segmentNames });
+      
       if (result.success) {
-        // Apply individual segment deadlines if provided
-        for (let i = 0; i < result.segments.length; i++) {
-          const seg = segments[i];
-          if (seg.deadlineDate && result.segments[i]) {
-            await apiCall(`/tasks/${result.segments[i].id}/segment-deadline`, 'PATCH', {
-              deadlineDate: seg.deadlineDate,
-              deadlineTime: seg.deadlineTime || null,
-            }).catch(() => {}); // non-fatal
-          }
-        }
+        // Reload tasks from server to get the new segments
         await loadTasks();
+        
+        // Open the new tasks sidebar to let user prioritize segments
+        setNewTasksSidebarOpen(true);
+        setHasUnsavedChanges(true);
+        
         setShowSplitTask(null);
-        setSplitSegments([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]);
+        setSplitSegments([{ name: 'Part 1' }]);
       }
     } catch (error) {
       console.error('Error splitting task:', error);
@@ -1558,7 +1828,194 @@ const PlanAssist = () => {
     }
   };
 
+  // Drag-and-drop functions
+  const handleDragStart = (e, task) => {
+    setDraggedTask(task);
+    e.dataTransfer.effectAllowed = 'move';
+  };
 
+  const handleDragOver = (e, task) => {
+    e.preventDefault();
+    if (draggedTask && draggedTask.id !== task.id) {
+      setDragOverTask(task);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedTask(null);
+    setDragOverTask(null);
+  };
+
+  const handleDrop = async (e, dropTask) => {
+    e.preventDefault();
+    if (!draggedTask || draggedTask.id === dropTask.id) return;
+
+    const reorderedTasks = [...tasks];
+    const draggedIndex = reorderedTasks.findIndex(t => t.id === draggedTask.id);
+    const dropIndex = reorderedTasks.findIndex(t => t.id === dropTask.id);
+
+    if (draggedIndex >= 0) {
+      // Dragging within main list
+      const [removed] = reorderedTasks.splice(draggedIndex, 1);
+      reorderedTasks.splice(dropIndex, 0, removed);
+      setTasks(reorderedTasks);
+    } else {
+      // Dragging from sidebar to main list - insert at drop position
+      const updatedNewTasks = newTasks.filter(t => t.id !== draggedTask.id);
+      reorderedTasks.splice(dropIndex, 0, draggedTask);
+      
+      setTasks(reorderedTasks);
+      setNewTasks(updatedNewTasks);
+      
+      // Clear new flag for this task
+      try {
+        await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [draggedTask.id] });
+      } catch (error) {
+        console.error('Failed to clear new flag:', error);
+      }
+      
+      // Close sidebar if no more new tasks
+      if (updatedNewTasks.length === 0) {
+        setNewTasksSidebarOpen(false);
+      }
+    }
+    
+    // Send new order to backend
+    try {
+      const taskOrder = reorderedTasks.map(t => t.id);
+      await apiCall('/tasks/reorder', 'POST', { taskOrder });
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to save task order:', error);
+      // Don't show alert - reordering still works locally and will sync on next save
+    }
+
+    setDraggedTask(null);
+    setDragOverTask(null);
+  };
+
+  const moveNewTaskToMain = async (taskId) => {
+    const taskToMove = newTasks.find(t => t.id === taskId);
+    if (!taskToMove) return;
+
+    try {
+      // Clear the is_new flag
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds: [taskId] });
+      
+      // Move to main list
+      setNewTasks(newTasks.filter(t => t.id !== taskId));
+      setTasks([...tasks, taskToMove]);
+      setHasUnsavedChanges(true);
+    } catch (error) {
+      console.error('Failed to move task:', error);
+      alert('Failed to move task');
+    }
+  };
+
+  const clearAllNewTasks = async () => {
+    if (newTasks.length === 0) return;
+
+    try {
+      const taskIds = newTasks.map(t => t.id);
+      await apiCall('/tasks/clear-new-flags', 'POST', { taskIds });
+
+      // Smart insertion: merge new tasks into existing list by deadline order.
+      // Algorithm:
+      //   1. Sort new tasks by deadline (ascending, nulls last).
+      //   2. For each new task, find the insertion index in the current active list
+      //      — insert before the first existing task whose deadline is strictly later,
+      //      or append if no such task exists.
+      //   3. After merging, reassign sequential priority_order values.
+
+      const activeTasks = [...tasks]; // current ordered list
+
+      // Sort new tasks by deadline
+      const sortedNew = [...newTasks].sort((a, b) => {
+        if (!a.dueDate && !b.dueDate) return 0;
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return a.dueDate - b.dueDate;
+      });
+
+      // Insert each new task into the active list
+      let merged = [...activeTasks];
+      for (const nt of sortedNew) {
+        const insertIdx = merged.findIndex(existing => {
+          if (!existing.dueDate) return false; // push before tasks with no date? No — append
+          if (!nt.dueDate) return false; // new task has no date — will append
+          return existing.dueDate > nt.dueDate;
+        });
+        if (insertIdx === -1) {
+          merged.push(nt); // append if no later task found
+        } else {
+          merged.splice(insertIdx, 0, nt);
+        }
+      }
+
+      // Reassign priority_order sequentially
+      let activeIdx = 0;
+      const reordered = merged.map(t => {
+        if (t.completed || t.deleted) return { ...t, priorityOrder: null, priority_order: null };
+        activeIdx++;
+        return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
+      });
+
+      // Persist new order to server — endpoint expects { taskOrder: [id, id, ...] }
+      const taskOrder = reordered
+        .filter(t => !t.completed && !t.deleted)
+        .map(t => t.id);
+      await apiCall('/tasks/reorder', 'POST', { taskOrder });
+
+      setTasks(reordered);
+      setNewTasks([]);
+      setNewTasksSidebarOpen(false);
+      setHasUnsavedChanges(false); // already persisted
+    } catch (error) {
+      console.error('Failed to clear new tasks:', error);
+      alert('Failed to add tasks to list');
+    }
+  };
+
+  const closeSidebarWithoutSaving = async () => {
+    if (newTasks.length > 0) {
+      const confirmClose = window.confirm(
+        `You have ${newTasks.length} new task(s) that haven't been prioritized. Close sidebar to automatically add them to the bottom of your list?`
+      );
+      if (!confirmClose) return;
+      
+      // Auto-add all new tasks to the bottom of the list
+      const updatedTasks = [...tasks, ...newTasks];
+      setTasks(updatedTasks);
+      
+      // Clear new flags for these tasks
+      try {
+        await apiCall('/tasks/clear-new-flags', 'POST', { 
+          taskIds: newTasks.map(t => t.id) 
+        });
+      } catch (error) {
+        console.error('Failed to clear new flags:', error);
+      }
+      
+      setHasUnsavedChanges(true);
+    }
+    setNewTasksSidebarOpen(false);
+    setNewTasks([]);
+  };
+
+  const handleIgnoreTask = async (taskId) => {
+    try {
+      // Call the ignore endpoint to mark task as deleted
+      await apiCall(`/tasks/${taskId}/ignore`, 'POST');
+      
+      // Remove from newTasks array in UI
+      setNewTasks(prevTasks => prevTasks.filter(t => t.id !== taskId));
+      
+      console.log(`✓ Task ${taskId} ignored successfully`);
+    } catch (error) {
+      console.error('Failed to ignore task:', error);
+      alert('Failed to ignore task: ' + error.message);
+    }
+  };
 
   // ── Agenda functions ────────────────────────────────────────────────────────
 
@@ -1762,6 +2219,7 @@ const PlanAssist = () => {
         timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60),
         canvasCompleted
       });
+      await normalizePriority();
       setTasks(prev => prev.map(t => t.id === currentRow.taskId ? { ...t, completed: true, deleted: true } : t));
       setAgendaTotalElapsed(prev => prev + snappedElapsed);
       // Now advance — same as Save & Proceed but task is already saved
@@ -2089,9 +2547,25 @@ const PlanAssist = () => {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
+  const adminUniversalScan = async () => {
+    if (!confirm('This will perform a Tasks Scan on ALL users — clearing all is_new flags and reassigning priority order for everyone. Continue?')) return;
+    try {
+      await apiCall('/admin/tasks-scan-all', 'POST');
+      alert('Universal Tasks Scan complete. All users processed.');
+    } catch (err) { alert('Universal Tasks Scan failed: ' + err.message); }
+  };
 
-
-
+  const adminTasksScan = async (userId) => {
+    if (!confirm('This will clear ALL is_new flags for this user and reassign priority order. Continue?')) return;
+    try {
+      const result = await apiCall(`/admin/users/${userId}/tasks-scan`, 'POST');
+      // Refresh the user detail with updated tasks
+      setAdminUserDetail(prev => prev ? { ...prev, tasks: result.tasks, newTasks: [] } : prev);
+      // Also clear new_tasks count in user list
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, new_tasks: 0 } : u));
+      alert('Tasks Scan complete. All is_new flags cleared and priority order reassigned.');
+    } catch (err) { alert('Tasks Scan failed: ' + err.message); }
+  };
 
   const adminCreateAnnouncement = async () => {
     if (!newAnnouncementMsg.trim()) return;
@@ -2111,25 +2585,42 @@ const PlanAssist = () => {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
-  // ── Priority normalize (no-op — tasks are now always deadline-sorted) ────────
+  // ── Priority normalize (remove gaps) ─────────────────────────────────────────
   const normalizePriority = async () => {
-    // No-op: priority_order removed. Tasks always sort by deadline.
+    try {
+      await apiCall('/tasks/normalize', 'POST');
+    } catch (err) {
+      console.error('Failed to normalize priority:', err);
+    }
   };
 
   // ── Toggle task completion (manual checkbox) ──────────────────────────────────
   const toggleTaskCompletion = async (taskId) => {
     setCheckingTask(taskId);
     try {
-      await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
-      setTasks(prev => prev.map(t => t.id === taskId
-        ? { ...t, deleted: true, completed: true }
-        : t
-      ));
+      await apiCall(`/tasks/${taskId}/complete`, 'PATCH'); // marks deleted=true
+      // Mark task as deleted in state (keep it for Calendar display) and
+      // immediately reassign sequential priorityOrder for remaining active tasks
+      setTasks(prev => {
+        const updated = prev.map(t => t.id === taskId
+          ? { ...t, deleted: true, priorityOrder: null, priority_order: null }
+          : t
+        );
+        // Renumber only active tasks
+        let activeIdx = 0;
+        return updated.map(t => {
+          if (t.completed || t.deleted) return t;
+          activeIdx++;
+          return { ...t, priorityOrder: activeIdx, priority_order: activeIdx };
+        });
+      });
       setSessionTasks(prev => prev.filter(t => t.id !== taskId));
+      // Remove from any agendas in state
       setAgendas(prev => prev.map(a => ({
         ...a,
         tasks: (a.tasks || []).filter(t => t.id !== taskId)
       })));
+      await normalizePriority();
     } catch (err) {
       console.error('Failed to check off task:', err);
       alert('Failed to mark task complete: ' + err.message);
@@ -2177,6 +2668,51 @@ const PlanAssist = () => {
   };
 
 
+  const handleSaveAndAdjustPlan = async () => {
+    if (isSavingPlan) return;
+    setIsSavingPlan(true);
+    try {
+      // Only send the fields the save-plan endpoint needs — no date conversion required
+      const tasksForBackend = tasks.map(task => ({
+        id: task.id,
+        priorityOrder: task.completed ? null : (task.priorityOrder ?? null),
+        segment: task.segment ?? null,
+        userEstimate: task.userEstimate ?? null,
+        accumulatedTime: task.accumulatedTime ?? 0,
+        completed: task.completed ?? false,
+      }));
+
+      await apiCall('/tasks/save-plan', 'POST', { tasks: tasksForBackend });
+
+      // Reload tasks from server to confirm saved state
+      await loadTasks();
+
+      setHasUnsavedChanges(false);
+      setNewTasksSidebarOpen(false);
+      setCurrentPage('hub');
+    } catch (error) {
+      console.error('Failed to save tasks:', error);
+      alert('Failed to save changes: ' + error.message);
+    } finally {
+      setIsSavingPlan(false);
+    }
+  };
+
+  // Sort all tasks by deadline — resets priority_order server-side then reloads
+  const handleSortByDeadline = async () => {
+    if (isSortingByDeadline) return;
+    setIsSortingByDeadline(true);
+    try {
+      await apiCall('/tasks/sort-by-deadline', 'POST');
+      await loadTasks();
+      setHasUnsavedChanges(false);
+    } catch (err) {
+      console.error('Sort by deadline failed:', err);
+      alert('Failed to sort by deadline: ' + err.message);
+    } finally {
+      setIsSortingByDeadline(false);
+    }
+  };
 
 
   // ── Session priorities functions ──────────────────────────────────────────
@@ -2184,7 +2720,7 @@ const PlanAssist = () => {
     setSessionPrioritiesLoading(true);
     try {
       const data = await apiCall('/session-priorities/today', 'GET');
-      setSessionPriorities(data.taskIds); // null if not set today
+      setSessionPriorities(data.taskIds);
     } catch (err) {
       console.error('Failed to load session priorities:', err);
     } finally {
@@ -2727,6 +3263,39 @@ const PlanAssist = () => {
     setFreeTimerMins('');
   };
 
+  // Item 3: Warn + auto-add tasks before page unload when sidebar is open
+  useEffect(() => {
+    if (!newTasksSidebarOpen || newTasks.length === 0) return;
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = `You have ${newTasks.length} unsorted task(s). If you leave, they will be added to your list automatically by deadline order.`;
+      return e.returnValue;
+    };
+    // On actual unload (after confirm), trigger the smart add via beacon so it fires even as the page closes
+    const handleUnload = () => {
+      // Best-effort: fire clear-new-flags synchronously via sendBeacon
+      const taskIds = newTasks.map(t => t.id);
+      if (taskIds.length > 0 && navigator.sendBeacon) {
+        const token = localStorage.getItem('token');
+        const blob = new Blob([JSON.stringify({ taskIds })], { type: 'application/json' });
+        // sendBeacon can't set Authorization header, so we use the /tasks/reorder endpoint
+        // instead just fire clear-new-flags to at least clear is_new; reorder happens on next load
+        fetch(`${API_URL}/tasks/clear-new-flags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ taskIds }),
+          keepalive: true
+        }).catch(() => {});
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('unload', handleUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('unload', handleUnload);
+    };
+  }, [newTasksSidebarOpen, newTasks]);
+
   // Inactivity auto-pause: if tab is hidden for 180+ minutes, pause any running timer
   useEffect(() => {
     let hiddenAt = null;
@@ -2804,20 +3373,27 @@ const PlanAssist = () => {
   // Feature 6: Auto-sync every 30 minutes while app is visible
   useEffect(() => {
     if (!isAuthenticated) return;
-    const AUTO_SYNC_INTERVAL = 30 * 60 * 1000;
+    const AUTO_SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutes
     const runAutoSync = async () => {
-      if (document.hidden) return;
-      if (isLoadingTasks || ['session-active','agenda-active'].includes(currentPage)) return;
+      if (document.hidden) return; // only sync when tab is visible
+      if (isLoadingTasks || newTasksSidebarOpen || ['session-active','agenda-active'].includes(currentPage)) return;
       try {
         const check = await apiCall('/canvas/auto-sync', 'POST', {});
         if (!check?.shouldSync) return;
+        // Backend now performs the 7-day sync itself and returns counts
         setIsLoadingTasks(true);
         try {
           const newCount = check.newCount || 0;
           await loadTasks();
           await loadCourses();
           await loadGradeImpact();
-          setAutoSyncToast(newCount > 0 ? `Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added` : 'Auto-sync complete');
+          if (newCount > 0) {
+            try { await apiCall('/tasks/smart-scan', 'POST', {}); } catch (e) { console.error('Smart scan failed:', e); }
+            await loadTasks();
+            setAutoSyncToast(`Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
+          } else {
+            setAutoSyncToast('Auto-sync complete');
+          }
           setLastAutoSync(new Date());
           setTimeout(() => setAutoSyncToast(null), 4000);
         } finally {
@@ -2829,7 +3405,7 @@ const PlanAssist = () => {
     };
     const interval = setInterval(runAutoSync, AUTO_SYNC_INTERVAL);
     return () => clearInterval(interval);
-  }, [isAuthenticated, isLoadingTasks, currentPage]);
+  }, [isAuthenticated, isLoadingTasks, newTasksSidebarOpen, currentPage]);
 
   // Handle Escape key to close notes popup
   useEffect(() => {
@@ -3178,13 +3754,13 @@ const PlanAssist = () => {
     {
       page: 'tasks',
       title: '📋 Your Task List',
-      body: 'This is where all your Canvas assignments live. Tasks are automatically sorted by deadline. Set manual time estimates, split big tasks into segments, or start a session directly. Hit Sync to pull in fresh assignments from Canvas.',
+      body: 'This is where all your Canvas assignments live. Drag tasks to reorder your priorities, set manual time estimates, or split big tasks into smaller chunks. Hit Sync to pull in fresh assignments from Canvas.',
       arrow: null,
     },
     {
       page: 'sessions',
       title: '⏱ Study Sessions',
-      body: "Sessions is your productivity launchpad. Set today's focus list, start timed work blocks on individual tasks, and track your progress. The timer runs while you work.",
+      body: 'PlanAssist builds study sessions from your schedule. Each session fills your free periods with tasks in priority order. Hit Start when you\'re ready to work — the timer tracks your time on each task.',
       arrow: null,
     },
     {
@@ -3196,7 +3772,7 @@ const PlanAssist = () => {
     {
       page: 'hub',
       title: '🚀 You\'re all set!',
-      body: "Start by syncing your Canvas tasks, then use Sessions to set today's focus and start working. Good luck!",
+      body: 'Start by syncing your Canvas tasks, then drag them into priority order and hit Save & Adjust Plan. Your sessions will be ready to go. Good luck!',
       arrow: null,
     },
   ];
@@ -3273,41 +3849,43 @@ const PlanAssist = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : ['session-active','agenda-active'].includes(currentPage) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Calendar className="w-5 h-5" />
               <span className="font-medium">Calendar</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
+              {hasUnsavedChanges && !['session-active','agenda-active'].includes(currentPage) && <span className="w-2 h-2 bg-orange-500 rounded-full"></span>}
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
               <span className="font-medium">Sessions</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <LayoutList className="w-5 h-5" />
               <span className="font-medium">Agendas</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <ClipboardList className="w-5 h-5" />
               <span className="font-medium">Itinerary</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isLoadingTasks && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isSavingPlan && !isLoadingTasks && !newTasksSidebarOpen && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <UserCircle className="w-5 h-5" />
             </button>
             {user?.isAdmin && (
               <button
                 onClick={() => { setAdminSection('users'); setCurrentPage('admin'); loadAdminUsers(); }}
-                                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${currentPage === 'admin' ? 'bg-red-100 text-red-700' : 'text-red-600 hover:bg-red-50'}`}
+                disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${currentPage === 'admin' ? 'bg-red-100 text-red-700' : 'text-red-600 hover:bg-red-50'}`}
               >
                 <Shield className="w-5 h-5" />
               </button>
@@ -3318,7 +3896,7 @@ const PlanAssist = () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isSavingPlan || isLoadingTasks || newTasksSidebarOpen} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage) || isSavingPlan || newTasksSidebarOpen) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -3445,9 +4023,9 @@ const PlanAssist = () => {
       ))}
 
       {/* Save & Adjust Plan - Full Lock Overlay */}
-      {(isLoadingTasks) && (
+      {(isSavingPlan || isLoadingTasks) && (
         <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed flex items-center justify-center">
-          {isLoadingTasks && (
+          {isLoadingTasks && !isSavingPlan && (
             <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-3 pointer-events-none">
               <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
               <p className="text-gray-800 font-semibold text-base">Syncing with Canvas...</p>
@@ -3491,7 +4069,7 @@ const PlanAssist = () => {
           </div>
         </div>
       )}
-      <div className="py-6">
+      <div className={currentPage === 'sessions' ? '' : 'py-6'}>
         {currentPage === 'hub' && (
           <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
@@ -3659,7 +4237,7 @@ const PlanAssist = () => {
                   // No goals — show original Next Up
                   const activeTasks = tasks.filter(t => !t.deleted && !t.completed && !t.ignored);
                   if (activeTasks.length === 0) return null;
-                  const nextTask = activeTasks.sort((a, b) => { if (!a.dueDate && !b.dueDate) return 0; if (!a.dueDate) return 1; if (!b.dueDate) return -1; return a.dueDate - b.dueDate; })[0];
+                  const nextTask = activeTasks.sort((a, b) => (a.priorityOrder || 999) - (b.priorityOrder || 999))[0];
                   const color = getClassColor(nextTask.class);
                   return (
                     <div className="bg-white rounded-xl shadow-md p-6">
@@ -3872,7 +4450,7 @@ const PlanAssist = () => {
         {currentPage === 'tasks' && (
           <div className="flex h-[calc(100vh-80px)] overflow-hidden">
             {/* Main Task List */}
-            <div className="flex-1">
+            <div className={`flex-1 transition-all duration-300 ${newTasksSidebarOpen ? 'mr-96' : 'mr-0'}`}>
               <div className="h-full overflow-y-auto p-6">
                 <div className="max-w-4xl mx-auto">
                   <div className="bg-white rounded-xl shadow-md p-6">
@@ -3891,6 +4469,18 @@ const PlanAssist = () => {
                           <span className="hidden sm:inline">Add Task</span>
                         </button>
                         <button
+                          onClick={handleSortByDeadline}
+                          disabled={isSortingByDeadline || isLoadingTasks}
+                          title="Sort all tasks by deadline"
+                          className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
+                        >
+                          {isSortingByDeadline ? (
+                            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /><span className="hidden sm:inline">Sorting…</span></>
+                          ) : (
+                            <><LayoutList className="w-4 h-4" /><span className="hidden sm:inline">Sort by Deadline</span></>
+                          )}
+                        </button>
+                        <button
                           onClick={fetchCanvasTasks}
                           disabled={isLoadingTasks}
                           className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
@@ -3903,6 +4493,32 @@ const PlanAssist = () => {
                         </button>
                       </div>
                     </div>
+
+                    {/* Unsaved Changes Warning */}
+                    {hasUnsavedChanges && (
+                      <div className="mb-4 p-3 bg-orange-50 border-2 border-orange-300 rounded-lg flex items-center justify-between">
+                        <p className="text-orange-800 font-medium">
+                          WARNING: You have unsaved changes. Click Save and Adjust Plan to apply.
+                        </p>
+                        <button 
+                          onClick={handleSaveAndAdjustPlan} 
+                          disabled={isSavingPlan}
+                          className={`px-6 py-2 rounded-lg font-semibold flex items-center gap-2 shadow-md transition-all ${isSavingPlan ? 'bg-orange-400 text-white cursor-not-allowed opacity-70' : 'bg-orange-600 text-white hover:bg-orange-700'}`}
+                        >
+                          {isSavingPlan ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Saving...
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-5 h-5" />
+                              Save and Adjust Plan
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
 
                     {/* Task List */}
                     <div className="space-y-4">
@@ -3929,13 +4545,27 @@ const PlanAssist = () => {
                             return (
                               <div 
                                 key={task.id}
-                                className="border-2 rounded-lg p-4 transition-all bg-white hover:shadow-lg"
+                                draggable={true}
+                                onDragStart={(e) => handleDragStart(e, task)}
+                                onDragOver={(e) => handleDragOver(e, task)}
+                                onDragEnd={handleDragEnd}
+                                onDrop={(e) => handleDrop(e, task)}
+                                className={`border-2 rounded-lg p-4 transition-all cursor-move bg-white hover:shadow-lg ${
+                                  dragOverTask?.id === task.id ? 'opacity-50 scale-98 ring-2 ring-purple-400' : ''
+                                }`}
                                 style={{ 
                                   borderColor: classColor,
                                   borderLeftWidth: '6px'
                                 }}
                               >
-                                <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-4">
+                                  <div className="flex flex-col items-center gap-1 flex-shrink-0">
+                                    <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-full flex items-center justify-center font-bold text-sm shadow-md">
+                                      {index + 1}
+                                    </div>
+                                    <GripVertical className="w-4 h-4 text-gray-400" />
+                                  </div>
+                                  
                                   {/* Checkbox with loading state */}
                                   {checkingTask === task.id ? (
                                     <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center">
@@ -3992,20 +4622,46 @@ const PlanAssist = () => {
                                                 className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                                                 autoFocus
                                                 onKeyDown={(e) => {
-                                                  if (e.key === 'Enter') { handleSaveTimeEstimate(task.id); }
-                                                  else if (e.key === 'Escape') { handleCancelEditTime(); }
+                                                  if (e.key === 'Enter') {
+                                                    handleSaveTimeEstimate(task.id);
+                                                  } else if (e.key === 'Escape') {
+                                                    handleCancelEditTime();
+                                                  }
                                                 }}
                                               />
                                               <span>min</span>
-                                              <button onClick={() => handleSaveTimeEstimate(task.id)} className="text-green-600 hover:text-green-700"><Check className="w-4 h-4" /></button>
-                                              <button onClick={handleCancelEditTime} className="text-red-600 hover:text-red-700"><X className="w-4 h-4" /></button>
+                                              <button
+                                                onClick={() => handleSaveTimeEstimate(task.id)}
+                                                className="text-green-600 hover:text-green-700"
+                                              >
+                                                <Check className="w-4 h-4" />
+                                              </button>
+                                              <button
+                                                onClick={handleCancelEditTime}
+                                                className="text-red-600 hover:text-red-700"
+                                              >
+                                                <X className="w-4 h-4" />
+                                              </button>
                                             </div>
                                           ) : (
                                             <div className="flex items-center gap-2">
                                               <span>{taskTime} min</span>
-                                              <button onClick={() => handleStartEditTime(task.id, taskTime)} className="text-purple-600 hover:text-purple-700" title="Edit time estimate"><Edit2 className="w-4 h-4" /></button>
+                                              <button
+                                                onClick={() => handleStartEditTime(task.id, taskTime)}
+                                                className="text-purple-600 hover:text-purple-700"
+                                                title="Edit time estimate"
+                                              >
+                                                <Edit2 className="w-4 h-4" />
+                                              </button>
+                                              {/* Grade Impact Badge */}
                                               {gradeImpact[task.id] && (
-                                                <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${gradeImpact[task.id] === 'High' ? 'bg-red-100 text-red-700' : gradeImpact[task.id] === 'Moderate' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                                                <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                                  gradeImpact[task.id] === 'High'
+                                                    ? 'bg-red-100 text-red-700'
+                                                    : gradeImpact[task.id] === 'Moderate'
+                                                    ? 'bg-amber-100 text-amber-700'
+                                                    : 'bg-gray-100 text-gray-500'
+                                                }`}>
                                                   <TrendingUp className="w-3 h-3" />
                                                   {gradeImpact[task.id]}
                                                 </span>
@@ -4017,30 +4673,7 @@ const PlanAssist = () => {
                                     </div>
                                   </div>
                                   
-                                  <div className="flex gap-2 flex-shrink-0 items-center">
-                                    {/* Start Session — prominent, distinct from management buttons */}
-                                    {!className.toLowerCase().includes('homeroom') && (
-                                      <button
-                                        onClick={() => {
-                                          // Hydrate a session-compatible task object and start
-                                          const sessionTask = {
-                                            id: task.id, title: task.title, segment: task.segment,
-                                            class: task.class, url: task.url,
-                                            dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
-                                            estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
-                                            accumulatedTime: (task.accumulatedTime || 0) * 60,
-                                            sessionActive: false, assignmentId: task.assignmentId,
-                                            course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
-                                          };
-                                          startTaskSession(sessionTask);
-                                        }}
-                                        className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-all bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700 shadow-sm hover:shadow-md"
-                                        title="Start a timed session on this task"
-                                      >
-                                        <Play className="w-3.5 h-3.5" />
-                                        <span className="hidden sm:inline">Start</span>
-                                      </button>
-                                    )}
+                                  <div className="flex gap-2 flex-shrink-0">
                                     <button 
                                       onClick={() => setShowTaskDescription(task)}
                                       className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
@@ -4074,13 +4707,116 @@ const PlanAssist = () => {
                           });
                       })()}
                     </div>
-
                   </div>
                 </div>
               </div>
             </div>
 
+            {/* New Tasks Sidebar */}
+            {newTasksSidebarOpen && (
+              <div className="fixed right-0 top-[80px] w-96 h-[calc(100vh-80px)] bg-gradient-to-br from-yellow-50 to-orange-50 border-l-4 border-yellow-400 shadow-2xl overflow-y-auto z-50">
+                <div className="p-6">
+                  {/* Sidebar Header */}
+                  <div className="flex items-center justify-between mb-4 sticky top-0 bg-gradient-to-br from-yellow-50 to-orange-50 pb-4 border-b-2 border-yellow-300">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="w-6 h-6 text-yellow-700" />
+                      <h3 className="text-xl font-bold text-yellow-900">New Tasks</h3>
+                      <span className="bg-yellow-600 text-white px-2 py-1 rounded-full text-sm font-bold">{newTasks.length}</span>
+                    </div>
+                    <button 
+                      onClick={closeSidebarWithoutSaving}
+                      className="text-gray-600 hover:text-gray-800"
+                    >
+                      <X className="w-6 h-6" />
+                    </button>
+                  </div>
 
+                  {/* Instructions */}
+                  <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg text-sm">
+                    <p className="text-yellow-900 font-medium mb-1">📌 Drag tasks to your list</p>
+                    <p className="text-yellow-800">Drag each task to its priority position in your main list, or click "Add All" to smart-insert them by deadline.</p>
+                  </div>
+
+                  {/* Add All Button */}
+                  <button 
+                    onClick={clearAllNewTasks}
+                    className="w-full mb-4 bg-yellow-600 text-white px-4 py-3 rounded-lg hover:bg-yellow-700 font-semibold shadow-md flex items-center justify-center gap-2"
+                  >
+                    <Check className="w-5 h-5" />
+                    Add All to List
+                  </button>
+
+                  {/* New Tasks */}
+                  <div className="space-y-3">
+                    {newTasks.map((task) => {
+                      const className = extractClassName(task);
+                      const classColor = getClassColor(task);
+                      const dueDate = new Date(task.dueDate);
+                      const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                      
+                      return (
+                        <div 
+                          key={task.id}
+                          draggable={true}
+                          onDragStart={(e) => handleDragStart(e, task)}
+                          onDragEnd={handleDragEnd}
+                          className="bg-white border-2 border-yellow-300 rounded-lg p-3 hover:shadow-md transition-all"
+                        >
+                          <div className="flex items-start gap-2 mb-2">
+                            <GripVertical className="w-5 h-5 text-gray-400 flex-shrink-0 mt-0.5 cursor-move" />
+                            <div className="flex-1 min-w-0">
+                              <a 
+                                href={task.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="font-semibold text-gray-900 text-sm mb-1 break-words hover:text-purple-600 hover:underline transition-colors block"
+                              >
+                                {cleanTaskTitle(task)}
+                              </a>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span 
+                                  className="px-2 py-0.5 rounded-full text-xs font-bold text-white"
+                                  style={{ backgroundColor: classColor }}
+                                >
+                                  {className}
+                                </span>
+                                <span className="text-xs text-gray-600 flex items-center gap-1">
+                                  <Calendar className="w-3 h-3" />
+                                  {task.hasSpecificTime ? (
+                                    <>
+                                      {dayName} at <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
+                                    </>
+                                  ) : (
+                                    <span title="Due date (no specific time)">{dayName}</span>
+                                  )}
+                                </span>
+                                <span className="text-xs text-gray-600 flex items-center gap-1">
+                                  <Brain className="w-3 h-3" />
+                                  {task.userEstimate || task.estimatedTime} min
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between pl-7 gap-2">
+                            <span className="text-xs text-gray-500 italic">
+                              Drag to priority list →
+                            </span>
+                            <button
+                              onClick={() => handleIgnoreTask(task.id)}
+                              className="px-2 py-1 text-xs bg-red-100 text-red-700 rounded hover:bg-red-200 font-medium flex items-center gap-1"
+                              title="Ignore this task - it will be removed and won't be re-imported"
+                            >
+                              <X className="w-3 h-3" />
+                              Ignore
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
             {showCompleteConfirm && (
               <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
                 <div className="bg-white rounded-xl p-6 max-w-md mx-4">
@@ -4106,65 +4842,42 @@ const PlanAssist = () => {
               </div>
             )}
             {showSplitTask && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl p-6 max-w-lg mx-4 w-full max-h-[85vh] overflow-y-auto">
-                  <h3 className="text-xl font-bold text-gray-900 mb-1">Split Task into Segments</h3>
-                  <p className="text-gray-500 text-sm mb-4">Each segment gets its own name and optional individual deadline. Time is divided equally.</p>
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white rounded-xl p-6 max-w-md mx-4 w-full">
+                  <h3 className="text-xl font-bold text-gray-900 mb-4">Split Task into Segments</h3>
+                  <p className="text-gray-600 mb-4">
+                    Split this task into multiple parts. Time will be divided equally.
+                  </p>
                   <div className="space-y-3 mb-4">
                     {splitSegments.map((seg, idx) => (
-                      <div key={idx} className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                        <div className="flex gap-2 mb-2">
-                          <input
-                            type="text"
-                            value={seg.name}
-                            onChange={(e) => {
-                              const newSegs = [...splitSegments];
-                              newSegs[idx] = { ...newSegs[idx], name: e.target.value };
-                              setSplitSegments(newSegs);
-                            }}
-                            placeholder={`Segment ${idx + 1} name`}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                          />
-                          {splitSegments.length > 1 && (
-                            <button onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))} className="text-red-500 hover:text-red-700 flex-shrink-0">
-                              <X className="w-4 h-4" />
-                            </button>
-                          )}
-                        </div>
-                        <div className="flex gap-2 items-center">
-                          <span className="text-xs text-gray-500 flex-shrink-0">Deadline:</span>
-                          <input
-                            type="date"
-                            value={seg.deadlineDate || ''}
-                            onChange={(e) => {
-                              const newSegs = [...splitSegments];
-                              newSegs[idx] = { ...newSegs[idx], deadlineDate: e.target.value };
-                              setSplitSegments(newSegs);
-                            }}
-                            className="flex-1 px-2 py-1 border border-gray-300 rounded text-xs"
-                          />
-                          <input
-                            type="time"
-                            value={seg.deadlineTime || ''}
-                            onChange={(e) => {
-                              const newSegs = [...splitSegments];
-                              newSegs[idx] = { ...newSegs[idx], deadlineTime: e.target.value };
-                              setSplitSegments(newSegs);
-                            }}
-                            className="w-28 px-2 py-1 border border-gray-300 rounded text-xs"
-                          />
-                        </div>
+                      <div key={idx} className="flex gap-2">
+                        <input 
+                          type="text" 
+                          value={seg.name} 
+                          onChange={(e) => {
+                            const newSegs = [...splitSegments];
+                            newSegs[idx].name = e.target.value;
+                            setSplitSegments(newSegs);
+                          }} 
+                          placeholder={`Segment ${idx + 1} name`} 
+                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg" 
+                        />
+                        {splitSegments.length > 1 && (
+                          <button onClick={() => setSplitSegments(splitSegments.filter((_, i) => i !== idx))} className="text-red-600 hover:text-red-800">
+                            <X className="w-5 h-5" />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
-                  <button
-                    onClick={() => setSplitSegments([...splitSegments, { name: `Part ${splitSegments.length + 1}`, deadlineDate: '', deadlineTime: '' }])}
-                    className="w-full mb-4 bg-blue-50 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-100 font-medium text-sm border border-blue-200"
-                  >
+                  <button onClick={() => setSplitSegments([...splitSegments, { name: `Part ${splitSegments.length + 1}` }])} className="w-full mb-4 bg-blue-100 text-blue-700 px-4 py-2 rounded-lg hover:bg-blue-200 font-medium">
                     + Add Segment
                   </button>
                   <div className="flex gap-3">
-                    <button onClick={() => { setShowSplitTask(null); setSplitSegments([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]); }} className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium">
+                    <button onClick={() => {
+                      setShowSplitTask(null);
+                      setSplitSegments([{ name: 'Part 1' }]);
+                    }} className="flex-1 bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 font-medium">
                       Cancel
                     </button>
                     <button onClick={() => handleSplitTask(showSplitTask)} className="flex-1 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium">
@@ -4354,7 +5067,6 @@ const PlanAssist = () => {
                 </div>
               ) : (
                 <>
-                  {/* TODAY'S FOCUS */}
                   <div className="mt-6">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-2">
@@ -4365,10 +5077,7 @@ const PlanAssist = () => {
                         {focusTasks && focusTasks.length > 0 && (
                           <button onClick={clearSessionPriorities} className="text-xs text-purple-400 hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-white/10">Reset</button>
                         )}
-                        <button onClick={() => {
-                          setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []);
-                          setSessionPrioritiesPickerOpen(true);
-                        }}
+                        <button onClick={() => { setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []); setSessionPrioritiesPickerOpen(true); }}
                           className="text-xs bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg font-semibold transition-colors flex items-center gap-1">
                           <Edit2 className="w-3 h-3" />
                           {focusTasks ? 'Edit' : 'Set priorities'}
@@ -4409,10 +5118,7 @@ const PlanAssist = () => {
                     ) : focusTasks && focusTasks.length === 0 ? (
                       <div className="bg-white/5 border border-white/10 rounded-xl p-6 text-center">
                         <p className="text-purple-300 text-sm">No tasks in today's focus list.</p>
-                        <button onClick={() => {
-                          setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []);
-                          setSessionPrioritiesPickerOpen(true);
-                        }} className="mt-3 text-purple-400 hover:text-white text-sm underline underline-offset-2">Set your priorities →</button>
+                        <button onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }} className="mt-3 text-purple-400 hover:text-white text-sm underline underline-offset-2">Set your priorities →</button>
                       </div>
                     ) : (
                       <div className="bg-white/5 border border-dashed border-purple-500/50 rounded-xl p-5">
@@ -4435,10 +5141,7 @@ const PlanAssist = () => {
                           })}
                           {eligibleTasks.length > 5 && <p className="text-purple-500 text-xs pl-4">+{eligibleTasks.length - 5} more tasks</p>}
                         </div>
-                        <button onClick={() => {
-                          setSessionPickerSel(todayFocusIds ? [...todayFocusIds] : []);
-                          setSessionPrioritiesPickerOpen(true);
-                        }}
+                        <button onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
                           className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2">
                           <Target className="w-4 h-4" />
                           Set My Priorities for Today
@@ -4447,7 +5150,6 @@ const PlanAssist = () => {
                     )}
                   </div>
 
-                  {/* ALL TASKS */}
                   <div className="mt-8">
                     <div className="flex items-center gap-2 mb-3">
                       <ClipboardList className="w-5 h-5 text-purple-400" />
@@ -4551,6 +5253,89 @@ const PlanAssist = () => {
           </div>
           );
         })()}
+        {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete) && (
+          showSessionComplete ? (
+            <div className="max-w-lg mx-auto p-6">
+              <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
+                <Check className="w-16 h-16 mx-auto mb-4" />
+                <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
+                <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
+              </div>
+              <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
+                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
+                <div className="text-gray-500">Total time spent</div>
+              </div>
+              <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
+                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                Back to Sessions
+              </button>
+            </div>
+          ) : (
+            <div className="max-w-lg mx-auto p-6">
+              <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white rounded-xl p-8 mb-5">
+                <div className="text-center mb-6">
+                  <div className="flex items-center justify-center gap-2 mb-3">
+                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(currentSessionTask.class) }} />
+                    <span className="text-purple-200 text-sm font-medium">
+                      {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g, '') : 'No Class'}
+                    </span>
+                  </div>
+                  <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer"
+                    className="block text-xl font-bold mb-6 hover:underline">{cleanTaskTitle(currentSessionTask)}</a>
+                  <div className="text-7xl font-bold mb-1 tabular-nums">{formatTime(sessionElapsed)}</div>
+                  <p className="text-purple-200 text-sm">Time on this task</p>
+                </div>
+                <div className="flex gap-3 justify-center">
+                  <button
+                    onClick={() => {
+                      if (isTimerRunning) {
+                        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+                        const snapped = timerBaseElapsedRef.current + wallElapsed;
+                        setSessionElapsed(snapped);
+                        timerBaseElapsedRef.current = snapped;
+                      }
+                      setIsTimerRunning(prev => !prev);
+                    }}
+                    className="bg-white bg-opacity-20 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-opacity-30 flex items-center gap-2"
+                  >
+                    {isTimerRunning ? <><Pause className="w-4 h-4" /> Pause Timer</> : <><Play className="w-4 h-4" /> Resume Timer</>}
+                  </button>
+                  <button onClick={pauseTaskSession} disabled={savingSession}
+                    className="bg-purple-800 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
+                    {savingSession
+                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                      : <><X className="w-4 h-4" /> Save & Exit</>}
+                  </button>
+                </div>
+              </div>
+              <div className="bg-white rounded-xl shadow-md p-6">
+                <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
+                  <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
+                  {currentSessionTask.deadlineDateRaw && (
+                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
+                      Due {(currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  )}
+                  {currentSessionTask.accumulatedTime > 0 && (
+                    <span className="flex items-center gap-1 text-blue-600 font-medium">
+                      <Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
+                    </span>
+                  )}
+                </div>
+                <button onClick={completeTaskSession} disabled={markingComplete}
+                  className="w-full bg-green-500 text-white py-3.5 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 mb-3">
+                  {markingComplete
+                    ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
+                    : <><Check className="w-5 h-5" /> Mark Complete</>}
+                </button>
+                <button onClick={() => openWorkspace(currentSessionTask, 'session')}
+                  className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
+                  <BookOpen className="w-4 h-4" /> Open Workspace
+                </button>
+              </div>
+            </div>
+          )
+        )}
 
                 {currentPage === 'agendas' && (() => {
                   return (
@@ -4899,8 +5684,6 @@ const PlanAssist = () => {
                   );
                 })()}
 
-                })()}
-
         {currentPage === 'agenda-active' && currentAgenda && (() => {
           const rows = currentAgenda.rows || [];
           const currentRow = rows[agendaCurrentRow];
@@ -5147,7 +5930,7 @@ const PlanAssist = () => {
           // and task list always agree on which day a task belongs to.
           const getTasksForDay = (dayDate) => {
             const dayStr = toDayStr(dayDate);
-            return [...tasks].filter(t => {
+            return [...tasks, ...newTasks.filter(t => !t.deleted)].filter(t => {
               if (!t.dueDate) return false;
               if (toDayStr(t.dueDate) !== dayStr) return false;
               if (!isCourseEnabled(t)) return false;
@@ -5160,7 +5943,7 @@ const PlanAssist = () => {
               if (a.dueDate && b.dueDate) return a.dueDate - b.dueDate;
               if (a.dueDate) return -1;
               if (b.dueDate) return 1;
-              if (!a.dueDate && !b.dueDate) return 0; if (!a.dueDate) return 1; if (!b.dueDate) return -1; return a.dueDate - b.dueDate;
+              return (a.priorityOrder ?? 9999) - (b.priorityOrder ?? 9999);
             });
           };
 
@@ -5188,7 +5971,7 @@ const PlanAssist = () => {
 
           // Priority lookup
           const priorityMap = {};
-          // priorityOrder removed — tasks are deadline-sorted
+          tasks.forEach(t => { if (t.priorityOrder) priorityMap[t.id] = t.priorityOrder; });
 
 
           return (
@@ -6767,6 +7550,15 @@ const PlanAssist = () => {
                         ))}
                       </select>
                       <select
+                        value={adminFilter.unsorted}
+                        onChange={e => setAdminFilter(f => ({ ...f, unsorted: e.target.value }))}
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
+                      >
+                        <option value="all">Any Unsorted</option>
+                        <option value="has_unsorted">Has Unsorted Tasks</option>
+                        <option value="no_unsorted">No Unsorted Tasks</option>
+                      </select>
+                      <select
                         value={adminSort}
                         onChange={e => setAdminSort(e.target.value)}
                         className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
@@ -6798,9 +7590,11 @@ const PlanAssist = () => {
                         })
                         .filter(u => adminFilter.grade === 'all' || String(u.grade) === adminFilter.grade)
                         .filter(u => {
+                          if (adminFilter.unsorted === 'has_unsorted') return parseInt(u.new_tasks) > 0;
+                          if (adminFilter.unsorted === 'no_unsorted') return parseInt(u.new_tasks) === 0;
                           return true;
                         });
-                      const hasFilters = adminFilter.status !== 'all' || adminFilter.grade !== 'all' || adminSearch;
+                      const hasFilters = adminFilter.status !== 'all' || adminFilter.grade !== 'all' || adminFilter.unsorted !== 'all' || adminSearch;
                       return (
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-400">{filtered.length} of {adminUsers.length} users</span>
@@ -6846,6 +7640,8 @@ const PlanAssist = () => {
                         })
                         .filter(u => adminFilter.grade === 'all' || String(u.grade) === adminFilter.grade)
                         .filter(u => {
+                          if (adminFilter.unsorted === 'has_unsorted') return parseInt(u.new_tasks) > 0;
+                          if (adminFilter.unsorted === 'no_unsorted') return parseInt(u.new_tasks) === 0;
                           return true;
                         })
                         .sort(sortFn)
@@ -6866,7 +7662,7 @@ const PlanAssist = () => {
                                   {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
                                   {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
                                   {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
-                                  
+                                  {parseInt(u.new_tasks) > 0 && <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 rounded font-medium">{u.new_tasks} unsorted</span>}
                                   {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>Active</span>}
                                 </div>
                               </div>
@@ -6959,7 +7755,49 @@ const PlanAssist = () => {
                           </div>
                         </div>
 
+                        {/* Unsorted tasks (is_new) + Tasks Scan */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="font-semibold text-gray-700 text-sm">
+                              Unsorted Tasks — is_new ({adminUserDetail.newTasks?.length || 0})
+                            </h4>
+                            <button
+                              onClick={() => adminTasksScan(u.id)}
+                              className="text-xs px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 flex items-center gap-1 font-semibold"
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />Tasks Scan
+                            </button>
+                          </div>
+                          {(!adminUserDetail.newTasks || adminUserDetail.newTasks.length === 0) ? (
+                            <p className="text-green-600 text-xs">No unsorted tasks ✓</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                              {adminUserDetail.newTasks.map(t => (
+                                <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-yellow-50 rounded-lg border border-yellow-100">
+                                  <div className="flex-1 min-w-0">
+                                    <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
+                                    <span className="text-gray-400">{t.class}{t.manually_created ? ' · manual' : ''}</span>
+                                  </div>
+                                  <span className="ml-2 text-gray-400 flex-shrink-0">{(() => { if (!t.deadline_date) return 'no date'; const dp = (t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date); const d = t.deadline_time ? new Date(dp + 'T' + t.deadline_time + 'Z') : new Date(dp + 'T23:59:00'); return d.toLocaleDateString(); })()}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
 
+                        {/* Recent completions */}
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <h4 className="font-semibold text-gray-700 mb-3 text-sm">Recent Completions</h4>
+                          <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                            {adminUserDetail.recentCompletions.map((c, i) => (
+                              <div key={i} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
+                                <span className="font-medium text-gray-800 flex-1 truncate">{c.title}</span>
+                                <span className="text-gray-400 ml-2 flex-shrink-0">{c.actual_time}m · {new Date(c.completed_at).toLocaleDateString()}</span>
+                              </div>
+                            ))}
+                            {adminUserDetail.recentCompletions.length === 0 && <p className="text-gray-400 text-xs">No completions yet</p>}
+                          </div>
+                        </div>
                       </div>
                     );
                   })()}
@@ -7046,7 +7884,21 @@ const PlanAssist = () => {
             {/* ── DIAGNOSTICS ── */}
             {adminSection === 'diagnostics' && (
               <div className="space-y-6">
-
+                {/* Universal Tasks Scan */}
+                <div className="bg-white rounded-xl shadow-sm border border-red-100 p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="font-bold text-gray-900 text-sm">Universal Tasks Scan</h4>
+                      <p className="text-xs text-gray-500 mt-0.5">Clears all is_new flags and reassigns priority order smartly for every user on the platform.</p>
+                    </div>
+                    <button
+                      onClick={adminUniversalScan}
+                      className="text-xs px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-1.5 font-semibold flex-shrink-0"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />Run Universal Scan
+                    </button>
+                  </div>
+                </div>
                 {adminLoading && <div className="text-center py-10 text-gray-400">Loading diagnostics...</div>}
                 {adminDiagnostics && (() => {
                   const d = adminDiagnostics;
