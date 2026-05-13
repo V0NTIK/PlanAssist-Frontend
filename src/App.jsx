@@ -3078,6 +3078,20 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] table tbody tr { border-color: #fce4ec !important; }
         /* ── Misc ────────────────────────────────────────────── */
         [data-planassist-theme="warm"] .animate-spin { border-color: #e91e8c !important; border-top-color: transparent !important; }
+        /* ── Banner chip fix: bg-white.bg-opacity-20 on pink banner ── */
+        /* Override so chips use semi-transparent dark instead of white */
+        [data-planassist-theme="warm"] .bg-opacity-20 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.18) !important; }
+        [data-planassist-theme="warm"] .bg-opacity-15 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.15) !important; }
+        [data-planassist-theme="warm"] .hover\:bg-opacity-30:hover { background-color: rgba(0,0,0,0.28) !important; }
+        /* bg-purple-800: Session Save & Exit button on pink banner */
+        [data-planassist-theme="warm"] .bg-purple-800 { background-color: rgba(0,0,0,0.30) !important; }
+        [data-planassist-theme="warm"] .hover\:bg-purple-900:hover { background-color: rgba(0,0,0,0.40) !important; }
+        /* bg-gray-300: Goals disabled button */
+        [data-planassist-theme="warm"] .bg-gray-300 { background-color: #f8bbd0 !important; }
+        /* Join Zoom button on blue banner: bg-white = white chip ✓, text-blue-600 = dark blue ✓ */
+        /* text-blue-200 on Zoom banner → white */
+        [data-planassist-theme="warm"] .text-blue-200 { color: #ffffff !important; }
+
         [data-planassist-theme="warm"] .border-b-2.border-purple-600 { border-color: #e91e8c !important; }
         [data-planassist-theme="warm"] .bg-indigo-600 { background-color: #e91e8c !important; }
       `,
@@ -3241,6 +3255,18 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] .text-orange-900 { color: #ffb74d !important; }
         [data-planassist-theme="cool"] .text-blue-900 { color: #64b5f6 !important; }
         [data-planassist-theme="cool"] .text-green-500 { color: #66bb6a !important; }
+        /* ── Banner chip fix: bg-white.bg-opacity-20 on green banner ── */
+        [data-planassist-theme="cool"] .bg-opacity-20 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.22) !important; }
+        [data-planassist-theme="cool"] .bg-opacity-15 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.18) !important; }
+        [data-planassist-theme="cool"] .hover\:bg-opacity-30:hover { background-color: rgba(0,0,0,0.32) !important; }
+        /* bg-purple-800: Session Save & Exit on dark green banner */
+        [data-planassist-theme="cool"] .bg-purple-800 { background-color: rgba(0,0,0,0.35) !important; }
+        [data-planassist-theme="cool"] .hover\:bg-purple-900:hover { background-color: rgba(0,0,0,0.45) !important; }
+        /* bg-gray-300: Goals disabled button on dark bg */
+        [data-planassist-theme="cool"] .bg-gray-300 { background-color: #1e3520 !important; color: #4caf50; }
+        /* Join Zoom: bg-white button → show clearly on banner */
+        [data-planassist-theme="cool"] .bg-white.text-blue-600 { background-color: #e8f5e9 !important; color: #1b5e20 !important; }
+
       `,
       dark: `
         :root { color-scheme: dark; }
@@ -3403,6 +3429,18 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] .text-blue-900 { color: #64b5f6 !important; }
         [data-planassist-theme="dark"] .text-green-500 { color: #81c784 !important; }
         [data-planassist-theme="dark"] .text-green-400 { color: #66bb6a !important; }
+        /* ── Banner chip fix: bg-white.bg-opacity-20 on dark purple banner ── */
+        [data-planassist-theme="dark"] .bg-opacity-20 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.25) !important; }
+        [data-planassist-theme="dark"] .bg-opacity-15 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.20) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-opacity-30:hover { background-color: rgba(0,0,0,0.35) !important; }
+        /* bg-purple-800: Session Save & Exit on dark purple banner */
+        [data-planassist-theme="dark"] .bg-purple-800 { background-color: rgba(0,0,0,0.35) !important; }
+        [data-planassist-theme="dark"] .hover\:bg-purple-900:hover { background-color: rgba(0,0,0,0.45) !important; }
+        /* bg-gray-300: Goals disabled button on dark bg */
+        [data-planassist-theme="dark"] .bg-gray-300 { background-color: #1e1e30 !important; }
+        /* Join Zoom: bg-white button on blue banner */
+        [data-planassist-theme="dark"] .bg-white.text-blue-600 { background-color: #e8eaf6 !important; color: #1565c0 !important; }
+
       `,
     };
 
