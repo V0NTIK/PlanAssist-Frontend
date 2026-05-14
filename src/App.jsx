@@ -5549,7 +5549,7 @@ const PlanAssist = () => {
                                               >
                                                 <option value="">— pick task —</option>
                                                 {sessionTasks.map(t => (
-                                                  <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
+                                                  <option key={t.id} value={t.id}>{cleanTaskTitle(t)}{t.dueDate ? ` — due ${t.dueDate.toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : ""}</option>
                                                 ))}
                                               </select>
 
@@ -5683,7 +5683,7 @@ const PlanAssist = () => {
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
                                               {sessionTasks.map(t => (
-                                                <option key={t.id} value={t.id}>{cleanTaskTitle(t)} (P{t.priorityOrder})</option>
+                                                <option key={t.id} value={t.id}>{cleanTaskTitle(t)}{t.dueDate ? ` — due ${t.dueDate.toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : ""}</option>
                                               ))}
                                             </select>
 
