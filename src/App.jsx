@@ -3090,7 +3090,7 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] .bg-gray-300 { background-color: #f8bbd0 !important; }
         /* Marks banner: from-blue-600 to-purple-600 → pink-to-blue in Blossom */
         [data-planassist-theme="warm"] .from-blue-600 { --tw-gradient-from: #e91e8c !important; }
-        [data-planassist-theme="warm"] .to-purple-600 { --tw-gradient-to: #1e88e5 !important; }
+        [data-planassist-theme="warm"] .from-blue-600.to-purple-600 { --tw-gradient-to: #1e88e5 !important; }
 
         /* Join Zoom button on blue banner: bg-white = white chip ✓, text-blue-600 = dark blue ✓ */
         /* text-blue-200 on Zoom banner → white */
@@ -3270,7 +3270,7 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] .bg-gray-300 { background-color: #1e3520 !important; color: #4caf50; }
         /* Marks banner: from-blue-600 to-purple-600 → blue-to-green in Grove */
         [data-planassist-theme="cool"] .from-blue-600 { --tw-gradient-from: #1565c0 !important; }
-        [data-planassist-theme="cool"] .to-purple-600 { --tw-gradient-to: #2e7d32 !important; }
+        [data-planassist-theme="cool"] .from-blue-600.to-purple-600 { --tw-gradient-to: #2e7d32 !important; }
 
         /* Join Zoom: bg-white button → show clearly on banner */
         [data-planassist-theme="cool"] .bg-white.text-blue-600 { background-color: #e8f5e9 !important; color: #1b5e20 !important; }
@@ -3448,7 +3448,7 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] .bg-gray-300 { background-color: #1e1e30 !important; }
         /* Marks banner: from-blue-600 to-purple-600 → blue-to-bright-purple in Dark */
         [data-planassist-theme="dark"] .from-blue-600 { --tw-gradient-from: #2979ff !important; }
-        [data-planassist-theme="dark"] .to-purple-600 { --tw-gradient-to: #7c4dff !important; }
+        [data-planassist-theme="dark"] .from-blue-600.to-purple-600 { --tw-gradient-to: #7c4dff !important; }
 
         /* Join Zoom: bg-white button on blue banner */
         [data-planassist-theme="dark"] .bg-white.text-blue-600 { background-color: #e8eaf6 !important; color: #1565c0 !important; }
