@@ -212,6 +212,7 @@ const PlanAssist = () => {
   // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
   const [token, setToken] = useState(null);
+  const tokenRef = React.useRef(null); // Always-current token for use in intervals/callbacks
   const [user, setUser] = useState(null);
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -554,7 +555,9 @@ const PlanAssist = () => {
   // API helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
     const headers = { 'Content-Type': 'application/json' };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    // Use tokenRef.current (always up-to-date) instead of token state (stale closure risk in intervals)
+    const currentToken = tokenRef.current || token;
+    if (currentToken) headers['Authorization'] = `Bearer ${currentToken}`;
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${API_URL}${endpoint}`, options);
@@ -571,6 +574,9 @@ const PlanAssist = () => {
   };
   
   // Check for existing session on mount — warm up server first to avoid cold-start failures
+  // Keep tokenRef in sync with token state — avoids stale closure bugs in intervals
+  useEffect(() => { tokenRef.current = token; }, [token]);
+
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
     const savedUser = localStorage.getItem('user');
@@ -796,6 +802,8 @@ const PlanAssist = () => {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setToken(data.token);
+      tokenRef.current = data.token; // Immediately sync ref — don't wait for effect
+      setSessionExpired(false);      // Clear any prior expiry state before loading
       setUser({ ...data.user, isAdmin: data.user.isAdmin || false });
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
@@ -832,6 +840,8 @@ const PlanAssist = () => {
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setToken(data.token);
+      tokenRef.current = data.token;
+      setSessionExpired(false);
       setUser(data.user);
       setIsAuthenticated(true);
       setAccountSetup(prev => ({ ...prev, name: data.user.name }));
@@ -848,6 +858,7 @@ const PlanAssist = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setToken(null);
+    tokenRef.current = null;
     setUser(null);
     setIsAuthenticated(false);
     setCurrentPage('hub');
@@ -1435,8 +1446,15 @@ const PlanAssist = () => {
         accumulatedTime: Math.round(snappedElapsed / 60) // DB stores minutes
       });
       setIsTimerRunning(false);
-      const updated = { ...currentSessionTask, accumulatedTime: sessionElapsed, sessionActive: false };
+      const newAccumMins = Math.round(snappedElapsed / 60);
+      const updated = { ...currentSessionTask, accumulatedTime: snappedElapsed, sessionActive: false };
       setSessionTasks(prev => prev.map(t => t.id === currentSessionTask.id ? updated : t));
+      // Also update the Task List tasks state so Start → Resume is immediate
+      setTasks(prev => prev.map(t =>
+        t.id === currentSessionTask.id
+          ? { ...t, accumulatedTime: newAccumMins }
+          : t
+      ));
       setCurrentSessionTask(null);
       setCurrentPage('sessions');
     } catch (err) {
@@ -3259,6 +3277,13 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] .text-orange-900 { color: #ffb74d !important; }
         [data-planassist-theme="cool"] .text-blue-900 { color: #64b5f6 !important; }
         [data-planassist-theme="cool"] .text-green-500 { color: #66bb6a !important; }
+        /* Hub explainer card: yellow Leaderboard bubble */
+        [data-planassist-theme="cool"] .border-yellow-100 { border-color: #2a2200 !important; }
+        [data-planassist-theme="cool"] .text-yellow-900 { color: #fff176 !important; }
+        [data-planassist-theme="cool"] .text-yellow-800 { color: #ffe57f !important; }
+        /* Info card body text (blue-800, green-800 on colored bg) */
+        [data-planassist-theme="cool"] .text-blue-800 { color: #90caf9 !important; }
+        [data-planassist-theme="cool"] .text-green-800 { color: #a5d6a7 !important; }
         /* ── Banner chip fix: bg-white.bg-opacity-20 on green banner ── */
         [data-planassist-theme="cool"] .bg-opacity-20 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.22) !important; }
         [data-planassist-theme="cool"] .bg-opacity-15 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.18) !important; }
@@ -3437,6 +3462,13 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] .text-blue-900 { color: #64b5f6 !important; }
         [data-planassist-theme="dark"] .text-green-500 { color: #81c784 !important; }
         [data-planassist-theme="dark"] .text-green-400 { color: #66bb6a !important; }
+        /* Hub explainer card: yellow Leaderboard bubble */
+        [data-planassist-theme="dark"] .border-yellow-100 { border-color: #221b00 !important; }
+        [data-planassist-theme="dark"] .text-yellow-900 { color: #fff176 !important; }
+        [data-planassist-theme="dark"] .text-yellow-800 { color: #ffe57f !important; }
+        /* Info card body text (blue-800, green-800 on colored bg) */
+        [data-planassist-theme="dark"] .text-blue-800 { color: #90caf9 !important; }
+        [data-planassist-theme="dark"] .text-green-800 { color: #a5d6a7 !important; }
         /* ── Banner chip fix: bg-white.bg-opacity-20 on dark purple banner ── */
         [data-planassist-theme="dark"] .bg-opacity-20 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.25) !important; }
         [data-planassist-theme="dark"] .bg-opacity-15 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.20) !important; }
