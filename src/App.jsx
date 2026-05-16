@@ -6245,11 +6245,12 @@ const PlanAssist = () => {
                                           // Ensure sessionTasks are loaded, then start
                                           if (sessionTasks.length === 0) await loadSessionTasks();
                                           // Build a task object compatible with startTaskSession
+                                          // task is from hydrated `tasks` state: use camelCase fields
                                           const sessionTask = sessionTasks.find(t => t.id === task.id) || {
                                             ...task,
-                                            accumulatedTime: (task.accumulated_time || 0) * 60, // min→sec if needed
-                                            userEstimate: task.user_estimated_time || task.estimated_time,
-                                            estimatedTime: task.estimated_time,
+                                            accumulatedTime: (task.accumulatedTime || 0) * 60, // already minutes → convert to seconds
+                                            userEstimate: task.userEstimate || task.estimatedTime,
+                                            estimatedTime: task.estimatedTime,
                                           };
                                           await startTaskSession(sessionTask);
                                         }}
@@ -6257,7 +6258,7 @@ const PlanAssist = () => {
                                       >
                                         {sessionStartingId === task.id
                                           ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</>
-                                          : <><Play className="w-3 h-3" />{task.accumulated_time > 0 ? 'Resume Session' : 'Start Session'}</>
+                                          : <><Play className="w-3 h-3" />{task.accumulatedTime > 0 ? 'Resume Session' : 'Start Session'}</>
                                         }
                                       </button>
                                     )}
@@ -8142,19 +8143,41 @@ const PlanAssist = () => {
                 </div>
                 <div className="space-y-2 max-h-[600px] overflow-y-auto">
                   {adminAuditLog.length === 0 && <p className="text-gray-400 text-sm">No actions recorded yet</p>}
-                  {adminAuditLog.map(entry => (
-                    <div key={entry.id} className="flex items-start gap-3 text-xs p-3 bg-gray-50 rounded-lg">
-                      <div className="flex-1">
-                        <span className="font-bold text-gray-800">{entry.admin_name}</span>
-                        <span className="mx-1.5 font-mono bg-gray-200 px-1.5 py-0.5 rounded text-gray-600">{entry.action}</span>
-                        {entry.target_user_name && <span className="text-gray-600">on <span className="font-medium">{entry.target_user_name}</span></span>}
-                        {entry.details && Object.keys(JSON.parse(typeof entry.details === 'string' ? entry.details : JSON.stringify(entry.details))).length > 0 && (
-                          <span className="ml-2 text-gray-400">{JSON.stringify(typeof entry.details === 'string' ? JSON.parse(entry.details) : entry.details)}</span>
-                        )}
+                  {adminAuditLog.map(entry => {
+                    const actionLabels = {
+                      CREATE_ANNOUNCEMENT: '📢 Created Announcement',
+                      DEACTIVATE_ANNOUNCEMENT: '🔕 Deactivated Announcement',
+                      EDIT_USER: '✏️ Edited User',
+                      BAN_USER: '🚫 Banned User',
+                      UNBAN_USER: '✅ Unbanned User',
+                      CLEAR_CANVAS_TOKEN: '🔑 Cleared Canvas Token',
+                      DELETE_TASK: '🗑️ Deleted Task',
+                      UPDATE_HELP: '📖 Updated Help Page',
+                    };
+                    const details = typeof entry.details === 'string' ? JSON.parse(entry.details) : (entry.details || {});
+                    const detailKeys = Object.keys(details);
+                    const friendlyDetails = detailKeys.length > 0
+                      ? detailKeys.map(k => {
+                          if (k === 'task_title') return `"${details[k]}"`;
+                          if (k === 'message') return `"${details[k]}"`;
+                          if (k === 'content_length') return `${details[k]} chars`;
+                          if (k === 'reason') return `reason: ${details[k]}`;
+                          if (k === 'type') return `type: ${details[k]}`;
+                          return null;
+                        }).filter(Boolean).join(', ')
+                      : null;
+                    return (
+                      <div key={entry.id} className="flex items-start gap-3 text-xs p-3 bg-gray-50 rounded-lg">
+                        <div className="flex-1">
+                          <span className="font-bold text-gray-800">{entry.admin_name}</span>
+                          <span className="mx-1.5 font-medium text-purple-700">{actionLabels[entry.action] || entry.action}</span>
+                          {entry.target_user_name && <span className="text-gray-600">on <span className="font-medium">{entry.target_user_name}</span></span>}
+                          {friendlyDetails && <span className="ml-2 text-gray-400 italic">{friendlyDetails}</span>}
+                        </div>
+                        <span className="text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
                       </div>
-                      <span className="text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
