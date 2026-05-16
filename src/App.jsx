@@ -6237,8 +6237,10 @@ const PlanAssist = () => {
                                     )}
                                     {!isDone && (
                                       <button
+                                        disabled={sessionStartingId === task.id}
                                         onClick={async (e) => {
                                           e.stopPropagation();
+                                          if (sessionStartingId === task.id) return;
                                           setCalendarExpandedId(null);
                                           // Ensure sessionTasks are loaded, then start
                                           if (sessionTasks.length === 0) await loadSessionTasks();
@@ -6251,10 +6253,12 @@ const PlanAssist = () => {
                                           };
                                           await startTaskSession(sessionTask);
                                         }}
-                                        className="w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors"
+                                        className={`w-full mt-1 flex items-center justify-center gap-1.5 py-1.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded text-xs font-semibold transition-colors ${sessionStartingId === task.id ? 'opacity-70 cursor-not-allowed' : ''}`}
                                       >
-                                        <Play className="w-3 h-3" />
-                                        {task.accumulated_time > 0 ? 'Resume Session' : 'Start Session'}
+                                        {sessionStartingId === task.id
+                                          ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</>
+                                          : <><Play className="w-3 h-3" />{task.accumulated_time > 0 ? 'Resume Session' : 'Start Session'}</>
+                                        }
                                       </button>
                                     )}
                                     <p className="text-xs opacity-60 mt-1">Tap again to open in Canvas →</p>
