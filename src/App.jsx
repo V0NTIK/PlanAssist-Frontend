@@ -284,6 +284,7 @@ const PlanAssist = () => {
   const [adminSearch, setAdminSearch] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminAnnouncements, setAdminAnnouncements] = useState([]);
+  const [newAnnouncementAudience, setNewAnnouncementAudience] = useState('all');
   const [newAnnouncementMsg, setNewAnnouncementMsg] = useState('');
   const [newAnnouncementType, setNewAnnouncementType] = useState('info');
   const [banReason, setBanReason] = useState('');
@@ -451,6 +452,41 @@ const PlanAssist = () => {
   const [zoomBanner, setZoomBanner] = useState(null); // { period, zoomNumber, isTutorial }
   const [lastAutoSync, setLastAutoSync] = useState(null);
   const [lastSyncTimestamp, setLastSyncTimestamp] = useState(null); // ISO string from DB
+
+  // Streak & shields
+  const [streakShieldsAvailable, setStreakShieldsAvailable] = useState(0);
+  const [streakShieldMode, setStreakShieldMode] = useState('manual');
+  const [streakShieldLog, setStreakShieldLog] = useState([]); // dates shields were used
+  const [streakShieldToast, setStreakShieldToast] = useState(null);
+
+  // Feed labels
+  const [feedLabelDays, setFeedLabelDays] = useState(0);
+  const [feedLabelSelected, setFeedLabelSelected] = useState('completed');
+  const [feedLabelUnlocked, setFeedLabelUnlocked] = useState([]);
+  const [feedLabelNewUnlock, setFeedLabelNewUnlock] = useState(null); // toast
+
+  // Badges / Gallery
+  const [userBadges, setUserBadges] = useState([]);
+
+  // Break timer
+  const [breakTimerActive, setBreakTimerActive] = useState(false);
+  const [breakTimerSeconds, setBreakTimerSeconds] = useState(0);
+  const [breakTimerTotal, setBreakTimerTotal] = useState(0);
+
+  // Task list quick filters
+  const [quickFilter, setQuickFilter] = useState(null); // 'today' | 'week' | 'overdue' | null
+
+  // Undo state for task list checkbox
+  const [undoCompleteTask, setUndoCompleteTask] = useState(null); // { taskId, title, timeout }
+
+  // Completion animation
+  const [completionAnim, setCompletionAnim] = useState(null); // { type: 'task'|'agenda', x, y }
+
+  // Agenda finish animation
+  const [agendaFinishAnim, setAgendaFinishAnim] = useState(false);
+
+  // Streak pane
+  const [streakPaneData, setStreakPaneData] = useState(null);
   const [autoSyncToast, setAutoSyncToast] = useState(null); // '3 new tasks added'
 
   // Hub features state
@@ -581,6 +617,70 @@ const PlanAssist = () => {
   // Check for existing session on mount — warm up server first to avoid cold-start failures
   // Keep tokenRef in sync with token state — avoids stale closure bugs in intervals
   useEffect(() => { tokenRef.current = token; }, [token]);
+  // ── Break timer countdown ────────────────────────────────────────────────
+  useEffect(() => {
+    if (!breakTimerActive || breakTimerSeconds <= 0) {
+      if (breakTimerActive && breakTimerSeconds <= 0) setBreakTimerActive(false);
+      return;
+    }
+    const t = setTimeout(() => setBreakTimerSeconds(s => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [breakTimerActive, breakTimerSeconds]);
+
+  // ── Completion animation auto-dismiss ───────────────────────────────────
+  useEffect(() => {
+    if (!completionAnim) return;
+    const t = setTimeout(() => setCompletionAnim(null), 1400);
+    return () => clearTimeout(t);
+  }, [completionAnim]);
+
+  // ── Agenda finish animation auto-dismiss ────────────────────────────────
+  useEffect(() => {
+    if (!agendaFinishAnim) return;
+    const t = setTimeout(() => setAgendaFinishAnim(false), 3000);
+    return () => clearTimeout(t);
+  }, [agendaFinishAnim]);
+
+
+  // ── Keyboard shortcuts ──────────────────────────────────────────────────
+  useEffect(() => {
+    const BLOCKED_PAGES = ['session-active', 'agenda-active'];
+    // Detect if any dialog/modal is open: check for fixed z-50+ overlays or open state flags
+    const isDialogOpen = () => {
+      return showTaskDescription || showNotesPopup || showSplitTask ||
+             sessionPrioritiesPickerOpen || showEnhanceDialog ||
+             showHubExplainer || breakTimerActive ||
+             document.querySelector('[data-modal-open]') !== null;
+    };
+    const handler = (e) => {
+      // Don't fire inside input/textarea/select
+      if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+      if (BLOCKED_PAGES.includes(currentPage)) return;
+      if (isDialogOpen()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      const pageMap = {
+        'c': 'calendar', 't': 'tasks', 'f': 'sessions',
+        'a': 'agendas', 'i': 'itinerary', 'm': 'marks',
+      };
+      if (pageMap[key]) {
+        e.preventDefault();
+        if (!isLoadingTasks) setCurrentPage(pageMap[key]);
+        return;
+      }
+      if (key === 's') { e.preventDefault(); setCurrentPage('account'); setAccountTab('settings'); return; }
+      if (key === 'r') { e.preventDefault(); setCurrentPage('account'); setAccountTab('resolved'); return; }
+      if (key === 'g') { e.preventDefault(); setCurrentPage('account'); setAccountTab('goals'); return; }
+      if (key === 'h') { e.preventDefault(); setCurrentPage('account'); setAccountTab('help'); return; }
+      if (key === 'u' && user?.isAdmin) { e.preventDefault(); setCurrentPage('admin'); setAdminTab('users'); return; }
+      if (key === 'l') { e.preventDefault(); handleLogout(); return; }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [currentPage, isLoadingTasks, showTaskDescription, showNotesPopup, showSplitTask,
+      sessionPrioritiesPickerOpen, showEnhanceDialog, showHubExplainer, breakTimerActive, user]);
+
+
 
   useEffect(() => {
     const savedToken = localStorage.getItem('token');
@@ -1254,6 +1354,21 @@ const PlanAssist = () => {
   };
 
   // ── MAIN SYNC ────────────────────────────────────────────────────────────
+  const startBreakTimer = (sessionDurationSeconds) => {
+    // Suggest break duration based on session length, max 15 min
+    const mins = Math.max(1, Math.min(15, Math.round(sessionDurationSeconds / 60 / 5)));
+    setBreakTimerSeconds(mins * 60);
+    setBreakTimerTotal(mins * 60);
+    setBreakTimerActive(true);
+  };
+
+  const triggerCompletionAnim = (type = 'task') => {
+    setCompletionAnim({ type });
+    if (type === 'agenda') {
+      setTimeout(() => setAgendaFinishAnim(true), 200);
+    }
+  };
+
   const fetchCanvasTasks = async ({ silent = false } = {}) => {
     if (!accountSetup.canvasApiToken) {
       alert('Please enter your Canvas API Token first');
@@ -1552,9 +1667,11 @@ const PlanAssist = () => {
           ? { ...t, completed: true, deleted: true }
           : t
       ));
+      triggerCompletionAnim('task');
+      startBreakTimer(sessionElapsed); // sessionElapsed is in seconds
       setShowSessionComplete({ task: currentSessionTask, timeSpent: sessionElapsed }); // seconds
       // Don't null currentSessionTask yet — completion screen still needs it
-      // It gets cleared when user clicks "Back to Sessions" 
+      // It gets cleared when user clicks "Back to Focus" 
     } catch (err) {
       console.error('Failed to complete task:', err);
       alert('Failed to complete task: ' + err.message);
@@ -2182,9 +2299,10 @@ const PlanAssist = () => {
   const adminCreateAnnouncement = async () => {
     if (!newAnnouncementMsg.trim()) return;
     try {
-      const data = await apiCall('/admin/announcements', 'POST', { message: newAnnouncementMsg, type: newAnnouncementType });
+      const data = await apiCall('/admin/announcements', 'POST', { message: newAnnouncementMsg, type: newAnnouncementType, target_audience: newAnnouncementAudience || 'all' });
       setAdminAnnouncements(prev => [data, ...prev]);
       setNewAnnouncementMsg('');
+      setNewAnnouncementAudience('all');
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -3569,6 +3687,77 @@ const PlanAssist = () => {
     }
   }, [colorTheme]);
 
+  // ── Streak data loader (client-side calculation) ──────────────────────
+  const LABEL_THRESHOLDS = [
+    [0,'completed'],[5,'finished'],[10,'did'],[20,'handled'],[30,'closed'],
+    [40,'processed'],[50,'resolved'],[60,'settled'],[70,'finalized'],[80,'accomplished'],
+    [90,'achieved'],[100,'fulfilled'],[120,'delivered'],[140,'executed'],[160,'cleared'],
+    [180,'dispatched'],[200,'secured'],[250,'conquered'],[300,'crushed'],[400,'dominated'],[500,'mastered']
+  ];
+
+  const isWeekday = (date) => { const d = new Date(date); const day = d.getDay(); return day !== 0 && day !== 6; };
+
+  const computeStreak = (completionDates, shieldDates) => {
+    // completionDates: array of 'YYYY-MM-DD' strings (local dates)
+    // shieldDates: array of 'YYYY-MM-DD' strings
+    const allDays = new Set([...completionDates, ...shieldDates]);
+    const today = getLocalDateStr();
+    let streak = 0;
+    let d = new Date(today);
+    // Walk backwards day-by-day; skip weekends; stop on first unshielded weekday miss
+    while (true) {
+      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; }
+      if (allDays.has(ds)) { streak++; d.setDate(d.getDate() - 1); continue; }
+      break;
+    }
+    return streak;
+  };
+
+  const loadStreakData = async () => {
+    try {
+      const [shieldsR, logR] = await Promise.all([
+        apiCall('/streak/shields', 'GET'),
+        apiCall('/streak/shields/log', 'GET'),
+      ]);
+      setStreakShieldsAvailable(shieldsR.available ?? 0);
+      setStreakShieldMode(shieldsR.mode ?? 'manual');
+      setStreakShieldLog((logR.shieldDates ?? []).map(d => typeof d === 'string' ? d.slice(0,10) : new Date(d).toISOString().slice(0,10)));
+    } catch (err) { console.error('loadStreakData error:', err.message); }
+  };
+
+  const loadFeedLabel = async () => {
+    try {
+      const data = await apiCall('/feed-label', 'GET');
+      setFeedLabelDays(data.days ?? 0);
+      setFeedLabelSelected(data.selected ?? 'completed');
+      setFeedLabelUnlocked(data.unlocked ?? []);
+    } catch (err) { console.error('loadFeedLabel error:', err.message); }
+  };
+
+  const loadBadges = async () => {
+    try {
+      const data = await apiCall('/badges', 'GET');
+      setUserBadges(data.badges ?? []);
+    } catch (err) { console.error('loadBadges error:', err.message); }
+  };
+
+  const checkNewUnlocks = async (currentStreak) => {
+    try {
+      // Check streak badges
+      await apiCall('/badges/check', 'POST', { currentStreak });
+      // Check feed label unlocks
+      const unlockData = await apiCall('/feed-label/check-unlock', 'POST', {});
+      if (unlockData.newlyUnlocked?.length > 0) {
+        const newest = unlockData.newlyUnlocked[unlockData.newlyUnlocked.length - 1];
+        setFeedLabelNewUnlock(newest);
+        setTimeout(() => setFeedLabelNewUnlock(null), 6000);
+        await loadFeedLabel();
+        await loadBadges();
+      }
+    } catch (err) { console.error('checkNewUnlocks error:', err.message); }
+  };
+
   const loadCompletionHistory = async () => {
     try {
       const historyData = await apiCall('/learning', 'GET');
@@ -3733,6 +3922,7 @@ const PlanAssist = () => {
         loadCompletionFeed();
         loadLeaderboard();
         loadCompletionHistory();
+        loadStreakData();
       }, 120000);
 
       // Silent Course Sync every 60 minutes (regardless of page, but not if tab hidden)
@@ -3760,6 +3950,9 @@ const PlanAssist = () => {
     if (currentPage === 'hub') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       loadCompletionHistory();
+      loadStreakData();
+      loadFeedLabel();
+      loadBadges();
     }
     if (currentPage === 'marks') {
       runCourseSync(true, false); // Course Sync with session_active clear + spinner
@@ -3867,8 +4060,8 @@ const PlanAssist = () => {
     },
     {
       page: 'sessions',
-      title: '⏱ Study Sessions',
-      body: "Sessions is your productivity launchpad. Set today's focus list, start timed work blocks on individual tasks, and track your progress. The timer runs while you work.",
+      title: '⏱ Focus',
+      body: "Focus is your productivity launchpad. Set today's priority list, start timed work sessions on individual tasks, and track your progress. The timer runs while you work.",
       arrow: null,
     },
     {
@@ -3880,7 +4073,7 @@ const PlanAssist = () => {
     {
       page: 'hub',
       title: '🚀 You\'re all set!',
-      body: "Start by syncing your Canvas tasks, then use Sessions to set today's focus and start working. Good luck!",
+      body: "Start by syncing your Canvas tasks, then use Focus to set today's priorities and start working. Good luck!",
       arrow: null,
     },
   ];
@@ -3970,7 +4163,7 @@ const PlanAssist = () => {
             </button>
             <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Play className="w-5 h-5" />
-              <span className="font-medium">Sessions</span>
+              <span className="font-medium">Focus</span>
             </button>
             <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <LayoutList className="w-5 h-5" />
@@ -4042,6 +4235,35 @@ const PlanAssist = () => {
         </div>
       )}
 
+      {/* Undo complete toast */}
+      {undoCompleteTask && (
+        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-gray-900 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-3">
+          <span>✅ <span className="font-medium">{undoCompleteTask.title}</span> marked complete</span>
+          <button onClick={async () => {
+            clearTimeout(undoCompleteTask.timeout);
+            try {
+              await apiCall(`/tasks/${undoCompleteTask.taskId}/uncomplete`, 'PATCH', {});
+              setTasks(prev => prev.map(t => t.id === undoCompleteTask.taskId ? { ...t, completed: false, deleted: false } : t));
+            } catch (err) { console.error('Undo failed:', err); }
+            setUndoCompleteTask(null);
+          }} className="underline font-semibold hover:text-yellow-300 transition-colors ml-2">Undo</button>
+        </div>
+      )}
+
+      {/* Feed label unlock toast */}
+      {feedLabelNewUnlock && (
+        <div className="fixed top-20 right-4 bg-purple-600 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2">
+          🎉 New Feed Label unlocked: <span className="font-bold">"{feedLabelNewUnlock}"</span>
+        </div>
+      )}
+
+      {/* Streak shield toast */}
+      {streakShieldToast && (
+        <div className="fixed top-20 right-4 bg-yellow-500 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2">
+          {streakShieldToast}
+        </div>
+      )}
+
       {/* Hub Explainer Overlay — top-level so it covers the full viewport including nav */}
       {showHubExplainer && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-[200] flex items-center justify-center p-4" onClick={() => setShowHubExplainer(false)}>
@@ -4063,7 +4285,7 @@ const PlanAssist = () => {
               </div>
               <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
                 <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
-                <p className="text-purple-800">Start Session begins a timed work block on a specific task. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
+                <p className="text-purple-800">Open Focus to set today's priorities and start timed work sessions. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
               </div>
             </div>
           </div>
@@ -4126,6 +4348,89 @@ const PlanAssist = () => {
           )}
         </div>
       ))}
+
+      {/* ── Completion Animation Overlay ───────────────────────── */}
+      {completionAnim && (
+        <div className="fixed inset-0 z-[9500] pointer-events-none flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/20 animate-fade-out" style={{ animation: 'fadeOut 1.2s ease forwards' }} />
+          <div style={{ animation: 'popBounce 0.6s ease forwards' }} className="flex flex-col items-center gap-3">
+            <div className="w-24 h-24 rounded-full bg-green-500 flex items-center justify-center shadow-2xl"
+                 style={{ animation: 'checkPop 0.5s 0.1s ease both' }}>
+              <svg className="w-14 h-14 text-white" fill="none" stroke="currentColor" strokeWidth={3} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div className="text-white font-bold text-xl drop-shadow-lg">
+              {completionAnim.type === 'agenda' ? '🎉 Agenda Complete!' : '✅ Task Complete!'}
+            </div>
+          </div>
+          <style>{`
+            @keyframes popBounce { 0% { transform: scale(0); opacity: 0; } 60% { transform: scale(1.15); } 100% { transform: scale(1); opacity: 1; } }
+            @keyframes checkPop { 0% { transform: scale(0.5); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+            @keyframes fadeOut { 0% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+          `}</style>
+        </div>
+      )}
+
+      {/* ── Agenda Finish Animation ──────────────────────────────── */}
+      {agendaFinishAnim && (
+        <div className="fixed inset-0 z-[9500] pointer-events-none overflow-hidden">
+          {Array.from({ length: 40 }).map((_, i) => (
+            <div key={i} style={{
+              position: 'absolute',
+              left: `${Math.random() * 100}%`,
+              top: '-10px',
+              width: `${8 + Math.random() * 10}px`,
+              height: `${8 + Math.random() * 10}px`,
+              backgroundColor: ['#f59e0b','#10b981','#3b82f6','#ec4899','#8b5cf6'][i % 5],
+              borderRadius: Math.random() > 0.5 ? '50%' : '2px',
+              animation: `confettiFall ${1.5 + Math.random() * 1.5}s ${Math.random() * 0.5}s linear forwards`,
+              transform: `rotate(${Math.random() * 360}deg)`,
+            }} />
+          ))}
+          <style>{`
+            @keyframes confettiFall {
+              0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+              100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+            }
+          `}</style>
+        </div>
+      )}
+
+      {/* ── Break Timer Toast ────────────────────────────────────── */}
+      {breakTimerActive && (
+        <div className="fixed bottom-6 right-6 z-[9000] bg-white rounded-2xl shadow-2xl border border-green-200 p-5 min-w-[280px]">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">☕</span>
+              <div>
+                <p className="font-bold text-gray-900 text-sm">Break Time!</p>
+                <p className="text-gray-500 text-xs">You earned a rest</p>
+              </div>
+            </div>
+            <button onClick={() => setBreakTimerActive(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="text-center mb-3">
+            <div className="text-4xl font-bold text-green-600 tabular-nums">
+              {String(Math.floor(breakTimerSeconds/60)).padStart(2,'0')}:{String(breakTimerSeconds%60).padStart(2,'0')}
+            </div>
+            <div className="h-2 bg-gray-100 rounded-full mt-2 overflow-hidden">
+              <div className="h-full bg-green-400 rounded-full transition-all"
+                   style={{ width: `${((breakTimerTotal - breakTimerSeconds) / breakTimerTotal) * 100}%` }} />
+            </div>
+          </div>
+          <button onClick={() => setBreakTimerActive(false)}
+            className="w-full py-2 bg-green-500 hover:bg-green-600 text-white rounded-xl font-semibold text-sm">
+            Skip Break
+          </button>
+        </div>
+      )}
+
+      {/* ── Break timer countdown effect ────────────────────────── */}
+      {breakTimerActive && (() => {
+        /* This IIFE just starts the interval — the actual timer is managed in useEffect below */
+        return null;
+      })()}
 
       {/* Sync Loading Overlay — Main Sync: full-screen themed; Background Sync: silent */}
       {isLoadingTasks && syncType === 'main' && (
@@ -4362,7 +4667,18 @@ const PlanAssist = () => {
                     );
                   }
                   // No goals — show original Next Up
-                  const activeTasks = tasks.filter(t => !t.deleted && !t.completed && !t.ignored);
+                  const now = new Date();
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekEnd = new Date(todayStart); weekEnd.setDate(weekEnd.getDate() + 7);
+      const allActive = tasks.filter(t => !t.deleted && !t.completed && !t.ignored);
+      const activeTasks = allActive.filter(t => {
+        if (!quickFilter) return true;
+        if (quickFilter === 'today') return t.dueDate && t.dueDate >= todayStart && t.dueDate < new Date(todayStart.getTime() + 86400000);
+        if (quickFilter === 'week') return t.dueDate && t.dueDate >= todayStart && t.dueDate <= weekEnd;
+        if (quickFilter === 'overdue') return t.dueDate && t.dueDate < todayStart;
+        if (quickFilter === 'inprogress') return (t.accumulatedTime || 0) > 0;
+        return true;
+      });
                   if (activeTasks.length === 0) return null;
                   const nextTask = activeTasks.sort((a, b) => { if (!a.dueDate && !b.dueDate) return 0; if (!a.dueDate) return 1; if (!b.dueDate) return -1; return a.dueDate - b.dueDate; })[0];
                   const color = getClassColor(nextTask.class);
@@ -4416,8 +4732,21 @@ const PlanAssist = () => {
                           return `${Math.floor(seconds / 86400)}d ago`;
                         })();
                         
+                        const LABEL_COLORS = {
+                          completed:'#6b7280',finished:'#7c3aed',did:'#2563eb',handled:'#059669',
+                          closed:'#dc2626',processed:'#d97706',resolved:'#0891b2',settled:'#4f46e5',
+                          finalized:'#be185d',accomplished:'#7c3aed',achieved:'#b45309',fulfilled:'#065f46',
+                          delivered:'#1e40af',executed:'#9f1239',cleared:'#0f766e',dispatched:'#6d28d9',
+                          secured:'#1d4ed8',conquered:'#b91c1c',crushed:'#7c2d12',dominated:'#312e81',
+                          mastered:'#92400e'
+                        };
+                        const feedLabel = item.feed_label || 'completed';
+                        const labelColor = LABEL_COLORS[feedLabel] || '#6b7280';
+                        const reactions = item.reactions || [];
+                        const userReaction = item.user_reaction;
+                        const REACTION_EMOJIS = ['👏','⚡','🔥','💯','🎯'];
                         return (
-                          <div key={index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                          <div key={item.id || index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
                               <Check className="w-4 h-4 text-white" />
                             </div>
@@ -4425,10 +4754,47 @@ const PlanAssist = () => {
                               <p className="text-sm text-gray-900">
                                 <span className="font-semibold">{item.user_name.split(' ')[0]}</span>
                                 {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
-                                <span className="text-gray-600"> completed </span>
+                                {' '}<span className="font-semibold" style={{ color: labelColor }}>{feedLabel}</span>{' '}
                                 <span className="font-medium text-purple-600">{item.task_title}</span>
                               </p>
-                              <p className="text-xs text-gray-500 mt-1">{timeAgo}</p>
+                              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                <span className="text-xs text-gray-500">{timeAgo}</span>
+                                {/* Reaction buttons */}
+                                <div className="flex items-center gap-1">
+                                  {reactions.map(r => (
+                                    <button key={r.emoji}
+                                      onClick={async () => {
+                                        const isOwn = userReaction === r.emoji;
+                                        try {
+                                          if (isOwn) {
+                                            await apiCall(`/feed-reactions/${item.id}`, 'DELETE');
+                                          } else {
+                                            await apiCall(`/feed-reactions/${item.id}`, 'POST', { emoji: r.emoji });
+                                          }
+                                          loadCompletionFeed();
+                                        } catch (e) { console.error(e); }
+                                      }}
+                                      className={`text-xs px-1.5 py-0.5 rounded-full border transition-all ${
+                                        userReaction === r.emoji ? 'bg-purple-100 border-purple-400 text-purple-700' : 'bg-white border-gray-200 text-gray-600 hover:border-purple-300'
+                                      }`}
+                                    >{r.emoji} {r.count}</button>
+                                  ))}
+                                  {/* Add reaction picker */}
+                                  <div className="relative group">
+                                    <button className="text-xs px-1.5 py-0.5 rounded-full border border-gray-200 text-gray-400 hover:border-purple-300 hover:text-purple-600 transition-all">+</button>
+                                    <div className="absolute bottom-6 left-0 bg-white rounded-xl shadow-lg border border-gray-200 p-2 flex gap-1 hidden group-hover:flex z-10">
+                                      {REACTION_EMOJIS.map(emoji => (
+                                        <button key={emoji} onClick={async () => {
+                                          try {
+                                            await apiCall(`/feed-reactions/${item.id}`, 'POST', { emoji });
+                                            loadCompletionFeed();
+                                          } catch (e) { console.error(e); }
+                                        }} className="text-lg hover:scale-125 transition-transform">{emoji}</button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         );
@@ -4447,7 +4813,7 @@ const PlanAssist = () => {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <button onClick={() => setCurrentPage('sessions')} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-green-200">
                     <Play className="w-10 h-10 text-green-600 mb-3" />
-                    <h3 className="text-lg font-bold text-gray-900 mb-1">Start Session</h3>
+                    <h3 className="text-lg font-bold text-gray-900 mb-1">Open Focus</h3>
                     <p className="text-sm text-gray-600">Begin your study period</p>
                   </button>
                   <button onClick={() => setCurrentPage('tasks')} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-blue-200">
@@ -4580,6 +4946,29 @@ const PlanAssist = () => {
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
                 <div className="max-w-4xl mx-auto">
+                  {/* Quick filter chips */}
+                  <div className="flex items-center gap-2 mb-3 flex-wrap">
+                    {[
+                      { id: null, label: 'All' },
+                      { id: 'today', label: '📅 Due Today' },
+                      { id: 'week', label: '📆 Due This Week' },
+                      { id: 'overdue', label: '🔴 Overdue' },
+                      { id: 'inprogress', label: '⏱ In Progress' },
+                    ].map(chip => (
+                      <button key={String(chip.id)}
+                        onClick={() => setQuickFilter(quickFilter === chip.id ? null : chip.id)}
+                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                          quickFilter === chip.id
+                            ? 'bg-purple-600 text-white border-purple-600'
+                            : 'bg-white text-gray-600 border-gray-300 hover:border-purple-400 hover:text-purple-600'
+                        }`}
+                      >{chip.label}</button>
+                    ))}
+                    {quickFilter && (
+                      <button onClick={() => setQuickFilter(null)} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ Clear</button>
+                    )}
+                  </div>
+
                   <div className="bg-white rounded-xl shadow-md p-6">
                     {/* Header */}
                     <div className="flex items-center justify-between mb-6">
@@ -4650,7 +5039,15 @@ const PlanAssist = () => {
                                     <input
                                       type="checkbox"
                                       checked={task.completed || false}
-                                      onChange={() => toggleTaskCompletion(task.id)}
+                                      onChange={() => {
+                                        toggleTaskCompletion(task.id);
+                                        if (!task.completed) {
+                                          // Task is being marked complete — offer undo
+                                          if (undoCompleteTask?.timeout) clearTimeout(undoCompleteTask.timeout);
+                                          const timeout = setTimeout(() => setUndoCompleteTask(null), 5000);
+                                          setUndoCompleteTask({ taskId: task.id, title: cleanTaskTitle(task), timeout });
+                                        }
+                                      }}
                                       disabled={checkingTask !== null}
                                       className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer flex-shrink-0"
                                     />
@@ -5052,7 +5449,7 @@ const PlanAssist = () => {
               {/* Header bar */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
                 <div>
-                  <h1 className="text-xl font-bold text-gray-900">Today's Sessions</h1>
+                  <h1 className="text-xl font-bold text-gray-900">Today's Focus</h1>
                   <p className="text-gray-500 text-xs mt-0.5">{now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
                 </div>
                 <div className="flex items-center gap-3">
@@ -5394,7 +5791,7 @@ const PlanAssist = () => {
                                   <button onClick={() => { if (sessionStartingId !== nextUp.id) startTaskSession(nextUp); }}
                                     disabled={sessionStartingId === nextUp.id}
                                     className={`w-full py-3.5 rounded-2xl font-bold text-base transition-all flex items-center justify-center gap-2 shadow-md ${sessionStartingId === nextUp.id ? 'opacity-75 cursor-not-allowed' : ''} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-green-500 hover:bg-green-600 text-white'}`}>
-                                    {sessionStartingId === nextUp.id ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</> : <><Play className="w-5 h-5" />{hasProgress ? 'Resume Session' : 'Start Session'}</>}
+                                    {sessionStartingId === nextUp.id ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</> : <><Play className="w-5 h-5" />{hasProgress ? 'Resume' : 'Start'}</>}
                                   </button>
                                 </div>
                                 {/* Remaining tasks mini list */}
@@ -5520,7 +5917,7 @@ const PlanAssist = () => {
               </div>
               <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
                 className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                Back to Sessions
+                Back to Focus
               </button>
             </div>
           ) : (
@@ -6127,7 +6524,7 @@ const PlanAssist = () => {
                   </p>
                   <p className="text-sm text-gray-400 mt-1">{agendaFinishedSummary.rowCount} row{agendaFinishedSummary.rowCount !== 1 ? 's' : ''} completed</p>
                 </div>
-                <button onClick={() => { setAgendaFinishedSummary(null); setCurrentPage('agendas'); loadAgendas(); }}
+                <button onClick={() => { setAgendaFinishedSummary(null); triggerCompletionAnim('agenda'); startBreakTimer((agendaFinishedSummary?.totalTime || 0)); setCurrentPage('agendas'); loadAgendas(); }}
                   className="w-full py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors">
                   Back to Agendas
                 </button>
@@ -6254,6 +6651,12 @@ const PlanAssist = () => {
                   {weekDays.map((day, colIdx) => {
                     const dayTasks = getTasksForDay(day);
                     const todayCol = isToday(day);
+                    // Load indicator (weekdays only)
+                    const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                    const pendingTasks = dayTasks.filter(t => !t.completed && !t.deleted);
+                    const totalEstMin = pendingTasks.reduce((s, t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
+                    const loadLevel = isWeekend ? null : totalEstMin >= 180 ? 'high' : totalEstMin >= 90 ? 'medium' : totalEstMin >= 30 ? 'low' : null;
+                    const loadConfig = { low: { bar: '#86efac', label: 'bg-green-100 text-green-700' }, medium: { bar: '#fbbf24', label: 'bg-amber-100 text-amber-700' }, high: { bar: '#f87171', label: 'bg-red-100 text-red-700' } };
                     return (
                       <div
                         key={colIdx}
@@ -6271,6 +6674,10 @@ const PlanAssist = () => {
                             {day.toLocaleDateString('en-US',{month:'short'})}
                           </p>
                         </div>
+                        {/* Load indicator bar */}
+                        {loadLevel && (
+                          <div className="h-1.5 w-full" style={{ backgroundColor: loadConfig[loadLevel].bar, opacity: 0.75 }} title={`${totalEstMin}m estimated · ${pendingTasks.length} task${pendingTasks.length !== 1 ? 's' : ''}`} />
+                        )}
 
                         {/* Task bubbles */}
                         <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
@@ -6356,7 +6763,7 @@ const PlanAssist = () => {
                                       >
                                         {sessionStartingId === task.id
                                           ? <><div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />Loading…</>
-                                          : <><Play className="w-3 h-3" />{task.accumulatedTime > 0 ? 'Resume Session' : 'Start Session'}</>
+                                          : <><Play className="w-3 h-3" />{task.accumulatedTime > 0 ? 'Resume' : 'Start'}</>
                                         }
                                       </button>
                                     )}
@@ -6948,10 +7355,13 @@ const PlanAssist = () => {
                   {[
                     { id: 'settings', label: 'Settings', icon: Settings },
                     { id: 'courses', label: 'Courses', icon: BookOpen },
+                    { id: 'schedule', label: 'Schedule', icon: ClipboardList },
                     { id: 'resolved', label: 'Resolved Tasks', icon: CheckCircle },
                     { id: 'grades', label: 'Activity', icon: BarChart3 },
-                    { id: 'schedule', label: 'Schedule', icon: ClipboardList },
                     { id: 'goals', label: 'Goals', icon: Target },
+                    { id: 'streak', label: 'Streak', icon: Zap },
+                    { id: 'feedlabel', label: 'Feed Label', icon: MessageSquare },
+                    { id: 'gallery', label: 'Gallery', icon: Award },
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
@@ -7756,6 +8166,257 @@ const PlanAssist = () => {
                   </div>
                 )}
 
+                {/* ── STREAK TAB ── */}
+                {accountTab === 'streak' && (() => {
+                  const completionDays = completionHistory
+                    .map(h => h.date instanceof Date ? h.date.toISOString().slice(0,10) : String(h.date).slice(0,10))
+                    .filter(Boolean);
+                  const uniqueDays = [...new Set(completionDays)];
+                  const currentStreak = computeStreak(uniqueDays, streakShieldLog);
+                  const today = getLocalDateStr();
+                  const todayWeekday = isWeekday(today);
+                  const todayDone = uniqueDays.includes(today);
+                  const todayShielded = streakShieldLog.includes(today);
+                  const yesterday = (() => { const d = new Date(today); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
+                  const yesterdayShielded = streakShieldLog.includes(yesterday);
+                  const yesterdayDone = uniqueDays.includes(yesterday);
+
+                  // Streak state
+                  let streakState = 'safe';
+                  if (!todayWeekday) streakState = 'weekend';
+                  else if (todayDone) streakState = 'safe';
+                  else if (yesterdayShielded && !yesterdayDone && !todayDone) streakState = 'shield_used_yesterday';
+                  else streakState = 'at_risk';
+
+                  const stateConfig = {
+                    weekend: { color: 'from-blue-400 to-indigo-500', label: 'Weekend', sub: 'Streak safe — enjoy your break!', icon: '🏖️' },
+                    safe: { color: 'from-green-400 to-emerald-500', label: 'Streak Safe!', sub: "You've completed a task today.", icon: '✅' },
+                    at_risk: { color: 'from-orange-400 to-red-500', label: 'Streak at Risk!', sub: 'Complete a task today to keep your streak.', icon: '⚠️' },
+                    shield_used_yesterday: { color: 'from-yellow-400 to-orange-400', label: 'Shield Used Yesterday', sub: 'Streak barely saved! Complete a task today.', icon: '🛡️' },
+                  };
+                  const cfg = stateConfig[streakState];
+
+                  // Personal record
+                  const personalRecord = (() => {
+                    const sorted = [...uniqueDays].sort();
+                    let max = 0, cur = 0;
+                    for (let i = 0; i < sorted.length; i++) {
+                      if (!isWeekday(sorted[i])) continue;
+                      if (i === 0) { cur = 1; }
+                      else {
+                        const prev = sorted[i-1];
+                        const diff = (new Date(sorted[i]) - new Date(prev)) / 86400000;
+                        if (diff <= 3 && isWeekday(prev)) cur++;
+                        else cur = 1;
+                      }
+                      if (cur > max) max = cur;
+                    }
+                    return Math.max(max, currentStreak);
+                  })();
+
+                  return (
+                    <div className="space-y-4">
+                      {/* Main streak card */}
+                      <div className={`bg-gradient-to-br ${cfg.color} rounded-2xl p-8 text-white text-center shadow-lg`}>
+                        <div className="text-5xl mb-2">{cfg.icon}</div>
+                        <div className="text-7xl font-black mb-1">{currentStreak}</div>
+                        <div className="text-white/80 text-sm font-medium mb-1">day streak</div>
+                        <div className="font-bold text-lg">{cfg.label}</div>
+                        <div className="text-white/80 text-sm mt-1">{cfg.sub}</div>
+                      </div>
+
+                      {/* Stats row */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-white rounded-xl border border-gray-100 p-4 text-center shadow-sm">
+                          <div className="text-2xl font-bold text-purple-600">{personalRecord}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Your record</div>
+                        </div>
+                        <div className="bg-white rounded-xl border border-gray-100 p-4 text-center shadow-sm">
+                          <div className="text-2xl font-bold text-yellow-500">{streakShieldsAvailable}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Shields available</div>
+                        </div>
+                        <div className="bg-white rounded-xl border border-gray-100 p-4 text-center shadow-sm">
+                          <div className="text-2xl font-bold text-blue-500">{streakShieldLog.length}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Shields used</div>
+                        </div>
+                      </div>
+
+                      {/* Shield controls */}
+                      <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-gray-900 text-sm">Streak Shield</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Protect your streak on missed weekdays</p>
+                          </div>
+                          <button
+                            disabled={streakShieldsAvailable < 1 || streakState === 'safe' || streakState === 'weekend'}
+                            onClick={async () => {
+                              try {
+                                const r = await apiCall('/streak/shields/use', 'POST', { date: today });
+                                setStreakShieldsAvailable(r.remaining);
+                                setStreakShieldLog(prev => [...prev, today]);
+                                setStreakShieldToast('🛡️ Streak Shield used! Your streak is protected.');
+                                setTimeout(() => setStreakShieldToast(null), 4000);
+                              } catch (err) { alert(err.message); }
+                            }}
+                            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+                              streakShieldsAvailable < 1 || streakState === 'safe' || streakState === 'weekend'
+                                ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                : 'bg-yellow-400 hover:bg-yellow-500 text-white shadow-md'
+                            }`}
+                          >
+                            {streakShieldsAvailable < 1 ? '🛡️ No shields' : '🛡️ Use Shield'}
+                          </button>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-gray-500">Mode:</span>
+                          {['manual','automatic'].map(m => (
+                            <button key={m} onClick={async () => {
+                              await apiCall('/streak/shields/mode', 'PUT', { mode: m });
+                              setStreakShieldMode(m);
+                            }}
+                            className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${streakShieldMode === m ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                              {m.charAt(0).toUpperCase() + m.slice(1)}
+                            </button>
+                          ))}
+                          <span className="text-xs text-gray-400 ml-1">
+                            {streakShieldMode === 'automatic' ? '(shields auto-fill gaps on Hub load)' : '(tap Use Shield to save your streak)'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── FEED LABEL TAB ── */}
+                {accountTab === 'feedlabel' && (() => {
+                  const LABEL_STYLES = {
+                    completed: { color: '#6b7280', bg: '#f3f4f6', anim: '' },
+                    finished: { color: '#7c3aed', bg: '#ede9fe', anim: '' },
+                    did: { color: '#2563eb', bg: '#dbeafe', anim: '' },
+                    handled: { color: '#059669', bg: '#d1fae5', anim: '' },
+                    closed: { color: '#dc2626', bg: '#fee2e2', anim: '' },
+                    processed: { color: '#d97706', bg: '#fef3c7', anim: '' },
+                    resolved: { color: '#0891b2', bg: '#cffafe', anim: '' },
+                    settled: { color: '#4f46e5', bg: '#e0e7ff', anim: 'animate-pulse' },
+                    finalized: { color: '#be185d', bg: '#fce7f3', anim: 'animate-pulse' },
+                    accomplished: { color: '#7c3aed', bg: '#ddd6fe', anim: 'animate-pulse' },
+                    achieved: { color: '#b45309', bg: '#fef3c7', anim: 'animate-bounce' },
+                    fulfilled: { color: '#065f46', bg: '#d1fae5', anim: 'animate-bounce' },
+                    delivered: { color: '#1e40af', bg: '#bfdbfe', anim: 'animate-bounce' },
+                    executed: { color: '#9f1239', bg: '#ffe4e6', anim: 'animate-bounce' },
+                    cleared: { color: '#0f766e', bg: '#ccfbf1', anim: 'animate-bounce' },
+                    dispatched: { color: '#6d28d9', bg: '#ede9fe', anim: 'animate-ping' },
+                    secured: { color: '#1d4ed8', bg: '#dbeafe', anim: 'animate-ping' },
+                    conquered: { color: '#b91c1c', bg: '#fee2e2', anim: 'animate-ping' },
+                    crushed: { color: '#7c2d12', bg: '#ffedd5', anim: 'animate-ping' },
+                    dominated: { color: '#312e81', bg: '#e0e7ff', anim: 'animate-pulse' },
+                    mastered: { color: '#92400e', bg: '#fef3c7', anim: 'animate-bounce' },
+                  };
+                  const unlockedLabels = feedLabelUnlocked.map(u => u.label);
+                  return (
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-900 mb-1">Feed Label</h2>
+                      <p className="text-sm text-gray-500 mb-1">Your label appears on the Live Activity feed.</p>
+                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{feedLabelDays}</span> days — unlocking {unlockedLabels.length} / {LABEL_THRESHOLDS.length} labels.</p>
+                      <div className="grid grid-cols-2 gap-2">
+                        {LABEL_THRESHOLDS.map(([threshold, label]) => {
+                          const style = LABEL_STYLES[label] || {};
+                          const unlocked = unlockedLabels.includes(label);
+                          const selected = feedLabelSelected === label;
+                          return (
+                            <button
+                              key={label}
+                              disabled={!unlocked}
+                              onClick={async () => {
+                                if (!unlocked) return;
+                                await apiCall('/feed-label', 'PUT', { label });
+                                setFeedLabelSelected(label);
+                              }}
+                              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                                selected ? 'border-purple-500 shadow-md' :
+                                unlocked ? 'border-gray-200 hover:border-gray-300' :
+                                'border-gray-100 opacity-40 cursor-not-allowed'
+                              }`}
+                              style={{ backgroundColor: unlocked ? style.bg : '#f9fafb' }}
+                            >
+                              <span className={`text-sm font-bold px-2 py-0.5 rounded-lg ${style.anim}`}
+                                    style={{ color: style.color, backgroundColor: style.bg, border: `1px solid ${style.color}40` }}>
+                                {label}
+                              </span>
+                              <span className="text-xs text-gray-500 flex-1">{threshold === 0 ? 'default' : `${threshold} days`}</span>
+                              {selected && <span className="text-purple-600 text-xs font-bold">✓ Active</span>}
+                              {!unlocked && <span className="text-gray-400 text-xs">🔒</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── GALLERY TAB ── */}
+                {accountTab === 'gallery' && (() => {
+                  const BADGE_DEFS = {
+                    first_completion: { emoji: '🎯', name: 'First Step', desc: 'Completed your first task' },
+                    tasks_10: { emoji: '📚', name: 'Getting Started', desc: '10 tasks completed' },
+                    tasks_25: { emoji: '💪', name: 'Building Momentum', desc: '25 tasks completed' },
+                    tasks_50: { emoji: '🔥', name: 'On Fire', desc: '50 tasks completed' },
+                    tasks_100: { emoji: '💯', name: 'Century', desc: '100 tasks completed' },
+                    tasks_250: { emoji: '⚡', name: 'Powerhouse', desc: '250 tasks completed' },
+                    tasks_500: { emoji: '👑', name: 'Legend', desc: '500 tasks completed' },
+                    streak_7: { emoji: '📅', name: 'Week Warrior', desc: '7-day streak' },
+                    streak_14: { emoji: '🌟', name: 'Fortnight Focus', desc: '14-day streak' },
+                    streak_30: { emoji: '🗓️', name: 'Monthly Devotion', desc: '30-day streak' },
+                    streak_60: { emoji: '🏆', name: 'Champion', desc: '60-day streak' },
+                    streak_100: { emoji: '🎖️', name: 'Elite', desc: '100-day streak' },
+                    day_3: { emoji: '🌅', name: 'Productive Day', desc: '3 tasks in one day' },
+                    day_5: { emoji: '⚡', name: 'High Output', desc: '5 tasks in one day' },
+                    day_10: { emoji: '🚀', name: 'Beast Mode', desc: '10 tasks in one day' },
+                    day_20: { emoji: '🌋', name: 'Unstoppable', desc: '20 tasks in one day' },
+                    early_bird: { emoji: '🐦', name: 'Early Bird', desc: 'Completed a task before 8am' },
+                    night_owl: { emoji: '🦉', name: 'Night Owl', desc: 'Completed a task after 10pm' },
+                  };
+                  const earnedKeys = new Set(userBadges.map(b => b.badge_key));
+                  const earned = userBadges.map(b => ({ ...b, ...(BADGE_DEFS[b.badge_key] || { emoji: '🏅', name: b.badge_key, desc: '' }) }));
+                  const locked = Object.entries(BADGE_DEFS).filter(([k]) => !earnedKeys.has(k));
+                  return (
+                    <div>
+                      <h2 className="text-lg font-bold text-gray-900 mb-1">Gallery</h2>
+                      <p className="text-sm text-gray-500 mb-5">{earned.length} of {Object.keys(BADGE_DEFS).length} badges earned</p>
+                      {earned.length > 0 && (
+                        <div className="mb-6">
+                          <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-3">Earned</p>
+                          <div className="grid grid-cols-3 gap-3">
+                            {earned.map(b => (
+                              <div key={b.badge_key} className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-2xl p-4 text-center shadow-sm">
+                                <div className="text-3xl mb-1">{b.emoji}</div>
+                                <div className="font-bold text-gray-800 text-xs">{b.name}</div>
+                                <div className="text-gray-500 text-xs mt-0.5">{b.desc}</div>
+                                <div className="text-gray-400 text-xs mt-1">{new Date(b.awarded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {locked.length > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-3">Locked</p>
+                          <div className="grid grid-cols-3 gap-3">
+                            {locked.map(([key, def]) => (
+                              <div key={key} className="bg-gray-50 border border-gray-200 rounded-2xl p-4 text-center opacity-50">
+                                <div className="text-3xl mb-1 grayscale">{def.emoji}</div>
+                                <div className="font-bold text-gray-500 text-xs">{def.name}</div>
+                                <div className="text-gray-400 text-xs mt-0.5">{def.desc}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -7872,6 +8533,8 @@ const PlanAssist = () => {
                         <option value="active_tasks_asc">Fewest Tasks</option>
                         <option value="completions_desc">Most Completions</option>
                         <option value="completions_asc">Fewest Completions</option>
+                        <option value="health_desc">Healthiest First</option>
+                        <option value="health_asc">Needs Attention First</option>
                       </select>
                     </div>
                     {/* Active filter summary */}
@@ -7920,6 +8583,14 @@ const PlanAssist = () => {
                           case 'active_tasks_asc': return (parseInt(a.active_tasks) || 0) - (parseInt(b.active_tasks) || 0);
                           case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
                           case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
+                          case 'health_desc': {
+                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,((u.completed_this_week||0)/Math.max(1,u.active_tasks||1))*25)+(u.in_session?25:(u.completed_this_week>0?20:0)); };
+                            return hs(b) - hs(a);
+                          }
+                          case 'health_asc': {
+                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,((u.completed_this_week||0)/Math.max(1,u.active_tasks||1))*25)+(u.in_session?25:(u.completed_this_week>0?20:0)); };
+                            return hs(a) - hs(b);
+                          }
                           default: return (a.name || '').localeCompare(b.name || '');
                         }
                       };
@@ -7960,7 +8631,22 @@ const PlanAssist = () => {
                                 </div>
                               </div>
                             </div>
-                            <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} · last sync {u.last_sync ? new Date(u.last_sync).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'never'}</p>
+                            {(() => {
+                              // Health score: 0-100
+                              const daysSinceSync = u.last_sync ? Math.floor((Date.now() - new Date(u.last_sync)) / 86400000) : 99;
+                              const freshScore = Math.max(0, 25 - daysSinceSync * 3); // max 25
+                              const tokenScore = u.has_canvas_token ? 25 : 0;
+                              const completionRate = u.active_tasks > 0 ? Math.min(25, Math.round((u.completed_this_week / Math.max(1, u.active_tasks)) * 25)) : 12;
+                              const sessionScore = u.in_session ? 25 : u.completed_this_week > 0 ? 20 : 0;
+                              const healthScore = Math.min(100, freshScore + tokenScore + completionRate + sessionScore);
+                              const healthColor = healthScore >= 75 ? 'text-green-600 bg-green-50' : healthScore >= 45 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50';
+                              return (
+                                <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${healthColor}`}>Health: {healthScore}</span>
+                                  <span className="text-xs text-gray-400">{u.active_tasks} tasks · {u.total_completed} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} · last sync {u.last_sync ? new Date(u.last_sync).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'never'}</span>
+                                </div>
+                              );
+                            })()}
                           </div>
                         ));
                     })()}
@@ -8010,6 +8696,15 @@ const PlanAssist = () => {
                               </button>
                               <button onClick={() => adminClearToken(u.id)} className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 flex items-center gap-1">
                                 <X className="w-3.5 h-3.5" />Clear Token
+                              </button>
+                              <button onClick={async () => {
+                                try {
+                                  const r = await apiCall(`/admin/users/${u.id}/grant-shield`, 'POST', {});
+                                  alert(`✅ Shield granted to ${u.name}. They now have ${r.shields} shield(s).`);
+                                  loadAdminUsers();
+                                } catch (err) { alert('Failed: ' + err.message); }
+                              }} className="text-xs px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 flex items-center gap-1">
+                                🛡️ Grant Shield {u.streak_shields_available > 0 && <span className="ml-1 font-bold">({u.streak_shields_available})</span>}
                               </button>
                               {u.is_banned ? (
                                 <button onClick={() => adminUnbanUser(u.id)} className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 flex items-center gap-1">
@@ -8083,6 +8778,15 @@ const PlanAssist = () => {
                         >
                           <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />Permanent (red)</span>
                         </button>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-gray-500 font-medium">Audience:</span>
+                        {[['all','Everyone'],['existing','Existing Users'],['new','New Users']].map(([val,lbl]) => (
+                          <button key={val}
+                            onClick={() => setNewAnnouncementAudience(val)}
+                            className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all ${(newAnnouncementAudience||'all') === val ? 'bg-red-600 text-white border-red-600' : 'border-gray-300 text-gray-600 hover:border-red-400'}`}
+                          >{lbl}</button>
+                        ))}
                       </div>
                       <button
                         onClick={adminCreateAnnouncement}
