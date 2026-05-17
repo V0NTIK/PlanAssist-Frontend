@@ -819,35 +819,38 @@ const PlanAssist = () => {
         setCurrentPage('account');
         setAccountTab('initial-setup');
       } else {
+        // Load user data (tasks, history, settings) while login loading state is still active
         await loadUserData(data.token);
         loadAnnouncements(data.token);
-        setCurrentPage('hub');
-        // Login-time sync: check last_sync to decide Main vs Background
-        // lastSyncTimestamp is set inside loadUserData from the account/setup response
-        // We read it directly from the setupData (which is returned by loadUserData's fetch)
-        // Since loadUserData doesn't return the value, we use a quick re-fetch approach
-        if (data.user.canvasApiToken || accountSetup.canvasApiToken) {
-          // Re-check last_sync from the fresh token — it was stored in state by loadUserData
-          // Use a short timeout to let React batch the state updates before we read it
-          setTimeout(async () => {
-            try {
-              const setupCheck = await apiCall('/account/setup', 'GET');
-              const lastSync = setupCheck?.lastSync ? new Date(setupCheck.lastSync) : null;
-              const now = new Date();
-              const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-              const isStale = !lastSync || (now - lastSync) >= fourteenDaysMs;
-              if (isStale) {
-                console.log('[LOGIN SYNC] last_sync is null or 14+ days old — running Main Sync');
-                fetchCanvasTasks();
-              } else {
-                console.log('[LOGIN SYNC] last_sync is recent — running Background Sync');
-                runBackgroundSync();
-              }
-            } catch (err) {
-              console.warn('[LOGIN SYNC] Could not check last_sync:', err.message);
+
+        // Login-time sync: run before showing Hub so user sees fresh data immediately.
+        // authLoading stays TRUE throughout — the login button keeps its loading state
+        // until sync completes and Hub is fully ready.
+        // Only run if user has a Canvas token (setupData.canvasApiToken is returned by loadUserData
+        // and stored in accountSetup state — but since React state may not have updated yet,
+        // re-fetch account/setup directly to read last_sync and canvasApiToken reliably).
+        try {
+          const setupCheck = await apiCall('/account/setup', 'GET');
+          if (setupCheck?.canvasApiToken) {
+            const lastSync = setupCheck.lastSync ? new Date(setupCheck.lastSync) : null;
+            const now = new Date();
+            const isStale = !lastSync || (now - lastSync) >= 14 * 24 * 60 * 60 * 1000;
+            if (isStale) {
+              console.log('[LOGIN SYNC] last_sync null or 14+ days — running Main Sync');
+              await fetchCanvasTasks({ silent: true });
+            } else {
+              console.log('[LOGIN SYNC] last_sync recent — running Background Sync');
+              await runBackgroundSync();
             }
-          }, 100);
+          } else {
+            console.log('[LOGIN SYNC] No Canvas token — skipping sync');
+          }
+        } catch (err) {
+          console.warn('[LOGIN SYNC] Sync check failed:', err.message);
         }
+
+        // Only navigate to Hub after sync is fully done
+        setCurrentPage('hub');
       }
     } catch (error) {
       if (error.message === 'ACCOUNT_BLOCKED') {
@@ -1251,7 +1254,7 @@ const PlanAssist = () => {
   };
 
   // ── MAIN SYNC ────────────────────────────────────────────────────────────
-  const fetchCanvasTasks = async () => {
+  const fetchCanvasTasks = async ({ silent = false } = {}) => {
     if (!accountSetup.canvasApiToken) {
       alert('Please enter your Canvas API Token first');
       return;
@@ -1288,7 +1291,7 @@ const PlanAssist = () => {
       let msg = `Sync complete! ${updated} tasks updated`;
       if (newCount > 0) msg += `, ${newCount} new`;
       if (cleaned > 0) msg += `, ${cleaned} past-due removed`;
-      alert(msg + '.');
+      if (!silent) alert(msg + '.');
     } catch (error) {
       console.error('Main sync failed:', error);
       let msg = 'Sync failed.';
@@ -1297,7 +1300,7 @@ const PlanAssist = () => {
       } else if (error.message) {
         msg = 'Sync failed: ' + error.message;
       }
-      alert(msg);
+      if (!silent) alert(msg);
     } finally {
       setIsLoadingTasks(false);
       setSyncType(null);
