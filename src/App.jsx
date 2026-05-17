@@ -1216,6 +1216,12 @@ const PlanAssist = () => {
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
     if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
+    if (tab === 'streak') { loadStreakData(); loadCompletionHistory(); }
+    if (tab === 'feedlabel') loadFeedLabel();
+    if (tab === 'gallery') { loadBadges(); checkNewUnlocks(computeStreak(
+      [...new Set(completionHistory.map(h => h.date instanceof Date ? h.date.toISOString().slice(0,10) : String(h.date).slice(0,10)).filter(Boolean))],
+      streakShieldLog
+    )); }
     if (tab === 'help') loadHelpContent();
   };
 
@@ -4741,7 +4747,23 @@ const PlanAssist = () => {
                           mastered:'#92400e'
                         };
                         const feedLabel = item.feed_label || 'completed';
-                        const labelColor = LABEL_COLORS[feedLabel] || '#6b7280';
+                        const FEED_LABEL_STYLES_MAP = {
+                          completed:'#6b7280',finished:'#7c3aed',did:'#2563eb',handled:'#059669',
+                          closed:'#dc2626',processed:'#d97706',resolved:'#0891b2',settled:'#4f46e5',
+                          finalized:'#be185d',accomplished:'#7c3aed',achieved:'#b45309',fulfilled:'#065f46',
+                          delivered:'#1e40af',executed:'#9f1239',cleared:'#0f766e',dispatched:'#6d28d9',
+                          secured:'#1d4ed8',conquered:'#b91c1c',crushed:'#7c2d12',dominated:'#312e81',
+                          mastered:'#92400e'
+                        };
+                        const FEED_LABEL_WEIGHT = {
+                          completed:'500',finished:'600',did:'600',handled:'700',closed:'700',
+                          processed:'600',resolved:'700',settled:'700',finalized:'700',accomplished:'800',
+                          achieved:'800',fulfilled:'800',delivered:'800',executed:'800',cleared:'800',
+                          dispatched:'800',secured:'900',conquered:'900',crushed:'900',dominated:'900',
+                          mastered:'900'
+                        };
+                        const labelColor = FEED_LABEL_STYLES_MAP[feedLabel] || '#6b7280';
+                        const labelWeight = FEED_LABEL_WEIGHT[feedLabel] || '500';
                         const reactions = item.reactions || [];
                         const userReaction = item.user_reaction;
                         const REACTION_EMOJIS = ['👏','⚡','🔥','💯','🎯'];
@@ -8290,28 +8312,30 @@ const PlanAssist = () => {
 
                 {/* ── FEED LABEL TAB ── */}
                 {accountTab === 'feedlabel' && (() => {
+                  // Each label: unique visual personality
+                  // style: { color, bg, border, weight, size, anim, extra (CSS string for inline) }
                   const LABEL_STYLES = {
-                    completed: { color: '#6b7280', bg: '#f3f4f6', anim: '' },
-                    finished: { color: '#7c3aed', bg: '#ede9fe', anim: '' },
-                    did: { color: '#2563eb', bg: '#dbeafe', anim: '' },
-                    handled: { color: '#059669', bg: '#d1fae5', anim: '' },
-                    closed: { color: '#dc2626', bg: '#fee2e2', anim: '' },
-                    processed: { color: '#d97706', bg: '#fef3c7', anim: '' },
-                    resolved: { color: '#0891b2', bg: '#cffafe', anim: '' },
-                    settled: { color: '#4f46e5', bg: '#e0e7ff', anim: 'animate-pulse' },
-                    finalized: { color: '#be185d', bg: '#fce7f3', anim: 'animate-pulse' },
-                    accomplished: { color: '#7c3aed', bg: '#ddd6fe', anim: 'animate-pulse' },
-                    achieved: { color: '#b45309', bg: '#fef3c7', anim: 'animate-bounce' },
-                    fulfilled: { color: '#065f46', bg: '#d1fae5', anim: 'animate-bounce' },
-                    delivered: { color: '#1e40af', bg: '#bfdbfe', anim: 'animate-bounce' },
-                    executed: { color: '#9f1239', bg: '#ffe4e6', anim: 'animate-bounce' },
-                    cleared: { color: '#0f766e', bg: '#ccfbf1', anim: 'animate-bounce' },
-                    dispatched: { color: '#6d28d9', bg: '#ede9fe', anim: 'animate-ping' },
-                    secured: { color: '#1d4ed8', bg: '#dbeafe', anim: 'animate-ping' },
-                    conquered: { color: '#b91c1c', bg: '#fee2e2', anim: 'animate-ping' },
-                    crushed: { color: '#7c2d12', bg: '#ffedd5', anim: 'animate-ping' },
-                    dominated: { color: '#312e81', bg: '#e0e7ff', anim: 'animate-pulse' },
-                    mastered: { color: '#92400e', bg: '#fef3c7', anim: 'animate-bounce' },
+                    completed:  { color:'#6b7280', bg:'#f3f4f6', border:'#d1d5db', weight:'500', size:'0.75rem', anim:'', extra:'' },
+                    finished:   { color:'#7c3aed', bg:'#ede9fe', border:'#c4b5fd', weight:'600', size:'0.78rem', anim:'', extra:'' },
+                    did:        { color:'#2563eb', bg:'#dbeafe', border:'#93c5fd', weight:'600', size:'0.78rem', anim:'', extra:'letterSpacing:"0.05em"' },
+                    handled:    { color:'#059669', bg:'#d1fae5', border:'#6ee7b7', weight:'700', size:'0.80rem', anim:'', extra:'' },
+                    closed:     { color:'#dc2626', bg:'#fee2e2', border:'#fca5a5', weight:'700', size:'0.80rem', anim:'', extra:'textDecoration:"line-through",textDecorationColor:"#dc2626"' },
+                    processed:  { color:'#d97706', bg:'#fef3c7', border:'#fcd34d', weight:'600', size:'0.80rem', anim:'', extra:'fontStyle:"italic"' },
+                    resolved:   { color:'#0891b2', bg:'#cffafe', border:'#67e8f9', weight:'700', size:'0.80rem', anim:'', extra:'letterSpacing:"0.08em"' },
+                    settled:    { color:'#4f46e5', bg:'#e0e7ff', border:'#a5b4fc', weight:'700', size:'0.82rem', anim:'animate-pulse', extra:'' },
+                    finalized:  { color:'#be185d', bg:'#fce7f3', border:'#f9a8d4', weight:'700', size:'0.82rem', anim:'animate-pulse', extra:'fontStyle:"italic"' },
+                    accomplished:{ color:'#7c3aed', bg:'linear-gradient(90deg,#ede9fe,#ddd6fe)', border:'#8b5cf6', weight:'800', size:'0.85rem', anim:'animate-pulse', extra:'' },
+                    achieved:   { color:'#b45309', bg:'linear-gradient(90deg,#fef3c7,#fde68a)', border:'#f59e0b', weight:'800', size:'0.85rem', anim:'animate-bounce', extra:'' },
+                    fulfilled:  { color:'#065f46', bg:'linear-gradient(90deg,#d1fae5,#a7f3d0)', border:'#34d399', weight:'800', size:'0.85rem', anim:'animate-bounce', extra:'letterSpacing:"0.05em"' },
+                    delivered:  { color:'#1e40af', bg:'linear-gradient(90deg,#bfdbfe,#93c5fd)', border:'#3b82f6', weight:'800', size:'0.88rem', anim:'animate-bounce', extra:'' },
+                    executed:   { color:'#9f1239', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3)', border:'#f43f5e', weight:'800', size:'0.88rem', anim:'animate-bounce', extra:'textTransform:"uppercase",letterSpacing:"0.10em"' },
+                    cleared:    { color:'#0f766e', bg:'linear-gradient(135deg,#ccfbf1,#99f6e4)', border:'#2dd4bf', weight:'800', size:'0.88rem', anim:'animate-bounce', extra:'letterSpacing:"0.08em"' },
+                    dispatched: { color:'#6d28d9', bg:'linear-gradient(135deg,#ede9fe,#c4b5fd)', border:'#7c3aed', weight:'800', size:'0.90rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.12em"' },
+                    secured:    { color:'#1d4ed8', bg:'linear-gradient(135deg,#dbeafe,#93c5fd)', border:'#2563eb', weight:'900', size:'0.90rem', anim:'', extra:'letterSpacing:"0.10em",fontStyle:"italic"' },
+                    conquered:  { color:'#b91c1c', bg:'linear-gradient(135deg,#fee2e2,#fca5a5)', border:'#ef4444', weight:'900', size:'0.92rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.15em"' },
+                    crushed:    { color:'#92400e', bg:'linear-gradient(135deg,#ffedd5,#fdba74)', border:'#f97316', weight:'900', size:'0.92rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.12em",fontStyle:"italic"' },
+                    dominated:  { color:'#312e81', bg:'linear-gradient(135deg,#e0e7ff,#818cf8)', border:'#6366f1', weight:'900', size:'0.95rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.18em"' },
+                    mastered:   { color:'#92400e', bg:'linear-gradient(135deg,#fef3c7,#fcd34d,#f59e0b)', border:'#d97706', weight:'900', size:'1rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.20em",textShadow:"0 1px 2px rgba(180,83,9,0.4)"' },
                   };
                   const unlockedLabels = feedLabelUnlocked.map(u => u.label);
                   return (
@@ -8338,10 +8362,17 @@ const PlanAssist = () => {
                                 unlocked ? 'border-gray-200 hover:border-gray-300' :
                                 'border-gray-100 opacity-40 cursor-not-allowed'
                               }`}
-                              style={{ backgroundColor: unlocked ? style.bg : '#f9fafb' }}
+                              style={{ background: unlocked ? (style.bg.startsWith('linear') ? style.bg : style.bg) : '#f9fafb' }}
                             >
-                              <span className={`text-sm font-bold px-2 py-0.5 rounded-lg ${style.anim}`}
-                                    style={{ color: style.color, backgroundColor: style.bg, border: `1px solid ${style.color}40` }}>
+                              <span className={`px-2.5 py-1 rounded-lg ${style.anim}`}
+                                    style={{
+                                      color: style.color,
+                                      background: style.bg.startsWith('linear') ? style.bg : style.bg,
+                                      border: `1.5px solid ${style.border || style.color + '60'}`,
+                                      fontWeight: style.weight || '600',
+                                      fontSize: style.size || '0.78rem',
+                                      ...(style.extra ? Object.fromEntries(style.extra.split(',').filter(Boolean).map(p => { const [k,v] = p.split(':'); return [k.trim(), v?.replace(/"/g,'').trim()]; })) : {})
+                                    }}>
                                 {label}
                               </span>
                               <span className="text-xs text-gray-500 flex-1">{threshold === 0 ? 'default' : `${threshold} days`}</span>
@@ -8378,7 +8409,14 @@ const PlanAssist = () => {
                     night_owl: { emoji: '🦉', name: 'Night Owl', desc: 'Completed a task after 10pm' },
                   };
                   const earnedKeys = new Set(userBadges.map(b => b.badge_key));
-                  const earned = userBadges.map(b => ({ ...b, ...(BADGE_DEFS[b.badge_key] || { emoji: '🏅', name: b.badge_key, desc: '' }) }));
+                  const earned = userBadges.map(b => ({
+                      ...b,
+                      ...(BADGE_DEFS[b.badge_key] || {
+                        emoji: '🏅',
+                        name: b.badge_key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+                        desc: ''
+                      })
+                    }));
                   const locked = Object.entries(BADGE_DEFS).filter(([k]) => !earnedKeys.has(k));
                   return (
                     <div>
@@ -8617,7 +8655,14 @@ const PlanAssist = () => {
                           >
                             <div className="flex items-center justify-between">
                               <div>
-                                <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
+                                <div className="flex items-center gap-1.5">
+                                  <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
+                                  {(() => {
+                                    const daysSinceSync = u.last_sync ? Math.floor((Date.now() - new Date(u.last_sync)) / 86400000) : 99;
+                                    const s = Math.min(100, Math.max(0,25-daysSinceSync*3) + (u.has_canvas_token?25:0) + Math.min(25,((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25) + (u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)));
+                                    return <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${s>=75?'text-green-700 bg-green-100':s>=45?'text-amber-700 bg-amber-100':'text-red-700 bg-red-100'}`}>{s}</span>;
+                                  })()}
+                                </div>
                                 <p className="text-xs text-gray-400">{u.email}</p>
                               </div>
                               <div className="flex flex-col items-end gap-1">
@@ -8631,22 +8676,9 @@ const PlanAssist = () => {
                                 </div>
                               </div>
                             </div>
-                            {(() => {
-                              // Health score: 0-100
-                              const daysSinceSync = u.last_sync ? Math.floor((Date.now() - new Date(u.last_sync)) / 86400000) : 99;
-                              const freshScore = Math.max(0, 25 - daysSinceSync * 3); // max 25
-                              const tokenScore = u.has_canvas_token ? 25 : 0;
-                              const completionRate = u.active_tasks > 0 ? Math.min(25, Math.round((u.completed_this_week / Math.max(1, u.active_tasks)) * 25)) : 12;
-                              const sessionScore = u.in_session ? 25 : u.completed_this_week > 0 ? 20 : 0;
-                              const healthScore = Math.min(100, freshScore + tokenScore + completionRate + sessionScore);
-                              const healthColor = healthScore >= 75 ? 'text-green-600 bg-green-50' : healthScore >= 45 ? 'text-amber-600 bg-amber-50' : 'text-red-600 bg-red-50';
-                              return (
-                                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${healthColor}`}>Health: {healthScore}</span>
-                                  <span className="text-xs text-gray-400">{u.active_tasks} tasks · {u.total_completed} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} · last sync {u.last_sync ? new Date(u.last_sync).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'never'}</span>
-                                </div>
-                              );
-                            })()}
+                            <div className="mt-1">
+                              <span className="text-xs text-gray-400">{parseInt(u.active_tasks) || 0} tasks · {parseInt(u.total_completed) || 0} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} · last sync {u.last_sync ? new Date(u.last_sync).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'never'}</span>
+                            </div>
                           </div>
                         ));
                     })()}
@@ -8954,6 +8986,39 @@ const PlanAssist = () => {
                           </div>
                         </div>
                       )}
+
+                      {/* Activity Heatmap — time-of-day across all days */}
+                      {d.activityHeatmap && (
+                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                          <h4 className="font-bold text-gray-900 mb-3">Activity Heatmap — Time of Day (all days combined)</h4>
+                          <div className="flex items-end gap-1 h-20">
+                            {d.activityHeatmap.map((bucket) => {
+                              const max = Math.max(...d.activityHeatmap.map(b => b.count), 1);
+                              const pct = Math.round((bucket.count / max) * 100);
+                              return (
+                                <div key={bucket.hour} className="flex flex-col items-center flex-1 gap-1" title={`${bucket.hour}:00 — ${bucket.count} completions`}>
+                                  <div className="w-full rounded-t" style={{ height: `${Math.max(4, pct * 0.68)}px`, backgroundColor: `rgba(124,77,255,${0.15 + pct/100*0.85})` }} />
+                                  <span className="text-xs text-gray-400" style={{ fontSize: '9px' }}>{bucket.hour}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Bulk Actions */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-3">Bulk Actions</h4>
+                        <button onClick={async () => {
+                          if (!window.confirm('Grant a Streak Shield to ALL users?')) return;
+                          try {
+                            const r = await apiCall('/admin/grant-shields-all', 'POST', {});
+                            alert(`✅ Granted shields to ${r.affected} users.`);
+                          } catch (err) { alert('Failed: ' + err.message); }
+                        }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold transition-colors">
+                          🛡️ Grant Streak Shield to All Users
+                        </button>
+                      </div>
 
                       <div className="text-right">
                         <button onClick={loadAdminDiagnostics} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh diagnostics</button>
