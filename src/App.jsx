@@ -3010,6 +3010,10 @@ const PlanAssist = () => {
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
         [data-planassist-theme="system"] * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+        /* Sync overlay cards (Activity/Goals/Marks pane spinners) */
+        [data-planassist-theme="system"] .pa-sync-overlay { background: rgba(255,255,255,0.82); }
+        [data-planassist-theme="system"] .pa-sync-card { background: #ffffff; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
+        [data-planassist-theme="system"] .pa-sync-text { color: #7c3aed; }
       `,
       warm: `
         :root { color-scheme: light; }
@@ -3019,6 +3023,11 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb { background: #f48fb1; border-radius: 4px; }
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb:hover { background: #c2185b; }
         [data-planassist-theme="warm"] * { scrollbar-color: #f48fb1 #fce4ec; scrollbar-width: thin; }
+        /* Sync overlay cards */
+        [data-planassist-theme="warm"] .pa-sync-overlay { background: rgba(255,240,245,0.88); }
+        [data-planassist-theme="warm"] .pa-sync-card { background: #fff5f8; box-shadow: 0 8px 32px rgba(194,24,91,0.15); }
+        [data-planassist-theme="warm"] .pa-sync-text { color: #c2185b; }
+        [data-planassist-theme="warm"] .pa-sync-card .border-purple-600 { border-color: #e91e8c !important; }
         /* ── Page background: white ──────────────────────────── */
         [data-planassist-theme="warm"] { background: #ffffff !important; }
         [data-planassist-theme="warm"] .bg-white { background-color: #ffffff !important; }
@@ -3170,6 +3179,11 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb { background: #2e7d32; border-radius: 4px; }
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb:hover { background: #43a047; }
         [data-planassist-theme="cool"] * { scrollbar-color: #2e7d32 #0a0f0a; scrollbar-width: thin; }
+        /* Sync overlay cards */
+        [data-planassist-theme="cool"] .pa-sync-overlay { background: rgba(10,15,10,0.82); }
+        [data-planassist-theme="cool"] .pa-sync-card { background: #192218; box-shadow: 0 8px 32px rgba(0,0,0,0.50); }
+        [data-planassist-theme="cool"] .pa-sync-text { color: #66bb6a; }
+        [data-planassist-theme="cool"] .pa-sync-card .border-purple-600 { border-color: #43a047 !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="cool"] { background: #0a0f0a !important; color: #e8f5e9; }
         [data-planassist-theme="cool"] .bg-white { background-color: #111811 !important; }
@@ -3354,6 +3368,11 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb { background: #3d3d6b; border-radius: 4px; }
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #7c4dff; }
         [data-planassist-theme="dark"] * { scrollbar-color: #3d3d6b #0d0d14; scrollbar-width: thin; }
+        /* Sync overlay cards */
+        [data-planassist-theme="dark"] .pa-sync-overlay { background: rgba(13,13,20,0.82); }
+        [data-planassist-theme="dark"] .pa-sync-card { background: #13131f; box-shadow: 0 8px 32px rgba(0,0,0,0.60); }
+        [data-planassist-theme="dark"] .pa-sync-text { color: #b39ddb; }
+        [data-planassist-theme="dark"] .pa-sync-card .border-purple-600 { border-color: #7c4dff !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="dark"] { background: #0d0d14 !important; color: #e8eaf6; }
         [data-planassist-theme="dark"] .bg-white { background-color: #13131f !important; }
@@ -6658,10 +6677,10 @@ const PlanAssist = () => {
           <div className="max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
-                <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.35)' }}>
-                  <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-3">
+                <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.40)' }}>
+                  <div className="pa-sync-card flex flex-col items-center gap-3 px-8 py-6 rounded-2xl shadow-2xl">
                     <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                    <p className="text-gray-900 font-semibold">Refreshing course data…</p>
+                    <p className="pa-sync-text font-semibold">Refreshing course data…</p>
                   </div>
                 </div>
               )}
@@ -7447,10 +7466,10 @@ const PlanAssist = () => {
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative">
                       {/* Grade Sync loading overlay for Activity pane */}
                       {gradeSyncLoading && (
-                        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', background: 'rgba(255,255,255,0.80)' }}>
-                          <div className="flex flex-col items-center gap-3">
+                        <div className="pa-sync-overlay absolute inset-0 z-20 flex items-center justify-center rounded-2xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+                          <div className="pa-sync-card flex flex-col items-center gap-3 px-6 py-4 rounded-xl">
                             <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                            <p className="text-purple-700 font-semibold text-sm">Refreshing grades…</p>
+                            <p className="pa-sync-text text-sm font-semibold">Refreshing grades…</p>
                           </div>
                         </div>
                       )}
@@ -7717,10 +7736,10 @@ const PlanAssist = () => {
                 {accountTab === 'goals' && (
                   <div className="relative">
                     {courseSyncLoading && (
-                      <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', background: 'rgba(255,255,255,0.75)' }}>
-                        <div className="flex flex-col items-center gap-3">
+                      <div className="pa-sync-overlay absolute inset-0 z-20 flex items-center justify-center rounded-xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
+                        <div className="pa-sync-card flex flex-col items-center gap-3 px-6 py-4 rounded-xl">
                           <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                          <p className="text-purple-700 font-semibold text-sm">Refreshing course data…</p>
+                          <p className="pa-sync-text text-sm font-semibold">Refreshing course data…</p>
                         </div>
                       </div>
                     )}
