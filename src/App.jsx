@@ -4741,23 +4741,31 @@ const PlanAssist = () => {
                           mastered:'#92400e'
                         };
                         const feedLabel = item.feed_label || 'completed';
-                        const FEED_LABEL_STYLES_MAP = {
-                          completed:'#6b7280',finished:'#7c3aed',did:'#2563eb',handled:'#059669',
-                          closed:'#dc2626',processed:'#d97706',resolved:'#0891b2',settled:'#4f46e5',
-                          finalized:'#be185d',accomplished:'#7c3aed',achieved:'#b45309',fulfilled:'#065f46',
-                          delivered:'#1e40af',executed:'#9f1239',cleared:'#0f766e',dispatched:'#6d28d9',
-                          secured:'#1d4ed8',conquered:'#b91c1c',crushed:'#7c2d12',dominated:'#312e81',
-                          mastered:'#92400e'
+                        // Per-label feed pill styles — condensed for inline use
+                        const FL = {
+                          completed:   { color:'#6b7280', bg:'transparent', border:'none', css:{ fontWeight:500 } },
+                          finished:    { color:'#7c3aed', bg:'transparent', border:'none', css:{ fontWeight:600 } },
+                          did:         { color:'#2563eb', bg:'transparent', border:'none', css:{ fontWeight:600, fontStyle:'italic' } },
+                          handled:     { color:'#059669', bg:'transparent', border:'none', css:{ fontWeight:700 } },
+                          closed:      { color:'#dc2626', bg:'transparent', border:'none', css:{ fontWeight:700, textDecoration:'line-through', textDecorationColor:'#dc2626' } },
+                          processed:   { color:'#d97706', bg:'transparent', border:'none', css:{ fontWeight:600, fontStyle:'italic' } },
+                          resolved:    { color:'#0e7490', bg:'#ecfeff', border:'1px solid #67e8f9', css:{ fontWeight:700, letterSpacing:'0.06em', borderRadius:'4px', padding:'0 4px' } },
+                          settled:     { color:'#3730a3', bg:'#e0e7ff', border:'1px solid #a5b4fc', css:{ fontWeight:700, borderRadius:'6px', padding:'0 4px' } },
+                          finalized:   { color:'#9d174d', bg:'#fce7f3', border:'1px solid #f9a8d4', css:{ fontWeight:700, fontStyle:'italic', borderRadius:'8px', padding:'0 4px' } },
+                          accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd)', border:'1px solid #8b5cf6', css:{ fontWeight:800, borderRadius:'6px', padding:'0 5px' } },
+                          achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a)', border:'1px solid #f59e0b', css:{ fontWeight:800, borderRadius:'4px', padding:'0 5px' } },
+                          fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'1px solid #34d399', css:{ fontWeight:800, borderRadius:'8px', padding:'0 5px' } },
+                          delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'1px solid #3b82f6', css:{ fontWeight:800, textTransform:'uppercase', letterSpacing:'0.08em', borderRadius:'3px', padding:'0 5px', fontSize:'0.72rem' } },
+                          executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3)', border:'1px solid #f43f5e', css:{ fontWeight:800, textTransform:'uppercase', letterSpacing:'0.10em', borderRadius:'2px', padding:'0 5px', fontSize:'0.72rem' } },
+                          cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1)', border:'1px solid #14b8a6', css:{ fontWeight:800, borderRadius:'10px', padding:'0 6px' } },
+                          dispatched:  { color:'#fff', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'none', css:{ fontWeight:800, textTransform:'uppercase', letterSpacing:'0.12em', borderRadius:'4px', padding:'0 6px', fontSize:'0.72rem', textShadow:'0 1px 2px rgba(76,29,149,0.5)' } },
+                          secured:     { color:'#fff', bg:'linear-gradient(135deg,#1d4ed8,#2563eb)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.10em', fontStyle:'italic', borderRadius:'3px', padding:'0 6px', fontSize:'0.72rem' } },
+                          conquered:   { color:'#fff', bg:'linear-gradient(135deg,#b91c1c,#ef4444)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.14em', borderRadius:'2px', padding:'0 6px', fontSize:'0.73rem', textShadow:'0 1px 3px rgba(185,28,28,0.6)' } },
+                          crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.12em', fontStyle:'italic', borderRadius:'3px', padding:'0 6px', fontSize:'0.73rem' } },
+                          dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.18em', borderRadius:'2px', padding:'0 7px', fontSize:'0.74rem', textShadow:'0 2px 5px rgba(49,46,129,0.7)' } },
+                          mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fbbf24,#f59e0b,#fbbf24)', border:'1.5px solid #d97706', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.20em', borderRadius:'4px', padding:'0 7px', fontSize:'0.75rem', textShadow:'0 1px 2px rgba(180,83,9,0.4)' } },
                         };
-                        const FEED_LABEL_WEIGHT = {
-                          completed:'500',finished:'600',did:'600',handled:'700',closed:'700',
-                          processed:'600',resolved:'700',settled:'700',finalized:'700',accomplished:'800',
-                          achieved:'800',fulfilled:'800',delivered:'800',executed:'800',cleared:'800',
-                          dispatched:'800',secured:'900',conquered:'900',crushed:'900',dominated:'900',
-                          mastered:'900'
-                        };
-                        const labelColor = FEED_LABEL_STYLES_MAP[feedLabel] || '#6b7280';
-                        const labelWeight = FEED_LABEL_WEIGHT[feedLabel] || '500';
+                        const flStyle = FL[feedLabel] || FL.completed;
                         const reactions = item.reactions || [];
                         const userReaction = item.user_reaction;
                         const REACTION_EMOJIS = ['👏','⚡','🔥','💯','🎯'];
@@ -4770,7 +4778,7 @@ const PlanAssist = () => {
                               <p className="text-sm text-gray-900">
                                 <span className="font-semibold">{item.user_name.split(' ')[0]}</span>
                                 {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
-                                {' '}<span className="font-semibold" style={{ color: labelColor }}>{feedLabel}</span>{' '}
+                                {' '}<span style={{ color: flStyle.color, background: flStyle.bg, border: flStyle.border, ...flStyle.css, display:'inline-block', lineHeight:1.4 }}>{feedLabel}</span>{' '}
                                 <span className="font-medium text-purple-600">{item.task_title}</span>
                               </p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -8341,28 +8349,60 @@ const PlanAssist = () => {
                 {accountTab === 'feedlabel' && (() => {
                   // Each label has unique visual style — no string parsing, direct style objects
                   const LABEL_STYLES = {
-                    completed:   { color:'#6b7280', bg:'#f3f4f6', border:'#d1d5db', anim:'', css:{ fontWeight:500, fontSize:'0.75rem' } },
-                    finished:    { color:'#7c3aed', bg:'#ede9fe', border:'#c4b5fd', anim:'', css:{ fontWeight:600, fontSize:'0.78rem' } },
-                    did:         { color:'#2563eb', bg:'#dbeafe', border:'#93c5fd', anim:'', css:{ fontWeight:600, fontSize:'0.78rem', letterSpacing:'0.05em' } },
-                    handled:     { color:'#059669', bg:'#d1fae5', border:'#6ee7b7', anim:'', css:{ fontWeight:700, fontSize:'0.80rem' } },
-                    closed:      { color:'#dc2626', bg:'#fee2e2', border:'#fca5a5', anim:'', css:{ fontWeight:700, fontSize:'0.80rem', textDecoration:'line-through', textDecorationColor:'#dc2626' } },
-                    processed:   { color:'#d97706', bg:'#fef3c7', border:'#fcd34d', anim:'', css:{ fontWeight:600, fontSize:'0.80rem', fontStyle:'italic' } },
-                    resolved:    { color:'#0891b2', bg:'#cffafe', border:'#67e8f9', anim:'', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.08em' } },
-                    settled:     { color:'#4f46e5', bg:'#e0e7ff', border:'#a5b4fc', anim:'animate-pulse', css:{ fontWeight:700, fontSize:'0.82rem' } },
-                    finalized:   { color:'#be185d', bg:'#fce7f3', border:'#f9a8d4', anim:'animate-pulse', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic' } },
-                    accomplished:{ color:'#7c3aed', bg:'linear-gradient(90deg,#ede9fe,#ddd6fe)', border:'#8b5cf6', anim:'animate-pulse', css:{ fontWeight:800, fontSize:'0.85rem' } },
-                    achieved:    { color:'#b45309', bg:'linear-gradient(90deg,#fef3c7,#fde68a)', border:'#f59e0b', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.85rem' } },
-                    fulfilled:   { color:'#065f46', bg:'linear-gradient(90deg,#d1fae5,#a7f3d0)', border:'#34d399', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em' } },
-                    delivered:   { color:'#1e40af', bg:'linear-gradient(90deg,#bfdbfe,#93c5fd)', border:'#3b82f6', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.88rem' } },
-                    executed:    { color:'#9f1239', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3)', border:'#f43f5e', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.10em' } },
-                    cleared:     { color:'#0f766e', bg:'linear-gradient(135deg,#ccfbf1,#99f6e4)', border:'#2dd4bf', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.88rem', letterSpacing:'0.08em' } },
-                    dispatched:  { color:'#6d28d9', bg:'linear-gradient(135deg,#ede9fe,#c4b5fd)', border:'#7c3aed', anim:'', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.12em' } },
-                    secured:     { color:'#1d4ed8', bg:'linear-gradient(135deg,#dbeafe,#93c5fd)', border:'#2563eb', anim:'', css:{ fontWeight:900, fontSize:'0.90rem', letterSpacing:'0.10em', fontStyle:'italic' } },
-                    conquered:   { color:'#b91c1c', bg:'linear-gradient(135deg,#fee2e2,#fca5a5)', border:'#ef4444', anim:'', css:{ fontWeight:900, fontSize:'0.92rem', textTransform:'uppercase', letterSpacing:'0.15em' } },
-                    crushed:     { color:'#92400e', bg:'linear-gradient(135deg,#ffedd5,#fdba74)', border:'#f97316', anim:'', css:{ fontWeight:900, fontSize:'0.92rem', textTransform:'uppercase', letterSpacing:'0.12em', fontStyle:'italic' } },
-                    dominated:   { color:'#312e81', bg:'linear-gradient(135deg,#e0e7ff,#818cf8)', border:'#6366f1', anim:'', css:{ fontWeight:900, fontSize:'0.95rem', textTransform:'uppercase', letterSpacing:'0.18em' } },
-                    mastered:    { color:'#92400e', bg:'linear-gradient(135deg,#fef3c7,#fcd34d,#f59e0b)', border:'#d97706', anim:'', css:{ fontWeight:900, fontSize:'1rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 1px 2px rgba(180,83,9,0.4)' } },
+                    // Tier 0 — plain, no fuss
+                    completed:   { color:'#6b7280', bg:'#f3f4f6', border:'1px solid #d1d5db', radius:'4px', animClass:'', css:{ fontWeight:500, fontSize:'0.74rem' } },
+                    // Tier 1 — subtle personality starts
+                    finished:    { color:'#7c3aed', bg:'#ede9fe', border:'1.5px solid #c4b5fd', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', letterSpacing:'0.02em' } },
+                    did:         { color:'#2563eb', bg:'#dbeafe', border:'1.5px solid #93c5fd', radius:'4px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', fontStyle:'italic' } },
+                    handled:     { color:'#065f46', bg:'#d1fae5', border:'1.5px solid #6ee7b7', radius:'8px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem' } },
+                    closed:      { color:'#991b1b', bg:'#fee2e2', border:'1.5px solid #fca5a5', radius:'2px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'line-through', textDecorationColor:'#dc2626', textDecorationThickness:'2px' } },
+                    processed:   { color:'#92400e', bg:'#fef3c7', border:'1.5px dashed #fcd34d', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.78rem', fontStyle:'italic', letterSpacing:'0.03em' } },
+                    // Tier 2 — gradients and motion enter
+                    resolved:    { color:'#0e7490', bg:'linear-gradient(90deg,#cffafe,#a5f3fc)', border:'2px solid #67e8f9', radius:'8px', animClass:'fl-resolved', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.06em' } },
+                    settled:     { color:'#3730a3', bg:'linear-gradient(135deg,#e0e7ff,#c7d2fe)', border:'2px solid #a5b4fc', radius:'10px', animClass:'fl-settled', css:{ fontWeight:700, fontSize:'0.81rem', letterSpacing:'0.04em' } },
+                    finalized:   { color:'#9d174d', bg:'linear-gradient(135deg,#fce7f3,#fbcfe8)', border:'2px solid #f9a8d4', radius:'12px', animClass:'fl-finalized', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic', letterSpacing:'0.03em' } },
+                    accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd,#ddd6fe)', border:'2px solid #8b5cf6', radius:'10px', animClass:'fl-accomplished', css:{ fontWeight:800, fontSize:'0.84rem', letterSpacing:'0.04em' } },
+                    // Tier 3 — bolder, more character
+                    achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a,#fef3c7)', border:'2px solid #f59e0b', radius:'6px', animClass:'fl-achieved', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em' } },
+                    fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'2px solid #34d399', radius:'12px', animClass:'fl-fulfilled', css:{ fontWeight:800, fontSize:'0.86rem', letterSpacing:'0.05em', textShadow:'0 1px 0 rgba(6,78,59,0.2)' } },
+                    delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'2px solid #3b82f6', radius:'4px', animClass:'fl-delivered', css:{ fontWeight:800, fontSize:'0.86rem', textTransform:'uppercase', letterSpacing:'0.08em' } },
+                    executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3,#fda4af)', border:'2px solid #f43f5e', radius:'2px', animClass:'fl-executed', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.12em', textShadow:'0 1px 0 rgba(136,19,55,0.25)' } },
+                    cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1,#99f6e4)', border:'2px solid #14b8a6', radius:'14px', animClass:'fl-cleared', css:{ fontWeight:800, fontSize:'0.87rem', letterSpacing:'0.06em', textShadow:'0 1px 0 rgba(19,78,74,0.2)' } },
+                    // Tier 4 — prestige, intense
+                    dispatched:  { color:'#4c1d95', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'2px solid #8b5cf6', radius:'6px', animClass:'fl-dispatched', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.14em', color:'#fff', textShadow:'0 1px 3px rgba(76,29,149,0.5)' } },
+                    secured:     { color:'#fff', bg:'linear-gradient(135deg,#1d4ed8,#2563eb,#1d4ed8)', border:'2px solid #60a5fa', radius:'4px', animClass:'fl-secured', css:{ fontWeight:900, fontSize:'0.91rem', textTransform:'uppercase', letterSpacing:'0.12em', fontStyle:'italic', textShadow:'0 1px 3px rgba(29,78,216,0.6)' } },
+                    conquered:   { color:'#fff', bg:'linear-gradient(135deg,#b91c1c,#ef4444,#b91c1c)', border:'2px solid #fca5a5', radius:'3px', animClass:'fl-conquered', css:{ fontWeight:900, fontSize:'0.93rem', textTransform:'uppercase', letterSpacing:'0.16em', textShadow:'0 1px 4px rgba(185,28,28,0.7)' } },
+                    crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316,#92400e)', border:'2px solid #fdba74', radius:'4px', animClass:'fl-crushed', css:{ fontWeight:900, fontSize:'0.94rem', textTransform:'uppercase', letterSpacing:'0.14em', fontStyle:'italic', textShadow:'0 1px 4px rgba(146,64,14,0.7)' } },
+                    dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1,#312e81)', border:'2px solid #a5b4fc', radius:'2px', animClass:'fl-dominated', css:{ fontWeight:900, fontSize:'0.97rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 2px 6px rgba(49,46,129,0.8)' } },
+                    mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fef3c7,#fbbf24,#f59e0b,#fbbf24,#fef3c7)', border:'2.5px solid #d97706', radius:'6px', animClass:'fl-mastered', css:{ fontWeight:900, fontSize:'1.0rem', textTransform:'uppercase', letterSpacing:'0.22em', textShadow:'0 1px 3px rgba(180,83,9,0.5), 0 0 8px rgba(245,158,11,0.4)' } },
                   };
+                  // Custom keyframe animations injected once
+                  const LABEL_KEYFRAMES = `
+                    @keyframes fl-fade { 0%,100%{opacity:1} 50%{opacity:0.7} }
+                    @keyframes fl-shimmer { 0%{background-position:200% center} 100%{background-position:-200% center} }
+                    @keyframes fl-breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.04)} }
+                    @keyframes fl-glow { 0%,100%{box-shadow:0 0 4px currentColor} 50%{box-shadow:0 0 10px currentColor,0 0 20px currentColor} }
+                    @keyframes fl-shake { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(-1.5deg)} 75%{transform:rotate(1.5deg)} }
+                    @keyframes fl-charge { 0%{filter:brightness(1)} 50%{filter:brightness(1.2)} 100%{filter:brightness(1)} }
+                    @keyframes fl-march { 0%{background-position:0 0} 100%{background-position:24px 0} }
+                    @keyframes fl-fire { 0%,100%{filter:hue-rotate(0deg) brightness(1)} 50%{filter:hue-rotate(10deg) brightness(1.15)} }
+                    @keyframes fl-nova { 0%,100%{box-shadow:0 0 6px rgba(251,191,36,0.6)} 50%{box-shadow:0 0 14px rgba(251,191,36,0.9),0 0 28px rgba(245,158,11,0.5)} }
+                    .fl-resolved  { animation: fl-fade 3s ease-in-out infinite }
+                    .fl-settled   { animation: fl-breathe 3s ease-in-out infinite }
+                    .fl-finalized { animation: fl-breathe 2.5s ease-in-out infinite }
+                    .fl-accomplished { animation: fl-shimmer 3s linear infinite; background-size: 200% auto }
+                    .fl-achieved  { animation: fl-shimmer 4s linear infinite; background-size: 200% auto }
+                    .fl-fulfilled { animation: fl-breathe 2.8s ease-in-out infinite }
+                    .fl-delivered { animation: fl-charge 2s ease-in-out infinite }
+                    .fl-executed  { animation: fl-shake 2.5s ease-in-out infinite }
+                    .fl-cleared   { animation: fl-shimmer 4s linear infinite; background-size: 200% auto }
+                    .fl-dispatched { animation: fl-glow 2s ease-in-out infinite }
+                    .fl-secured   { animation: fl-charge 1.8s ease-in-out infinite }
+                    .fl-conquered { animation: fl-fire 2s ease-in-out infinite }
+                    .fl-crushed   { animation: fl-fire 1.6s ease-in-out infinite }
+                    .fl-dominated { animation: fl-glow 1.8s ease-in-out infinite }
+                    .fl-mastered  { animation: fl-nova 2.2s ease-in-out infinite }
+                  `;
                   const unlockedLabels = feedLabelUnlocked.map(u => u.label);
                   if (feedLabelLoading) return (
                     <div className="flex items-center justify-center py-20">
@@ -8371,6 +8411,7 @@ const PlanAssist = () => {
                   );
                   return (
                     <div>
+                      <style>{LABEL_KEYFRAMES}</style>
                       <h2 className="text-lg font-bold text-gray-900 mb-1">Feed Label</h2>
                       <p className="text-sm text-gray-500 mb-1">Your label appears on the Live Activity feed.</p>
                       <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{feedLabelDays}</span> days — unlocking {unlockedLabels.length} / {LABEL_THRESHOLDS.length} labels.</p>
@@ -8389,17 +8430,18 @@ const PlanAssist = () => {
                                 setFeedLabelSelected(label);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                                selected ? 'border-purple-500 shadow-md' :
-                                unlocked ? 'border-gray-200 hover:border-gray-300' :
-                                'border-gray-100 opacity-40 cursor-not-allowed'
+                                selected ? 'border-purple-500 shadow-md ring-2 ring-purple-200' :
+                                unlocked ? 'border-gray-200 hover:border-gray-300 hover:shadow-sm' :
+                                'border-gray-100 opacity-35 cursor-not-allowed'
                               }`}
-                              style={{ background: unlocked ? (style.bg.startsWith('linear') ? style.bg : style.bg) : '#f9fafb' }}
+                              style={{ background: '#fff' }}
                             >
-                              <span className={`px-2.5 py-1 rounded-lg ${style.anim || ''}`}
+                              <span className={`px-2.5 py-1 inline-block ${style.animClass || ''}`}
                                     style={{
-                                      color: style.color,
+                                      color: style.css?.color || style.color,
                                       background: style.bg,
-                                      border: `1.5px solid ${style.border || style.color + '60'}`,
+                                      border: style.border || `1px solid ${style.color}50`,
+                                      borderRadius: style.radius || '6px',
                                       ...(style.css || {})
                                     }}>
                                 {label}
