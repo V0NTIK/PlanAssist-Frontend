@@ -8206,11 +8206,14 @@ const PlanAssist = () => {
                                   const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
                                   return d.toLocaleDateString();
                                 })();
-                                const isCompleted = task.completed || !!task.submitted_at;
+                                const isCompleted = task.completed === true || task.completed === 'true';
+                                const statusLabel = isCompleted ? 'Completed' : 'Dismissed';
+                                const statusColor = isCompleted ? 'text-green-600' : 'text-gray-400';
+                                const dotColor = isCompleted ? 'bg-green-400' : 'bg-gray-300';
                                 const hasSession = task.session_actual_time != null;
                                 return (
                                   <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                                    <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-400' : 'bg-gray-300'}`} />
+                                    <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColor}`} />
                                     <div className="flex-1 min-w-0">
                                       <a href={task.url} target="_blank" rel="noreferrer"
                                         className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
@@ -8220,8 +8223,8 @@ const PlanAssist = () => {
                                         <span className="text-xs text-gray-400">{task.class}</span>
                                         {deadlineStr && <><span className="text-xs text-gray-300">·</span><span className="text-xs text-gray-400">Due {deadlineStr}</span></>}
                                         <span className="text-xs text-gray-300">·</span>
-                                        <span className={`text-xs font-medium ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                                          {isCompleted ? 'Completed' : 'Dismissed'}
+                                        <span className={`text-xs font-medium ${statusColor}`}>
+                                          {statusLabel}
                                         </span>
                                       </div>
                                       {hasSession && (
@@ -8248,7 +8251,7 @@ const PlanAssist = () => {
                                       )}
                                       {task.completed_at && (
                                         <p className="text-xs text-gray-300 mt-0.5">
-                                          {isCompleted ? 'Completed' : 'Resolved'} {new Date(task.completed_at).toLocaleDateString()}
+                                          {statusLabel} {new Date(task.completed_at).toLocaleDateString()}
                                         </p>
                                       )}
                                     </div>
@@ -8609,9 +8612,9 @@ const PlanAssist = () => {
 
             {/* ── USERS ── */}
             {adminSection === 'users' && (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
                 {/* User list */}
-                <div className="lg:col-span-1 bg-white rounded-xl shadow-sm border border-gray-100">
+                <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100">
                   <div className="p-4 border-b border-gray-100 space-y-2">
                     {/* Search */}
                     <div className="relative">
@@ -8777,7 +8780,7 @@ const PlanAssist = () => {
                 </div>
 
                 {/* User detail */}
-                <div className="lg:col-span-2">
+                <div className="lg:col-span-3">
                   {!adminUserDetail && (
                     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
                       <UserCheck className="w-10 h-10 mx-auto mb-2 opacity-30" />
