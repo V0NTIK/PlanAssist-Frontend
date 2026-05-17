@@ -292,8 +292,10 @@ const PlanAssist = () => {
   const [editingUser, setEditingUser] = useState(null);
   const [adminHelpContent, setAdminHelpContent] = useState('');
   const [adminHelpSaving, setAdminHelpSaving] = useState(false);
-  // Account & Analytics page state
+  // Account page state
   const [accountTab, setAccountTab] = useState('settings');
+  const [settingsSubTab, setSettingsSubTab] = useState('other');
+  const [tokenDirty, setTokenDirty] = useState(false);
   const [resolvedTasks, setResolvedTasks] = useState([]);
   const [resolvedSearch, setResolvedSearch] = useState('');
   const [resolvedSort, setResolvedSort] = useState('created_at');
@@ -301,6 +303,7 @@ const PlanAssist = () => {
   const [editingActualTime, setEditingActualTime] = useState(null);
   const [editingActualTimeVal, setEditingActualTimeVal] = useState('');
   const [activityFilter, setActivityFilter] = useState('grades');
+  const [activitySearch, setActivitySearch] = useState('');
   // Activity sub-tab data
   const [gradesItems, setGradesItems] = useState([]);
   const [gradesLoading, setGradesLoading] = useState(false);
@@ -672,7 +675,6 @@ const PlanAssist = () => {
         return;
       }
       if (key === 's') { e.preventDefault(); setCurrentPage('account'); setAccountTab('settings'); return; }
-      if (key === 'r') { e.preventDefault(); setCurrentPage('account'); setAccountTab('resolved'); return; }
       if (key === 'g') { e.preventDefault(); setCurrentPage('account'); setAccountTab('goals'); return; }
       if (key === 'h') { e.preventDefault(); setCurrentPage('account'); setAccountTab('help'); return; }
       if (key === 'u' && user?.isAdmin) { e.preventDefault(); setCurrentPage('admin'); setAdminTab('users'); return; }
@@ -1056,7 +1058,30 @@ const PlanAssist = () => {
     }
   };
 
-  // ── Account & Analytics functions ────────────────────────────────────────
+  // ── Account page functions ────────────────────────────────────────────────
+  // Auto-save a single setting field immediately (no token — that needs explicit Confirm)
+  const autoSaveSetting = async (patch) => {
+    try {
+      const merged = { ...accountSetup, ...patch };
+      await apiCall('/account/setup', 'POST', {
+        grade: merged.grade,
+        presentPeriods: merged.presentPeriods,
+        schedule: merged.schedule,
+        calendarShowHomeroom: merged.calendarShowHomeroom,
+        calendarShowCompleted: merged.calendarShowCompleted,
+        calendarShowPrevWeek: merged.calendarShowPrevWeek,
+        calendarShowCurrentWeek: merged.calendarShowCurrentWeek,
+        calendarShowNextWeek1: merged.calendarShowNextWeek1,
+        calendarShowNextWeek2: merged.calendarShowNextWeek2,
+        calendarShowWeekends: merged.calendarShowWeekends,
+      });
+      if (patch.grade !== undefined) {
+        const updatedUser = { ...user, grade: patch.grade };
+        setUser(updatedUser);
+        localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+    } catch (err) { console.error('autoSaveSetting failed:', err.message); }
+  };
   const loadResolvedTasks = async (search = resolvedSearch, sort = resolvedSort) => {
     setResolvedLoading(true);
     try {
@@ -1204,8 +1229,9 @@ const PlanAssist = () => {
 
   const handleAccountTabChange = (tab) => {
     setAccountTab(tab);
-    if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
+    setActivitySearch('');
     if (tab === 'grades') {
+      setActivityFilter('grades');
       // Trigger Grade Sync (shows spinner over Activity pane) then load supporting data
       runGradeSync();
       loadCanvasAnnouncements();
@@ -5629,7 +5655,7 @@ const PlanAssist = () => {
                                     </div>
                                   );
                                 })}
-                                {eligibleTasks.length > 8 && <p className="text-gray-400 text-xs pl-3">+{eligibleTasks.length - 8} more</p>}
+                                {eligibleTasks.length > suggested.length && <p className="text-gray-400 text-xs pl-3">+{eligibleTasks.length - suggested.length} more not shown</p>}
                               </div>
                               <button
                                 onClick={() => {
@@ -6750,9 +6776,22 @@ const PlanAssist = () => {
                             {day.toLocaleDateString('en-US',{month:'short'})}
                           </p>
                         </div>
-                        {/* Load indicator bar */}
+                        {/* Workload indicator */}
                         {loadLevel && (
-                          <div className="h-1.5 w-full" style={{ backgroundColor: loadConfig[loadLevel].bar, opacity: 0.75 }} title={`${totalEstMin}m estimated · ${pendingTasks.length} task${pendingTasks.length !== 1 ? 's' : ''}`} />
+                          <div className="px-2 pb-1.5 flex items-center gap-1.5">
+                            <div className="flex-1 h-1 rounded-full bg-gray-100 overflow-hidden">
+                              <div
+                                className="h-full rounded-full transition-all"
+                                style={{
+                                  width: `${Math.min(100, Math.round((totalEstMin / 180) * 100))}%`,
+                                  backgroundColor: loadConfig[loadLevel].bar,
+                                }}
+                              />
+                            </div>
+                            <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full flex-shrink-0 ${loadConfig[loadLevel].label}`}>
+                              {totalEstMin}m
+                            </span>
+                          </div>
                         )}
 
                         {/* Task bubbles */}
@@ -6907,7 +6946,7 @@ const PlanAssist = () => {
                 <ClipboardList className="w-14 h-14 mx-auto mb-4 text-purple-300" />
                 <h2 className="text-2xl font-bold text-gray-900 mb-3">Enhance Your Schedule First</h2>
                 <p className="text-gray-500 mb-6">Link your courses to your Lesson periods to unlock the Itinerary.</p>
-                <button onClick={() => { setCurrentPage('account'); setAccountTab('schedule'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
+                <button onClick={() => { setCurrentPage('account'); setAccountTab('settings'); setSettingsSubTab('schedule'); setTimeout(() => { document.getElementById('enhance-schedule-btn')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300); }}
                   className="w-full py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 mb-3">Enhance Schedule</button>
                 <button onClick={() => setCurrentPage('hub')} className="w-full py-3 border border-gray-300 text-gray-600 rounded-lg font-medium hover:bg-gray-50">Back to Hub</button>
               </div>
@@ -7418,7 +7457,7 @@ const PlanAssist = () => {
                 <UserCircle className="w-7 h-7 text-white" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Account &amp; Analytics</h1>
+                <h1 className="text-2xl font-bold text-gray-900">Account</h1>
                 <p className="text-sm text-gray-500">{accountSetup.name || user?.email}</p>
               </div>
             </div>
@@ -7430,9 +7469,6 @@ const PlanAssist = () => {
                 <nav className="space-y-1">
                   {[
                     { id: 'settings', label: 'Settings', icon: Settings },
-                    { id: 'courses', label: 'Courses', icon: BookOpen },
-                    { id: 'schedule', label: 'Schedule', icon: ClipboardList },
-                    { id: 'resolved', label: 'Resolved Tasks', icon: CheckCircle },
                     { id: 'grades', label: 'Activity', icon: BarChart3 },
                     { id: 'goals', label: 'Goals', icon: Target },
                     { id: 'streak', label: 'Streak', icon: Zap },
@@ -7586,374 +7622,387 @@ const PlanAssist = () => {
                 )}
 
                 {/* ── SETTINGS TAB ── */}
-                {accountTab === 'settings' && (
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-                    <h2 className="text-lg font-bold text-gray-900">Settings</h2>
-
-                    {/* Calendar Settings */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Calendar Settings</h3>
-                      <div className="border border-gray-200 rounded-xl divide-y divide-gray-100 mb-4">
-                        {[
-                          { key: 'calendarShowHomeroom', label: 'Show Homeroom Tasks', desc: 'Homeroom tasks appear on the calendar.' },
-                          { key: 'calendarShowCompleted', label: 'Show Completed Tasks', desc: 'Submitted and completed tasks appear with a strikethrough.' },
-                          { key: 'calendarShowWeekends', label: 'Show Weekends', desc: 'Saturday and Sunday columns are visible on the calendar.' },
-                        ].map(({ key, label, desc }) => (
-                          <div key={key} className="flex items-start gap-3 p-4">
-                            <input type="checkbox" checked={accountSetup[key] !== false}
-                              onChange={(e) => setAccountSetup(prev => ({ ...prev, [key]: e.target.checked }))}
-                              className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
-                            <div>
-                              <p className="font-medium text-gray-900">{label}</p>
-                              <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="text-xs font-semibold text-gray-600 mb-2">Visible Weeks</p>
-                      <p className="text-xs text-gray-400 mb-3">Select which weeks appear on your calendar. At least one must be selected.</p>
-                      <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
-                        {[
-                          { key: 'calendarShowPrevWeek',    label: 'Previous Week', desc: 'The week before the current week.' },
-                          { key: 'calendarShowCurrentWeek', label: 'Current Week',  desc: 'The week containing today.' },
-                          { key: 'calendarShowNextWeek1',   label: 'Next Week',     desc: 'One week from now.' },
-                          { key: 'calendarShowNextWeek2',   label: 'Next Week 2',   desc: 'Two weeks from now.' },
-                        ].map(({ key, label, desc }) => {
-                          const checked = key === 'calendarShowCurrentWeek' ? accountSetup[key] !== false : (accountSetup[key] || false);
-                          return (
-                            <div key={key}
-                              className={`flex items-center p-4 cursor-pointer transition-colors select-none ${checked ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
-                              onClick={async () => {
-                                // Prevent deselecting all — need at least one
-                                const otherKeys = ['calendarShowPrevWeek','calendarShowCurrentWeek','calendarShowNextWeek1','calendarShowNextWeek2'].filter(k => k !== key);
-                                const otherSelected = otherKeys.some(k => k === 'calendarShowCurrentWeek' ? accountSetup[k] !== false : accountSetup[k]);
-                                if (checked && !otherSelected) return;
-                                const newVal = !checked;
-                                const updated = { ...accountSetup, [key]: newVal };
-                                setAccountSetup(updated);
-                                // Auto-save immediately
-                                try {
-                                  await apiCall('/account/setup', 'POST', {
-                                    grade: updated.grade,
-                                    canvasApiToken: updated.canvasApiToken,
-                                    presentPeriods: updated.presentPeriods,
-                                    schedule: updated.schedule,
-                                    calendarShowHomeroom: updated.calendarShowHomeroom,
-                                    calendarShowCompleted: updated.calendarShowCompleted,
-                                    calendarShowPrevWeek: updated.calendarShowPrevWeek,
-                                    calendarShowCurrentWeek: updated.calendarShowCurrentWeek,
-                                    calendarShowNextWeek1: updated.calendarShowNextWeek1,
-                                    calendarShowNextWeek2: updated.calendarShowNextWeek2,
-                                    calendarShowWeekends: updated.calendarShowWeekends
-                                  });
-                                } catch (err) { console.error('Failed to save week setting:', err); }
-                              }}>
-                              <div className="flex-1">
-                                <p className={`font-medium text-sm ${checked ? 'text-purple-800' : 'text-gray-900'}`}>{label}</p>
-                                <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
-                              </div>
-                              {checked && (
-                                <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 ml-3" />
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Display Settings */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Display Settings</h3>
-                      <div className="border border-gray-200 rounded-xl p-4 mb-4">
-                        <p className="font-medium text-gray-900 mb-1">Colour Theme</p>
-                        <p className="text-xs text-gray-500 mb-3">Choose a coloration for PlanAssist. Saved automatically.</p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { id: 'system', label: 'System',   emoji: '☀️', desc: 'Default clean look' },
-                            { id: 'warm',   label: 'Blossom', emoji: '🌸', desc: 'Light-hearted & pink' },
-                            { id: 'cool',   label: 'Grove',   emoji: '🌿', desc: 'Dark with green energy' },
-                            { id: 'dark',   label: 'Dark',    emoji: '🌙', desc: 'Tranquil & minimal' },
-                          ].map(t => (
-                            <button
-                              key={t.id}
-                              onClick={() => {
-                                setColorTheme(t.id);
-                                localStorage.setItem('planassist-theme', t.id);
-                              }}
-                              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                                colorTheme === t.id
-                                  ? 'border-purple-500 bg-purple-50'
-                                  : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
-                              }`}
-                            >
-                              <span className="text-xl flex-shrink-0">{t.emoji}</span>
-                              <div className="min-w-0">
-                                <p className={`font-semibold text-sm ${colorTheme === t.id ? 'text-purple-700' : 'text-gray-800'}`}>{t.label}</p>
-                                <p className="text-xs text-gray-500 mt-0.5">{t.desc}</p>
-                              </div>
-                              {colorTheme === t.id && (
-                                <div className="ml-auto w-4 h-4 rounded-full bg-purple-600 flex-shrink-0 flex items-center justify-center">
-                                  <div className="w-2 h-2 rounded-full bg-white" />
-                                </div>
-                              )}
+                {accountTab === 'settings' && (() => {
+                  const SETTINGS_TABS = [
+                    { id: 'courses',  label: 'Courses' },
+                    { id: 'schedule', label: 'Schedule' },
+                    { id: 'calendar', label: 'Calendar' },
+                    { id: 'other',    label: 'Other' },
+                  ];
+                  return (
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                      {/* Header + sub-tab pills */}
+                      <div className="flex items-center gap-3 mb-5 flex-wrap">
+                        <h2 className="text-lg font-bold text-gray-900 flex-shrink-0">Settings</h2>
+                        <div className="flex gap-1 flex-wrap">
+                          {SETTINGS_TABS.map(t => (
+                            <button key={t.id} onClick={() => setSettingsSubTab(t.id)}
+                              className={`px-3 py-1 rounded-full text-xs font-semibold transition-colors ${
+                                settingsSubTab === t.id
+                                  ? 'bg-purple-600 text-white'
+                                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}>
+                              {t.label}
                             </button>
                           ))}
                         </div>
                       </div>
-                    </div>
 
-                    {/* Privacy Settings */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy Settings</h3>
-                      <div className="border border-gray-200 rounded-xl p-4">
-                        <div className="flex items-start gap-3">
-                          <input type="checkbox" checked={user?.showInFeed === true}
-                            onChange={async (e) => {
-                              const newVal = e.target.checked;
-                              // Optimistically update UI first
-                              setUser(prev => ({ ...prev, showInFeed: newVal }));
-                              try {
-                                await apiCall('/user/feed-preference', 'PUT', { showInFeed: newVal });
-                              } catch (err) {
-                                // Revert on failure
-                                setUser(prev => ({ ...prev, showInFeed: !newVal }));
-                                console.error(err);
-                              }
-                            }}
-                            className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
-                          <div>
-                            <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
-                            <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Canvas Token */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Canvas API Token</h3>
-                      <input type="password" value={accountSetup.canvasApiToken}
-                        onChange={(e) => setAccountSetup(prev => ({ ...prev, canvasApiToken: e.target.value }))}
-                        placeholder="Paste your Canvas API token here..."
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 font-mono text-sm" />
-                      <p className="text-xs text-gray-500 mt-1">🔒 Encrypted and stored securely. Never share your token with anyone.</p>
-                    </div>
-
-                    {/* Grade */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Grade</h3>
-                      <select value={accountSetup.grade}
-                        onChange={(e) => setAccountSetup(prev => ({ ...prev, grade: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
-                        <option value="">Select your grade...</option>
-                        {['3','4','5','6','7','8','9','10','11','12'].map(g => <option key={g} value={g}>{g}</option>)}
-                      </select>
-                    </div>
-
-                    {/* Present Periods */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-2">Present Periods (Time Zone)</h3>
-                      <select value={accountSetup.presentPeriods}
-                        onChange={(e) => setAccountSetup(prev => ({ ...prev, presentPeriods: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
-                        <option value="1-5">Periods 1-5</option>
-                        <option value="2-6">Periods 2-6</option>
-                        <option value="3-7">Periods 3-7</option>
-                        <option value="4-8">Periods 4-8</option>
-                      </select>
-                    </div>
-
-                    {/* Feedback */}
-                    <div className="border-t pt-4">
-                      <button onClick={() => setShowFeedbackForm(true)}
-                        className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
-                        <Send className="w-4 h-4" /> Submit Feedback or Bug Report
-                      </button>
-                    </div>
-
-                    <div className="flex gap-3">
-                      <button onClick={() => setCurrentPage('hub')}
-                        className="flex-1 border-2 border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 text-sm">
-                        Cancel
-                      </button>
-                      <button onClick={saveAccountSetup} disabled={settingsSaving}
-                        className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 text-white py-3 rounded-xl font-semibold hover:from-purple-700 hover:to-purple-800 disabled:opacity-50 text-sm">
-                        {settingsSaving ? 'Saving...' : 'Save Settings'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── COURSES TAB ── */}
-                {accountTab === 'courses' && (
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-1">Course Management</h2>
-                    <p className="text-sm text-gray-500 mb-5">Toggle courses on or off to show or hide their tasks everywhere in PlanAssist. Customize colors per course.</p>
-                    {courses.length === 0 ? (
-                      <p className="text-gray-400 text-sm">No courses found. Sync Canvas to load your courses.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {courses.map(course => {
-                          const className = course.name;
-                          const color = (JSON.parse(localStorage.getItem('classColors') || '{}')?.[className]) || getClassColor(className);
-                          return (
-                            <div key={course.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${course.enabled !== false ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
-                              {/* Enable toggle */}
-                              <div className="flex items-center">
-                                <input type="checkbox" checked={course.enabled !== false}
-                                  onChange={(e) => toggleCourseEnabled(course.id, e.target.checked)}
-                                  className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer" />
-                              </div>
-                              {/* Color swatch */}
-                              <input type="color" value={color}
-                                onChange={(e) => {
-                                  const stored = JSON.parse(localStorage.getItem('classColors') || '{}');
-                                  stored[className] = e.target.value;
-                                  localStorage.setItem('classColors', JSON.stringify(stored));
-                                  setAccountSetup(prev => ({ ...prev, classColors: stored }));
-                                }}
-                                className="w-8 h-8 rounded-lg cursor-pointer border-0 p-0" title="Change color" />
-                              {/* Course name */}
-                              <div className="flex-1 min-w-0">
-                                <p className={`font-medium text-sm truncate ${course.enabled !== false ? 'text-gray-900' : 'text-gray-400'}`}>{course.name}</p>
-                                {course.current_period_score != null ? (
-                                  <p className="text-xs text-gray-400">{course.current_period_score}% · {course.current_period_grade || course.current_grade || '–'}</p>
-                                ) : course.current_score != null ? (
-                                  <p className="text-xs text-gray-400">{course.current_score}% · {course.current_grade || '–'}</p>
-                                ) : null}
-                              </div>
-                              {course.enabled === false && (
-                                <span className="text-xs text-gray-400 font-medium flex-shrink-0">Hidden</span>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── RESOLVED TASKS TAB ── */}
-                {accountTab === 'resolved' && (
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-                    <h2 className="text-lg font-bold text-gray-900 mb-1">Resolved Tasks</h2>
-                    <p className="text-sm text-gray-500 mb-4">Completed and dismissed tasks. Restore any task to send it back to your Task List.</p>
-
-                    {/* Search + Sort */}
-                    <div className="flex gap-3 mb-4">
-                      <div className="relative flex-1">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-                        <input value={resolvedSearch}
-                          onChange={(e) => { setResolvedSearch(e.target.value); loadResolvedTasks(e.target.value, resolvedSort); }}
-                          placeholder="Search resolved tasks..."
-                          className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500" />
-                      </div>
-                      <select value={resolvedSort}
-                        onChange={(e) => { setResolvedSort(e.target.value); loadResolvedTasks(resolvedSearch, e.target.value); }}
-                        className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500">
-                        <option value="created_at">Sort: Sync Date</option>
-                        <option value="deadline">Sort: Deadline</option>
-                      </select>
-                    </div>
-
-                    {resolvedLoading ? (
-                      <div className="flex items-center justify-center py-12">
-                        <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                      </div>
-                    ) : resolvedTasks.length === 0 ? (
-                      <p className="text-gray-400 text-sm text-center py-8">No resolved tasks found.</p>
-                    ) : (
-                      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                        {resolvedTasks.map(task => {
-                          const deadlineStr = (() => {
-                            if (!task.deadline_date) return null;
-                            const dp = task.deadline_date.includes('T') ? task.deadline_date.split('T')[0] : task.deadline_date;
-                            const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
-                            return d.toLocaleDateString();
-                          })();
-                          // Completed if PlanAssist marked it done, OR Canvas has a submission date
-                          const isCompleted = task.completed || !!task.submitted_at;
-                          const hasSession = task.session_actual_time != null;
-                          return (
-                            <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                              <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-400' : 'bg-gray-300'}`} />
-                              <div className="flex-1 min-w-0">
-                                <a href={task.url} target="_blank" rel="noreferrer"
-                                  className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                  {task.title}{task.segment ? ` · ${task.segment}` : ''}
-                                </a>
-                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                  <span className="text-xs text-gray-400">{task.class}</span>
-                                  {deadlineStr && <span className="text-xs text-gray-300">·</span>}
-                                  {deadlineStr && <span className="text-xs text-gray-400">Due {deadlineStr}</span>}
-                                  <span className="text-xs text-gray-300">·</span>
-                                  <span className={`text-xs font-medium ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
-                                    {isCompleted ? 'Completed' : 'Dismissed'}
-                                  </span>
-                                </div>
-                                {hasSession && (
-                                  <div className="flex items-center gap-2 mt-1.5">
-                                    <Clock className="w-3 h-3 text-gray-300" />
-                                    {editingActualTime === task.id ? (
-                                      <div className="flex items-center gap-1">
-                                        <input type="number" value={editingActualTimeVal} min="0"
-                                          onChange={(e) => setEditingActualTimeVal(e.target.value)}
-                                          className="w-16 px-2 py-0.5 border border-purple-300 rounded text-xs focus:ring-1 focus:ring-purple-500" />
-                                        <span className="text-xs text-gray-400">min</span>
-                                        <button onClick={() => saveActualTime(task.id, editingActualTimeVal)}
-                                          className="text-xs text-green-600 font-medium hover:text-green-700 px-1">Save</button>
-                                        <button onClick={() => setEditingActualTime(null)}
-                                          className="text-xs text-gray-400 hover:text-gray-600 px-1">×</button>
-                                      </div>
-                                    ) : (
-                                      <button onClick={() => { setEditingActualTime(task.id); setEditingActualTimeVal(String(task.session_actual_time)); }}
-                                        className="text-xs text-gray-400 hover:text-purple-600 transition-colors">
-                                        {task.session_actual_time} min <span className="text-gray-300">(tap to edit)</span>
-                                      </button>
-                                    )}
+                      {/* ── Courses sub-tab ── */}
+                      {settingsSubTab === 'courses' && (
+                        <div>
+                          <p className="text-sm text-gray-500 mb-4">Toggle courses on or off to show or hide their tasks everywhere in PlanAssist. Customize colors per course.</p>
+                          {courses.length === 0 ? (
+                            <p className="text-gray-400 text-sm">No courses found. Sync Canvas to load your courses.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {courses.map(course => {
+                                const className = course.name;
+                                const color = (JSON.parse(localStorage.getItem('classColors') || '{}')?.[className]) || getClassColor(className);
+                                return (
+                                  <div key={course.id} className={`flex items-center gap-4 p-4 rounded-xl border transition-colors ${course.enabled !== false ? 'border-gray-200 bg-white' : 'border-gray-100 bg-gray-50'}`}>
+                                    <input type="checkbox" checked={course.enabled !== false}
+                                      onChange={(e) => toggleCourseEnabled(course.id, e.target.checked)}
+                                      className="w-4 h-4 text-purple-600 rounded focus:ring-purple-500 cursor-pointer" />
+                                    <input type="color" value={color}
+                                      onChange={(e) => {
+                                        const stored = JSON.parse(localStorage.getItem('classColors') || '{}');
+                                        stored[className] = e.target.value;
+                                        localStorage.setItem('classColors', JSON.stringify(stored));
+                                        setAccountSetup(prev => ({ ...prev, classColors: stored }));
+                                      }}
+                                      className="w-8 h-8 rounded-lg cursor-pointer border-0 p-0" title="Change color" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className={`font-medium text-sm truncate ${course.enabled !== false ? 'text-gray-900' : 'text-gray-400'}`}>{course.name}</p>
+                                      {course.current_period_score != null ? (
+                                        <p className="text-xs text-gray-400">{course.current_period_score}% · {course.current_period_grade || course.current_grade || '–'}</p>
+                                      ) : course.current_score != null ? (
+                                        <p className="text-xs text-gray-400">{course.current_score}% · {course.current_grade || '–'}</p>
+                                      ) : null}
+                                    </div>
+                                    {course.enabled === false && <span className="text-xs text-gray-400 font-medium flex-shrink-0">Hidden</span>}
                                   </div>
-                                )}
-                                {task.completed_at && (
-                                  <p className="text-xs text-gray-300 mt-0.5">
-                                    {isCompleted ? 'Completed' : 'Resolved'} {new Date(task.completed_at).toLocaleDateString()}
-                                  </p>
-                                )}
-                              </div>
-                              <button onClick={() => restoreTask(task.id)}
-                                className="flex-shrink-0 text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 font-medium transition-colors">
-                                Restore
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Schedule sub-tab ── */}
+                      {settingsSubTab === 'schedule' && (
+                        <div className="space-y-6">
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Weekly Schedule</h3>
+                            <div className="border border-gray-200 rounded-xl overflow-hidden">
+                              <table className="w-full">
+                                <thead className="bg-gray-50">
+                                  <tr>
+                                    <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
+                                    {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                      <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">{day.slice(0,3)}</th>
+                                    ))}
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {selectedPeriods.map(period => (
+                                    <tr key={period} className="border-t">
+                                      <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
+                                      {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                        <td key={day} className="px-4 py-3 text-center">
+                                          <select
+                                            value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
+                                            onChange={async (e) => {
+                                              const newSchedule = { ...accountSetup.schedule };
+                                              if (!newSchedule[day]) newSchedule[day] = {};
+                                              newSchedule[day][period] = e.target.value;
+                                              const updated = { ...accountSetup, schedule: newSchedule };
+                                              setAccountSetup(updated);
+                                              await autoSaveSetting({ schedule: newSchedule });
+                                            }}
+                                            className={`px-3 py-2 rounded-lg font-medium text-sm ${
+                                              (accountSetup.schedule[day]?.[String(period)] || 'Study') === 'Study'
+                                                ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                                            }`}>
+                                            <option value="Study">Study</option>
+                                            <option value="Lesson">Lesson</option>
+                                          </select>
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                          {courses.length > 0 && parseInt(user?.grade || 0) >= 7 && (
+                            <div>
+                              <h3 className="text-sm font-semibold text-gray-700 mb-1">
+                                {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
+                              </h3>
+                              <p className="text-xs text-gray-500 mb-3">
+                                {scheduleEnhanced
+                                  ? 'Update your course-to-period assignments or Zoom numbers. Changes merge with your existing schedule.'
+                                  : 'Link your courses to Lesson periods and add Zoom numbers to unlock the Itinerary page.'}
+                              </p>
+                              <button
+                                id="enhance-schedule-btn"
+                                onClick={() => {
+                                  const prefillLessons = {};
+                                  scheduleLessons.forEach(sl => {
+                                    if (sl.course_id) prefillLessons[`${sl.day}-${sl.period}`] = { courseId: sl.course_id, courseName: sl.course_name };
+                                  });
+                                  const prefillZoom = {};
+                                  courses.forEach(c => { if (c.zoom_number) prefillZoom[c.id] = c.zoom_number; });
+                                  setEnhanceLessons(prefillLessons);
+                                  setEnhanceZoom(prefillZoom);
+                                  setShowEnhanceDialog(true);
+                                  setEnhanceStep(1);
+                                }}
+                                className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm transition-colors"
+                              >
+                                <ClipboardList className="w-4 h-4" />
+                                {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
+                                {scheduleEnhanced && <span className="ml-1 text-xs bg-green-400 text-white px-1.5 py-0.5 rounded-full">Enhanced</span>}
                               </button>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
+                          )}
+                        </div>
+                      )}
+
+                      {/* ── Calendar sub-tab ── */}
+                      {settingsSubTab === 'calendar' && (
+                        <div className="space-y-5">
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Calendar Settings</h3>
+                            <div className="border border-gray-200 rounded-xl divide-y divide-gray-100">
+                              {[
+                                { key: 'calendarShowHomeroom', label: 'Show Homeroom Tasks', desc: 'Homeroom tasks appear on the calendar.' },
+                                { key: 'calendarShowCompleted', label: 'Show Completed Tasks', desc: 'Submitted and completed tasks appear with a strikethrough.' },
+                                { key: 'calendarShowWeekends', label: 'Show Weekends', desc: 'Saturday and Sunday columns are visible on the calendar.' },
+                              ].map(({ key, label, desc }) => (
+                                <div key={key} className="flex items-start gap-3 p-4">
+                                  <input type="checkbox" checked={accountSetup[key] !== false}
+                                    onChange={async (e) => {
+                                      const updated = { ...accountSetup, [key]: e.target.checked };
+                                      setAccountSetup(updated);
+                                      await autoSaveSetting({ [key]: e.target.checked });
+                                    }}
+                                    className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                                  <div>
+                                    <p className="font-medium text-gray-900">{label}</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-gray-600 mb-1">Visible Weeks</p>
+                            <p className="text-xs text-gray-400 mb-3">Select which weeks appear on your calendar. At least one must be selected.</p>
+                            <div className="border border-gray-200 rounded-xl overflow-hidden divide-y divide-gray-100">
+                              {[
+                                { key: 'calendarShowPrevWeek',    label: 'Previous Week', desc: 'The week before the current week.' },
+                                { key: 'calendarShowCurrentWeek', label: 'Current Week',  desc: 'The week containing today.' },
+                                { key: 'calendarShowNextWeek1',   label: 'Next Week',     desc: 'One week from now.' },
+                                { key: 'calendarShowNextWeek2',   label: 'Next Week 2',   desc: 'Two weeks from now.' },
+                              ].map(({ key, label, desc }) => {
+                                const checked = key === 'calendarShowCurrentWeek' ? accountSetup[key] !== false : (accountSetup[key] || false);
+                                return (
+                                  <div key={key}
+                                    className={`flex items-center p-4 cursor-pointer transition-colors select-none ${checked ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
+                                    onClick={async () => {
+                                      const otherKeys = ['calendarShowPrevWeek','calendarShowCurrentWeek','calendarShowNextWeek1','calendarShowNextWeek2'].filter(k => k !== key);
+                                      const otherSelected = otherKeys.some(k => k === 'calendarShowCurrentWeek' ? accountSetup[k] !== false : accountSetup[k]);
+                                      if (checked && !otherSelected) return;
+                                      const newVal = !checked;
+                                      const updated = { ...accountSetup, [key]: newVal };
+                                      setAccountSetup(updated);
+                                      await autoSaveSetting({ [key]: newVal });
+                                    }}>
+                                    <div className="flex-1">
+                                      <p className={`font-medium text-sm ${checked ? 'text-purple-800' : 'text-gray-900'}`}>{label}</p>
+                                      <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                                    </div>
+                                    {checked && <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 ml-3" />}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── Other sub-tab ── */}
+                      {settingsSubTab === 'other' && (
+                        <div className="space-y-6">
+                          {/* Display */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Display</h3>
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <p className="font-medium text-gray-900 mb-1">Colour Theme</p>
+                              <p className="text-xs text-gray-500 mb-3">Saved automatically.</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                {[
+                                  { id: 'system', label: 'System',  emoji: '☀️', desc: 'Default clean look' },
+                                  { id: 'warm',   label: 'Blossom', emoji: '🌸', desc: 'Light-hearted & pink' },
+                                  { id: 'cool',   label: 'Grove',   emoji: '🌿', desc: 'Dark with green energy' },
+                                  { id: 'dark',   label: 'Dark',    emoji: '🌙', desc: 'Tranquil & minimal' },
+                                ].map(t => (
+                                  <button key={t.id} onClick={() => { setColorTheme(t.id); localStorage.setItem('planassist-theme', t.id); }}
+                                    className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
+                                      colorTheme === t.id ? 'border-purple-500 bg-purple-50' : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50'
+                                    }`}>
+                                    <span className="text-xl flex-shrink-0">{t.emoji}</span>
+                                    <div className="min-w-0">
+                                      <p className={`font-semibold text-sm ${colorTheme === t.id ? 'text-purple-700' : 'text-gray-800'}`}>{t.label}</p>
+                                      <p className="text-xs text-gray-500 mt-0.5">{t.desc}</p>
+                                    </div>
+                                    {colorTheme === t.id && (
+                                      <div className="ml-auto w-4 h-4 rounded-full bg-purple-600 flex-shrink-0 flex items-center justify-center">
+                                        <div className="w-2 h-2 rounded-full bg-white" />
+                                      </div>
+                                    )}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                          {/* Privacy */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy</h3>
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="flex items-start gap-3">
+                                <input type="checkbox" checked={user?.showInFeed === true}
+                                  onChange={async (e) => {
+                                    const newVal = e.target.checked;
+                                    setUser(prev => ({ ...prev, showInFeed: newVal }));
+                                    try { await apiCall('/user/feed-preference', 'PUT', { showInFeed: newVal }); }
+                                    catch (err) { setUser(prev => ({ ...prev, showInFeed: !newVal })); console.error(err); }
+                                  }}
+                                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                                <div>
+                                  <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
+                                  <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          {/* Canvas API Token */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-2">Canvas API Token</h3>
+                            <p className="text-xs text-gray-400 mb-3">Your token is encrypted and stored securely. To generate one: Canvas → Account → Settings → + New Access Token.</p>
+                            <div className="flex gap-2">
+                              <input type="password" value={accountSetup.canvasApiToken}
+                                onChange={(e) => { setAccountSetup(prev => ({ ...prev, canvasApiToken: e.target.value })); setTokenDirty(true); }}
+                                placeholder="Paste your Canvas API token here..."
+                                className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 font-mono text-sm" />
+                              <button
+                                disabled={!tokenDirty || settingsSaving}
+                                onClick={async () => {
+                                  setSettingsSaving(true);
+                                  try {
+                                    await apiCall('/account/setup', 'POST', {
+                                      grade: accountSetup.grade,
+                                      canvasApiToken: accountSetup.canvasApiToken,
+                                      presentPeriods: accountSetup.presentPeriods,
+                                      schedule: accountSetup.schedule,
+                                    });
+                                    const tokenChanged = accountSetup.canvasApiToken !== savedCanvasTokenRef.current;
+                                    if (accountSetup.canvasApiToken && tokenChanged) {
+                                      savedCanvasTokenRef.current = accountSetup.canvasApiToken;
+                                      await fetchCanvasTasks();
+                                    }
+                                    setTokenDirty(false);
+                                  } catch (err) { alert('Failed to save token: ' + err.message); }
+                                  finally { setSettingsSaving(false); }
+                                }}
+                                className={`px-4 py-3 rounded-xl font-semibold text-sm transition-all flex-shrink-0 ${
+                                  tokenDirty && !settingsSaving
+                                    ? 'bg-purple-600 text-white hover:bg-purple-700 shadow-md'
+                                    : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                }`}>
+                                {settingsSaving ? 'Saving…' : 'Confirm'}
+                              </button>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-1">🔒 Never share your token with anyone.</p>
+                          </div>
+                          {/* Grade */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-2">Grade</h3>
+                            <select value={accountSetup.grade}
+                              onChange={async (e) => {
+                                const updated = { ...accountSetup, grade: e.target.value };
+                                setAccountSetup(updated);
+                                await autoSaveSetting({ grade: e.target.value });
+                              }}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                              <option value="">Select your grade...</option>
+                              {['3','4','5','6','7','8','9','10','11','12'].map(g => <option key={g} value={g}>{g}</option>)}
+                            </select>
+                          </div>
+                          {/* Present Periods */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-2">Present Periods (Time Zone)</h3>
+                            <select value={accountSetup.presentPeriods}
+                              onChange={async (e) => {
+                                const updated = { ...accountSetup, presentPeriods: e.target.value };
+                                setAccountSetup(updated);
+                                await autoSaveSetting({ presentPeriods: e.target.value });
+                              }}
+                              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                              <option value="1-5">Periods 1-5</option>
+                              <option value="2-6">Periods 2-6</option>
+                              <option value="3-7">Periods 3-7</option>
+                              <option value="4-8">Periods 4-8</option>
+                            </select>
+                          </div>
+                          {/* Feedback */}
+                          <div className="border-t pt-4">
+                            <button onClick={() => setShowFeedbackForm(true)}
+                              className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
+                              <Send className="w-4 h-4" /> Submit Feedback or Bug Report
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* ── ACTIVITY TAB ── */}
                 {accountTab === 'grades' && (() => {
                   const FILTERS = [
-                    { key: 'grades', label: '📊 Grades' },
+                    { key: 'grades',        label: '📊 Grades' },
                     { key: 'announcements', label: '📢 Announcements' },
-                    { key: 'discussions', label: '💬 Discussions' },
-                    { key: 'messages', label: '✉️ Messages' },
+                    { key: 'discussions',   label: '💬 Discussions' },
+                    { key: 'messages',      label: '✉️ Messages' },
+                    { key: 'resolutions',   label: '✅ Resolutions' },
                   ];
 
-                  // Pick data + loading state based on active filter
                   const isLoading = activityFilter === 'grades' ? gradesLoading
                     : activityFilter === 'announcements' ? announcementsLoading
                     : activityFilter === 'discussions' ? discussionsLoading
+                    : activityFilter === 'resolutions' ? resolvedLoading
                     : activityLoading;
 
-                  const items = activityFilter === 'grades' ? gradesItems
-                    : activityFilter === 'announcements' ? announcementItems
-                    : activityFilter === 'discussions' ? discussionItems
-                    : activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation');
+                  // Filter items by search query
+                  const searchLower = activitySearch.toLowerCase();
+                  const filterBySearch = (arr, keys) => !searchLower ? arr : arr.filter(item =>
+                    keys.some(k => (item[k] || '').toLowerCase().includes(searchLower))
+                  );
+
+                  const gradesFiltered = filterBySearch(gradesItems, ['assignmentName', 'courseName']);
+                  const announcementsFiltered = filterBySearch(announcementItems, ['title', 'body', 'courseName']);
+                  const discussionsFiltered = filterBySearch(discussionItems, ['title', 'body', 'courseName']);
+                  const messagesFiltered = filterBySearch(
+                    activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation'),
+                    ['title', 'body']
+                  );
+                  const resolutionsFiltered = filterBySearch(resolvedTasks, ['title', 'class']);
 
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative">
-                      {/* Grade Sync loading overlay for Activity pane */}
                       {gradeSyncLoading && (
                         <div className="pa-sync-overlay absolute inset-0 z-20 flex items-center justify-center rounded-2xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
                           <div className="pa-sync-card flex flex-col items-center gap-3 px-6 py-4 rounded-xl">
@@ -7962,36 +8011,49 @@ const PlanAssist = () => {
                           </div>
                         </div>
                       )}
-                      <div className="flex items-center justify-between mb-1">
-                        <h2 className="text-lg font-bold text-gray-900">Canvas Activity</h2>
+                      <div className="flex items-center justify-between mb-4">
+                        <h2 className="text-lg font-bold text-gray-900">Activity</h2>
                         {isLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
                       </div>
-                      <p className="text-sm text-gray-500 mb-4">Your recent Canvas activity.</p>
 
                       {/* Filter pills */}
-                      <div className="flex flex-wrap gap-2 mb-5">
+                      <div className="flex flex-wrap gap-2 mb-4">
                         {FILTERS.map(f => (
-                          <button key={f.key} onClick={() => setActivityFilter(f.key)}
+                          <button key={f.key} onClick={() => {
+                            setActivityFilter(f.key);
+                            setActivitySearch('');
+                            if (f.key === 'resolutions') loadResolvedTasks('', resolvedSort);
+                          }}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
-                              activityFilter === f.key
-                                ? 'bg-purple-600 text-white'
-                                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              activityFilter === f.key ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}>
                             {f.label}
                           </button>
                         ))}
                       </div>
 
-                      {/* ── Grades sub-tab ── */}
+                      {/* Search bar — all tabs */}
+                      <div className="relative mb-4">
+                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                        <input value={activitySearch}
+                          onChange={(e) => {
+                            setActivitySearch(e.target.value);
+                            if (activityFilter === 'resolutions') loadResolvedTasks(e.target.value, resolvedSort);
+                          }}
+                          placeholder={`Search ${activityFilter}…`}
+                          className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500" />
+                      </div>
+
+                      {/* ── Grades ── */}
                       {activityFilter === 'grades' && (
                         <div>
                           {gradesLoading && gradesItems.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-8">Loading grades...</p>
-                          ) : gradesItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No graded assignments found yet. Grades appear here after a Sync detects a score change.</p>
+                          ) : gradesFiltered.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">{gradesItems.length === 0 ? 'No graded assignments found yet. Grades appear here after a Sync detects a score change.' : 'No results.'}</p>
                           ) : (
-                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                              {gradesItems.map(item => {
+                            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                              {gradesFiltered.map(item => {
                                 const isPassFail = item.gradingType === 'pass_fail' || item.gradingType === 'complete_incomplete';
                                 const scoreDisplay = (() => {
                                   if (isPassFail) return item.grade === 'complete' ? '✓ Complete' : item.grade === 'pass' ? '✓ Pass' : item.grade || '–';
@@ -8015,7 +8077,7 @@ const PlanAssist = () => {
                                         <p className="font-medium text-sm text-gray-900 truncate">{item.assignmentName}</p>
                                       )}
                                       {item.courseName && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.courseName}</p>}
-                                      {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Submitted {gradedDate}</p>}
+                                      {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Graded {gradedDate}</p>}
                                     </div>
                                     <div className="flex-shrink-0 text-right">
                                       <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
@@ -8029,22 +8091,20 @@ const PlanAssist = () => {
                         </div>
                       )}
 
-                      {/* ── Announcements sub-tab ── */}
+                      {/* ── Announcements ── */}
                       {activityFilter === 'announcements' && (
                         <div>
                           {announcementsLoading && announcementItems.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-8">Loading announcements...</p>
-                          ) : announcementItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No recent announcements.</p>
+                          ) : announcementsFiltered.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No results.</p>
                           ) : (
-                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                              {announcementItems.map(item => (
+                            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                              {announcementsFiltered.map(item => (
                                 <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
                                   {item.htmlUrl ? (
                                     <a href={item.htmlUrl} target="_blank" rel="noreferrer"
-                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block">
-                                      {item.title}
-                                    </a>
+                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block">{item.title}</a>
                                   ) : (
                                     <p className="font-medium text-sm text-gray-900">{item.title}</p>
                                   )}
@@ -8058,24 +8118,22 @@ const PlanAssist = () => {
                         </div>
                       )}
 
-                      {/* ── Discussions sub-tab ── */}
+                      {/* ── Discussions ── */}
                       {activityFilter === 'discussions' && (
                         <div>
                           {discussionsLoading && discussionItems.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-8">Loading discussions...</p>
-                          ) : discussionItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No recent discussions.</p>
+                          ) : discussionsFiltered.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No results.</p>
                           ) : (
-                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                              {discussionItems.map(item => (
+                            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                              {discussionsFiltered.map(item => (
                                 <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
                                   <div className="flex items-start justify-between gap-2">
                                     <div className="flex-1 min-w-0">
                                       {item.htmlUrl ? (
                                         <a href={item.htmlUrl} target="_blank" rel="noreferrer"
-                                          className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                          {item.title}
-                                        </a>
+                                          className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">{item.title}</a>
                                       ) : (
                                         <p className="font-medium text-sm text-gray-900 truncate">{item.title}</p>
                                       )}
@@ -8084,9 +8142,7 @@ const PlanAssist = () => {
                                       {item.lastReplyAt && <p className="text-xs text-gray-300 mt-1">Last reply {new Date(item.lastReplyAt).toLocaleDateString()}</p>}
                                     </div>
                                     {item.unreadCount > 0 && (
-                                      <span className="flex-shrink-0 bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                                        {item.unreadCount} new
-                                      </span>
+                                      <span className="flex-shrink-0 bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">{item.unreadCount} new</span>
                                     )}
                                   </div>
                                 </div>
@@ -8096,22 +8152,20 @@ const PlanAssist = () => {
                         </div>
                       )}
 
-                      {/* ── Messages sub-tab (activity stream filter) ── */}
+                      {/* ── Messages ── */}
                       {activityFilter === 'messages' && (
                         <div>
                           {activityLoading && activityItems.length === 0 ? (
                             <p className="text-gray-400 text-sm text-center py-8">Loading messages...</p>
-                          ) : items.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No recent messages.</p>
+                          ) : messagesFiltered.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No results.</p>
                           ) : (
-                            <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                              {items.map(item => (
+                            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                              {messagesFiltered.map(item => (
                                 <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
                                   {item.htmlUrl ? (
                                     <a href={item.htmlUrl} target="_blank" rel="noreferrer"
-                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                      {item.title || 'Message'}
-                                    </a>
+                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">{item.title || 'Message'}</a>
                                   ) : (
                                     <p className="font-medium text-sm text-gray-900 truncate">{item.title || 'Message'}</p>
                                   )}
@@ -8123,103 +8177,94 @@ const PlanAssist = () => {
                           )}
                         </div>
                       )}
+
+                      {/* ── Resolutions ── */}
+                      {activityFilter === 'resolutions' && (
+                        <div>
+                          <div className="flex items-center gap-3 mb-4">
+                            <p className="text-sm text-gray-500 flex-1">Completed and dismissed tasks. Restore any task to send it back to your Task List.</p>
+                            <select value={resolvedSort}
+                              onChange={(e) => { setResolvedSort(e.target.value); loadResolvedTasks(activitySearch, e.target.value); }}
+                              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 flex-shrink-0">
+                              <option value="created_at">Sort: Sync Date</option>
+                              <option value="deadline">Sort: Deadline</option>
+                            </select>
+                          </div>
+                          {resolvedLoading ? (
+                            <div className="flex items-center justify-center py-12">
+                              <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                            </div>
+                          ) : resolutionsFiltered.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">No resolved tasks found.</p>
+                          ) : (
+                            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                              {resolutionsFiltered.map(task => {
+                                const deadlineStr = (() => {
+                                  if (!task.deadline_date) return null;
+                                  const dp = task.deadline_date.includes('T') ? task.deadline_date.split('T')[0] : task.deadline_date;
+                                  const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
+                                  return d.toLocaleDateString();
+                                })();
+                                const isCompleted = task.completed || !!task.submitted_at;
+                                const hasSession = task.session_actual_time != null;
+                                return (
+                                  <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                    <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${isCompleted ? 'bg-green-400' : 'bg-gray-300'}`} />
+                                    <div className="flex-1 min-w-0">
+                                      <a href={task.url} target="_blank" rel="noreferrer"
+                                        className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                        {task.title}{task.segment ? ` · ${task.segment}` : ''}
+                                      </a>
+                                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                        <span className="text-xs text-gray-400">{task.class}</span>
+                                        {deadlineStr && <><span className="text-xs text-gray-300">·</span><span className="text-xs text-gray-400">Due {deadlineStr}</span></>}
+                                        <span className="text-xs text-gray-300">·</span>
+                                        <span className={`text-xs font-medium ${isCompleted ? 'text-green-600' : 'text-gray-400'}`}>
+                                          {isCompleted ? 'Completed' : 'Dismissed'}
+                                        </span>
+                                      </div>
+                                      {hasSession && (
+                                        <div className="flex items-center gap-2 mt-1.5">
+                                          <Clock className="w-3 h-3 text-gray-300" />
+                                          {editingActualTime === task.id ? (
+                                            <div className="flex items-center gap-1">
+                                              <input type="number" value={editingActualTimeVal} min="0"
+                                                onChange={(e) => setEditingActualTimeVal(e.target.value)}
+                                                className="w-16 px-2 py-0.5 border border-purple-300 rounded text-xs focus:ring-1 focus:ring-purple-500" />
+                                              <span className="text-xs text-gray-400">min</span>
+                                              <button onClick={() => saveActualTime(task.id, editingActualTimeVal)}
+                                                className="text-xs text-green-600 font-medium hover:text-green-700 px-1">Save</button>
+                                              <button onClick={() => setEditingActualTime(null)}
+                                                className="text-xs text-gray-400 hover:text-gray-600 px-1">×</button>
+                                            </div>
+                                          ) : (
+                                            <button onClick={() => { setEditingActualTime(task.id); setEditingActualTimeVal(String(task.session_actual_time)); }}
+                                              className="text-xs text-gray-400 hover:text-purple-600 transition-colors">
+                                              {task.session_actual_time} min <span className="text-gray-300">(tap to edit)</span>
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                      {task.completed_at && (
+                                        <p className="text-xs text-gray-300 mt-0.5">
+                                          {isCompleted ? 'Completed' : 'Resolved'} {new Date(task.completed_at).toLocaleDateString()}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <button onClick={() => restoreTask(task.id)}
+                                      className="flex-shrink-0 text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 font-medium transition-colors">
+                                      Restore
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
-
-                {/* ── SCHEDULE TAB ── */}
-                {accountTab === 'schedule' && (
-                  <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 space-y-6">
-                    <h2 className="text-lg font-bold text-gray-900">Schedule Management</h2>
-
-                    {/* Weekly Schedule grid */}
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-700 mb-3">Weekly Schedule</h3>
-                      <div className="border border-gray-200 rounded-xl overflow-hidden">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
-                              {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
-                                <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">{day.slice(0,3)}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedPeriods.map(period => (
-                              <tr key={period} className="border-t">
-                                <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
-                                {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
-                                  <td key={day} className="px-4 py-3 text-center">
-                                    <select
-                                      value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
-                                      onChange={(e) => {
-                                        const newSchedule = { ...accountSetup.schedule };
-                                        if (!newSchedule[day]) newSchedule[day] = {};
-                                        newSchedule[day][period] = e.target.value;
-                                        setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
-                                      }}
-                                      className={`px-3 py-2 rounded-lg font-medium text-sm ${
-                                        (accountSetup.schedule[day]?.[String(period)] || 'Study') === 'Study'
-                                          ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                                      }`}>
-                                      <option value="Study">Study</option>
-                                      <option value="Lesson">Lesson</option>
-                                    </select>
-                                  </td>
-                                ))}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-
-                    {/* Enhance / Re-enhance */}
-                    {courses.length > 0 && parseInt(user?.grade || 0) >= 7 && (
-                      <div>
-                        <h3 className="text-sm font-semibold text-gray-700 mb-1">
-                          {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
-                        </h3>
-                        <p className="text-xs text-gray-500 mb-3">
-                          {scheduleEnhanced
-                            ? 'Update your course-to-period assignments or Zoom numbers. Changes merge with your existing schedule.'
-                            : 'Link your courses to Lesson periods and add Zoom numbers to unlock the Itinerary page.'}
-                        </p>
-                        <button
-                          onClick={() => {
-                            const prefillLessons = {};
-                            scheduleLessons.forEach(sl => {
-                              if (sl.course_id) prefillLessons[`${sl.day}-${sl.period}`] = { courseId: sl.course_id, courseName: sl.course_name };
-                            });
-                            const prefillZoom = {};
-                            courses.forEach(c => { if (c.zoom_number) prefillZoom[c.id] = c.zoom_number; });
-                            setEnhanceLessons(prefillLessons);
-                            setEnhanceZoom(prefillZoom);
-                            setShowEnhanceDialog(true);
-                            setEnhanceStep(1);
-                          }}
-                          className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 text-sm transition-colors"
-                        >
-                          <ClipboardList className="w-4 h-4" />
-                          {scheduleEnhanced ? 'Re-enhance Schedule' : 'Enhance Schedule'}
-                          {scheduleEnhanced && <span className="ml-1 text-xs bg-green-400 text-white px-1.5 py-0.5 rounded-full">Enhanced</span>}
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex gap-3 pt-2">
-                      <button onClick={() => setCurrentPage('hub')}
-                        className="flex-1 border-2 border-gray-200 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-50 text-sm">
-                        Cancel
-                      </button>
-                      <button onClick={saveAccountSetup} disabled={settingsSaving}
-                        className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 text-white py-3 rounded-xl font-semibold hover:from-purple-700 hover:to-purple-800 disabled:opacity-50 text-sm">
-                        {settingsSaving ? 'Saving...' : 'Save Schedule'}
-                      </button>
-                    </div>
-                  </div>
-                )}
 
                 {/* ── GOALS TAB ── */}
                 {accountTab === 'goals' && (
