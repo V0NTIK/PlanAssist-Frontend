@@ -487,6 +487,9 @@ const PlanAssist = () => {
 
   // Streak pane
   const [streakPaneData, setStreakPaneData] = useState(null);
+  const [streakLoading, setStreakLoading] = useState(false);
+  const [feedLabelLoading, setFeedLabelLoading] = useState(false);
+  const [galleryLoading, setGalleryLoading] = useState(false);
   const [autoSyncToast, setAutoSyncToast] = useState(null); // '3 new tasks added'
 
   // Hub features state
@@ -3721,6 +3724,7 @@ const PlanAssist = () => {
   };
 
   const loadStreakData = async () => {
+    setStreakLoading(true);
     try {
       const [shieldsR, logR] = await Promise.all([
         apiCall('/streak/shields', 'GET'),
@@ -3729,23 +3733,25 @@ const PlanAssist = () => {
       setStreakShieldsAvailable(shieldsR.available ?? 0);
       setStreakShieldMode(shieldsR.mode ?? 'manual');
       setStreakShieldLog((logR.shieldDates ?? []).map(d => typeof d === 'string' ? d.slice(0,10) : new Date(d).toISOString().slice(0,10)));
-    } catch (err) { console.error('loadStreakData error:', err.message); }
+    } catch (err) { console.error('loadStreakData error:', err.message); } finally { setStreakLoading(false); }
   };
 
   const loadFeedLabel = async () => {
+    setFeedLabelLoading(true);
     try {
       const data = await apiCall('/feed-label', 'GET');
       setFeedLabelDays(data.days ?? 0);
       setFeedLabelSelected(data.selected ?? 'completed');
       setFeedLabelUnlocked(data.unlocked ?? []);
-    } catch (err) { console.error('loadFeedLabel error:', err.message); }
+    } catch (err) { console.error('loadFeedLabel error:', err.message); } finally { setFeedLabelLoading(false); }
   };
 
   const loadBadges = async () => {
+    setGalleryLoading(true);
     try {
       const data = await apiCall('/badges', 'GET');
       setUserBadges(data.badges ?? []);
-    } catch (err) { console.error('loadBadges error:', err.message); }
+    } catch (err) { console.error('loadBadges error:', err.message); } finally { setGalleryLoading(false); }
   };
 
   const checkNewUnlocks = async (currentStreak) => {
@@ -4673,19 +4679,7 @@ const PlanAssist = () => {
                     );
                   }
                   // No goals — show original Next Up
-                  const now = new Date();
-      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const weekEnd = new Date(todayStart); weekEnd.setDate(weekEnd.getDate() + 7);
-      const allActive = tasks.filter(t => !t.deleted && !t.completed && !t.ignored);
-      const activeTasks = allActive.filter(t => {
-        if (!quickFilter) return true;
-        if (quickFilter === 'today') return t.dueDate && t.dueDate >= todayStart && t.dueDate < new Date(todayStart.getTime() + 86400000);
-        if (quickFilter === 'week') return t.dueDate && t.dueDate >= todayStart && t.dueDate <= weekEnd;
-        if (quickFilter === 'overdue') return t.dueDate && t.dueDate < todayStart;
-        if (quickFilter === 'inprogress') return (t.accumulatedTime || 0) > 0;
-        return true;
-      });
-                  if (activeTasks.length === 0) return null;
+                              if (activeTasks.length === 0) return null;
                   const nextTask = activeTasks.sort((a, b) => { if (!a.dueDate && !b.dueDate) return 0; if (!a.dueDate) return 1; if (!b.dueDate) return -1; return a.dueDate - b.dueDate; })[0];
                   const color = getClassColor(nextTask.class);
                   return (
@@ -4968,29 +4962,6 @@ const PlanAssist = () => {
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
                 <div className="max-w-4xl mx-auto">
-                  {/* Quick filter chips */}
-                  <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    {[
-                      { id: null, label: 'All' },
-                      { id: 'today', label: '📅 Due Today' },
-                      { id: 'week', label: '📆 Due This Week' },
-                      { id: 'overdue', label: '🔴 Overdue' },
-                      { id: 'inprogress', label: '⏱ In Progress' },
-                    ].map(chip => (
-                      <button key={String(chip.id)}
-                        onClick={() => setQuickFilter(quickFilter === chip.id ? null : chip.id)}
-                        className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-                          quickFilter === chip.id
-                            ? 'bg-purple-600 text-white border-purple-600'
-                            : 'bg-white text-gray-600 border-gray-300 hover:border-purple-400 hover:text-purple-600'
-                        }`}
-                      >{chip.label}</button>
-                    ))}
-                    {quickFilter && (
-                      <button onClick={() => setQuickFilter(null)} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ Clear</button>
-                    )}
-                  </div>
-
                   <div className="bg-white rounded-xl shadow-md p-6">
                     {/* Header */}
                     <div className="flex items-center justify-between mb-6">
@@ -5021,10 +4992,43 @@ const PlanAssist = () => {
                     </div>
 
                     {/* Task List */}
+                    {/* Quick filter chips — inside the card, under the header */}
+                    <div className="flex items-center gap-2 mb-4 flex-wrap">
+                      {[
+                        { id: null, label: 'All' },
+                        { id: 'today', label: '📅 Due Today' },
+                        { id: 'week', label: '📆 This Week' },
+                        { id: 'overdue', label: '🔴 Overdue' },
+                        { id: 'inprogress', label: '⏱ In Progress' },
+                      ].map(chip => (
+                        <button key={String(chip.id)}
+                          onClick={() => setQuickFilter(quickFilter === chip.id ? null : chip.id)}
+                          className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                            quickFilter === chip.id
+                              ? 'bg-purple-600 text-white border-purple-600'
+                              : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-purple-400 hover:text-purple-600 hover:bg-white'
+                          }`}
+                        >{chip.label}</button>
+                      ))}
+                      {quickFilter && (
+                        <button onClick={() => setQuickFilter(null)} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ Clear</button>
+                      )}
+                    </div>
                     <div className="space-y-4">
                       {(() => {
-                        const incompleteTasks = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t));
-                        
+                        const now = new Date();
+                        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        const weekEnd = new Date(todayStart); weekEnd.setDate(weekEnd.getDate() + 7);
+                        const allActive = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t));
+                        const incompleteTasks = allActive.filter(t => {
+                          if (!quickFilter) return true;
+                          if (quickFilter === 'today') return t.dueDate && t.dueDate >= todayStart && t.dueDate < new Date(todayStart.getTime() + 86400000);
+                          if (quickFilter === 'week') return t.dueDate && t.dueDate >= todayStart && t.dueDate <= weekEnd;
+                          if (quickFilter === 'overdue') return t.dueDate && t.dueDate < todayStart;
+                          if (quickFilter === 'inprogress') return (t.accumulatedTime || 0) > 0;
+                          return true;
+                        });
+
                         if (incompleteTasks.length === 0) {
                           return (
                             <div className="text-center py-12">
@@ -5578,9 +5582,17 @@ const PlanAssist = () => {
                                   const { label: dueLabel, color: dueColor, urgency } = getDueInfo(task);
                                   const classColor = getClassColor(task.class);
                                   return (
-                                    <div key={task.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-gray-50 group">
+                                    <div key={task.id}
+                                      onClick={() => {
+                                        // Toggle selection inline
+                                        setSessionPickerSel(prev => {
+                                          const cur = prev || suggested.map(t => t.id);
+                                          return cur.includes(task.id) ? cur.filter(id => id !== task.id) : [...cur, task.id];
+                                        });
+                                      }}
+                                      className="flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-purple-50 cursor-pointer group transition-colors">
                                       <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                      <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-800 text-xs flex-1 truncate hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
+                                      <span className="text-gray-800 text-xs flex-1 truncate">{cleanTaskTitle(task)}</span>
                                       <span className={`text-xs flex-shrink-0 ${urgency === 'overdue' || urgency === 'today' ? 'text-red-500 font-bold' : 'text-gray-400'}`}>{dueLabel}</span>
                                     </div>
                                   );
@@ -5588,10 +5600,20 @@ const PlanAssist = () => {
                                 {eligibleTasks.length > 8 && <p className="text-gray-400 text-xs pl-3">+{eligibleTasks.length - 8} more</p>}
                               </div>
                               <button
-                                onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
+                                onClick={() => {
+                                  // Pre-populate picker with the smart suggestion
+                                  setSessionPickerSel(suggested.map(t => t.id));
+                                  setSessionPrioritiesPickerOpen(true);
+                                }}
                                 className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-xs transition-colors flex items-center justify-center gap-1.5"
                               >
-                                <Target className="w-3.5 h-3.5" />Set My Priorities for Today
+                                <Target className="w-3.5 h-3.5" />Use These Suggestions
+                              </button>
+                              <button
+                                onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
+                                className="w-full py-1.5 text-purple-600 hover:text-purple-800 text-xs transition-colors flex items-center justify-center gap-1"
+                              >
+                                Choose manually instead
                               </button>
                             </>
                           )}
@@ -8236,6 +8258,11 @@ const PlanAssist = () => {
                     return Math.max(max, currentStreak);
                   })();
 
+                  if (streakLoading) return (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  );
                   return (
                     <div className="space-y-4">
                       {/* Main streak card */}
@@ -8312,32 +8339,36 @@ const PlanAssist = () => {
 
                 {/* ── FEED LABEL TAB ── */}
                 {accountTab === 'feedlabel' && (() => {
-                  // Each label: unique visual personality
-                  // style: { color, bg, border, weight, size, anim, extra (CSS string for inline) }
+                  // Each label has unique visual style — no string parsing, direct style objects
                   const LABEL_STYLES = {
-                    completed:  { color:'#6b7280', bg:'#f3f4f6', border:'#d1d5db', weight:'500', size:'0.75rem', anim:'', extra:'' },
-                    finished:   { color:'#7c3aed', bg:'#ede9fe', border:'#c4b5fd', weight:'600', size:'0.78rem', anim:'', extra:'' },
-                    did:        { color:'#2563eb', bg:'#dbeafe', border:'#93c5fd', weight:'600', size:'0.78rem', anim:'', extra:'letterSpacing:"0.05em"' },
-                    handled:    { color:'#059669', bg:'#d1fae5', border:'#6ee7b7', weight:'700', size:'0.80rem', anim:'', extra:'' },
-                    closed:     { color:'#dc2626', bg:'#fee2e2', border:'#fca5a5', weight:'700', size:'0.80rem', anim:'', extra:'textDecoration:"line-through",textDecorationColor:"#dc2626"' },
-                    processed:  { color:'#d97706', bg:'#fef3c7', border:'#fcd34d', weight:'600', size:'0.80rem', anim:'', extra:'fontStyle:"italic"' },
-                    resolved:   { color:'#0891b2', bg:'#cffafe', border:'#67e8f9', weight:'700', size:'0.80rem', anim:'', extra:'letterSpacing:"0.08em"' },
-                    settled:    { color:'#4f46e5', bg:'#e0e7ff', border:'#a5b4fc', weight:'700', size:'0.82rem', anim:'animate-pulse', extra:'' },
-                    finalized:  { color:'#be185d', bg:'#fce7f3', border:'#f9a8d4', weight:'700', size:'0.82rem', anim:'animate-pulse', extra:'fontStyle:"italic"' },
-                    accomplished:{ color:'#7c3aed', bg:'linear-gradient(90deg,#ede9fe,#ddd6fe)', border:'#8b5cf6', weight:'800', size:'0.85rem', anim:'animate-pulse', extra:'' },
-                    achieved:   { color:'#b45309', bg:'linear-gradient(90deg,#fef3c7,#fde68a)', border:'#f59e0b', weight:'800', size:'0.85rem', anim:'animate-bounce', extra:'' },
-                    fulfilled:  { color:'#065f46', bg:'linear-gradient(90deg,#d1fae5,#a7f3d0)', border:'#34d399', weight:'800', size:'0.85rem', anim:'animate-bounce', extra:'letterSpacing:"0.05em"' },
-                    delivered:  { color:'#1e40af', bg:'linear-gradient(90deg,#bfdbfe,#93c5fd)', border:'#3b82f6', weight:'800', size:'0.88rem', anim:'animate-bounce', extra:'' },
-                    executed:   { color:'#9f1239', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3)', border:'#f43f5e', weight:'800', size:'0.88rem', anim:'animate-bounce', extra:'textTransform:"uppercase",letterSpacing:"0.10em"' },
-                    cleared:    { color:'#0f766e', bg:'linear-gradient(135deg,#ccfbf1,#99f6e4)', border:'#2dd4bf', weight:'800', size:'0.88rem', anim:'animate-bounce', extra:'letterSpacing:"0.08em"' },
-                    dispatched: { color:'#6d28d9', bg:'linear-gradient(135deg,#ede9fe,#c4b5fd)', border:'#7c3aed', weight:'800', size:'0.90rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.12em"' },
-                    secured:    { color:'#1d4ed8', bg:'linear-gradient(135deg,#dbeafe,#93c5fd)', border:'#2563eb', weight:'900', size:'0.90rem', anim:'', extra:'letterSpacing:"0.10em",fontStyle:"italic"' },
-                    conquered:  { color:'#b91c1c', bg:'linear-gradient(135deg,#fee2e2,#fca5a5)', border:'#ef4444', weight:'900', size:'0.92rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.15em"' },
-                    crushed:    { color:'#92400e', bg:'linear-gradient(135deg,#ffedd5,#fdba74)', border:'#f97316', weight:'900', size:'0.92rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.12em",fontStyle:"italic"' },
-                    dominated:  { color:'#312e81', bg:'linear-gradient(135deg,#e0e7ff,#818cf8)', border:'#6366f1', weight:'900', size:'0.95rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.18em"' },
-                    mastered:   { color:'#92400e', bg:'linear-gradient(135deg,#fef3c7,#fcd34d,#f59e0b)', border:'#d97706', weight:'900', size:'1rem', anim:'', extra:'textTransform:"uppercase",letterSpacing:"0.20em",textShadow:"0 1px 2px rgba(180,83,9,0.4)"' },
+                    completed:   { color:'#6b7280', bg:'#f3f4f6', border:'#d1d5db', anim:'', css:{ fontWeight:500, fontSize:'0.75rem' } },
+                    finished:    { color:'#7c3aed', bg:'#ede9fe', border:'#c4b5fd', anim:'', css:{ fontWeight:600, fontSize:'0.78rem' } },
+                    did:         { color:'#2563eb', bg:'#dbeafe', border:'#93c5fd', anim:'', css:{ fontWeight:600, fontSize:'0.78rem', letterSpacing:'0.05em' } },
+                    handled:     { color:'#059669', bg:'#d1fae5', border:'#6ee7b7', anim:'', css:{ fontWeight:700, fontSize:'0.80rem' } },
+                    closed:      { color:'#dc2626', bg:'#fee2e2', border:'#fca5a5', anim:'', css:{ fontWeight:700, fontSize:'0.80rem', textDecoration:'line-through', textDecorationColor:'#dc2626' } },
+                    processed:   { color:'#d97706', bg:'#fef3c7', border:'#fcd34d', anim:'', css:{ fontWeight:600, fontSize:'0.80rem', fontStyle:'italic' } },
+                    resolved:    { color:'#0891b2', bg:'#cffafe', border:'#67e8f9', anim:'', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.08em' } },
+                    settled:     { color:'#4f46e5', bg:'#e0e7ff', border:'#a5b4fc', anim:'animate-pulse', css:{ fontWeight:700, fontSize:'0.82rem' } },
+                    finalized:   { color:'#be185d', bg:'#fce7f3', border:'#f9a8d4', anim:'animate-pulse', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic' } },
+                    accomplished:{ color:'#7c3aed', bg:'linear-gradient(90deg,#ede9fe,#ddd6fe)', border:'#8b5cf6', anim:'animate-pulse', css:{ fontWeight:800, fontSize:'0.85rem' } },
+                    achieved:    { color:'#b45309', bg:'linear-gradient(90deg,#fef3c7,#fde68a)', border:'#f59e0b', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.85rem' } },
+                    fulfilled:   { color:'#065f46', bg:'linear-gradient(90deg,#d1fae5,#a7f3d0)', border:'#34d399', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em' } },
+                    delivered:   { color:'#1e40af', bg:'linear-gradient(90deg,#bfdbfe,#93c5fd)', border:'#3b82f6', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.88rem' } },
+                    executed:    { color:'#9f1239', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3)', border:'#f43f5e', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.10em' } },
+                    cleared:     { color:'#0f766e', bg:'linear-gradient(135deg,#ccfbf1,#99f6e4)', border:'#2dd4bf', anim:'animate-bounce', css:{ fontWeight:800, fontSize:'0.88rem', letterSpacing:'0.08em' } },
+                    dispatched:  { color:'#6d28d9', bg:'linear-gradient(135deg,#ede9fe,#c4b5fd)', border:'#7c3aed', anim:'', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.12em' } },
+                    secured:     { color:'#1d4ed8', bg:'linear-gradient(135deg,#dbeafe,#93c5fd)', border:'#2563eb', anim:'', css:{ fontWeight:900, fontSize:'0.90rem', letterSpacing:'0.10em', fontStyle:'italic' } },
+                    conquered:   { color:'#b91c1c', bg:'linear-gradient(135deg,#fee2e2,#fca5a5)', border:'#ef4444', anim:'', css:{ fontWeight:900, fontSize:'0.92rem', textTransform:'uppercase', letterSpacing:'0.15em' } },
+                    crushed:     { color:'#92400e', bg:'linear-gradient(135deg,#ffedd5,#fdba74)', border:'#f97316', anim:'', css:{ fontWeight:900, fontSize:'0.92rem', textTransform:'uppercase', letterSpacing:'0.12em', fontStyle:'italic' } },
+                    dominated:   { color:'#312e81', bg:'linear-gradient(135deg,#e0e7ff,#818cf8)', border:'#6366f1', anim:'', css:{ fontWeight:900, fontSize:'0.95rem', textTransform:'uppercase', letterSpacing:'0.18em' } },
+                    mastered:    { color:'#92400e', bg:'linear-gradient(135deg,#fef3c7,#fcd34d,#f59e0b)', border:'#d97706', anim:'', css:{ fontWeight:900, fontSize:'1rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 1px 2px rgba(180,83,9,0.4)' } },
                   };
                   const unlockedLabels = feedLabelUnlocked.map(u => u.label);
+                  if (feedLabelLoading) return (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  );
                   return (
                     <div>
                       <h2 className="text-lg font-bold text-gray-900 mb-1">Feed Label</h2>
@@ -8364,14 +8395,12 @@ const PlanAssist = () => {
                               }`}
                               style={{ background: unlocked ? (style.bg.startsWith('linear') ? style.bg : style.bg) : '#f9fafb' }}
                             >
-                              <span className={`px-2.5 py-1 rounded-lg ${style.anim}`}
+                              <span className={`px-2.5 py-1 rounded-lg ${style.anim || ''}`}
                                     style={{
                                       color: style.color,
-                                      background: style.bg.startsWith('linear') ? style.bg : style.bg,
+                                      background: style.bg,
                                       border: `1.5px solid ${style.border || style.color + '60'}`,
-                                      fontWeight: style.weight || '600',
-                                      fontSize: style.size || '0.78rem',
-                                      ...(style.extra ? Object.fromEntries(style.extra.split(',').filter(Boolean).map(p => { const [k,v] = p.split(':'); return [k.trim(), v?.replace(/"/g,'').trim()]; })) : {})
+                                      ...(style.css || {})
                                     }}>
                                 {label}
                               </span>
@@ -8418,6 +8447,11 @@ const PlanAssist = () => {
                       })
                     }));
                   const locked = Object.entries(BADGE_DEFS).filter(([k]) => !earnedKeys.has(k));
+                  if (galleryLoading) return (
+                    <div className="flex items-center justify-center py-20">
+                      <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  );
                   return (
                     <div>
                       <h2 className="text-lg font-bold text-gray-900 mb-1">Gallery</h2>
