@@ -3698,7 +3698,7 @@ const PlanAssist = () => {
 
   // ── Streak data loader (client-side calculation) ──────────────────────
   const LABEL_THRESHOLDS = [
-    [0,'completed'],[5,'finished'],[10,'did'],[20,'handled'],[30,'closed'],
+    [0,'completed'],[5,'finished'],[10,'did'],[20,'handled'],[30,'banned'],
     [40,'processed'],[50,'resolved'],[60,'settled'],[70,'finalized'],[80,'accomplished'],
     [90,'achieved'],[100,'fulfilled'],[120,'delivered'],[140,'executed'],[160,'cleared'],
     [180,'dispatched'],[200,'secured'],[250,'conquered'],[300,'crushed'],[400,'dominated'],[500,'mastered']
@@ -4747,7 +4747,7 @@ const PlanAssist = () => {
                           finished:    { color:'#7c3aed', bg:'transparent', border:'none', css:{ fontWeight:600 } },
                           did:         { color:'#2563eb', bg:'transparent', border:'none', css:{ fontWeight:600, fontStyle:'italic' } },
                           handled:     { color:'#059669', bg:'transparent', border:'none', css:{ fontWeight:700 } },
-                          closed:      { color:'#dc2626', bg:'transparent', border:'none', css:{ fontWeight:700, textDecoration:'line-through', textDecorationColor:'#dc2626' } },
+                          banned:      { color:'#dc2626', bg:'transparent', border:'none', css:{ fontWeight:700, textDecoration:'line-through', textDecorationColor:'#dc2626' } },
                           processed:   { color:'#d97706', bg:'transparent', border:'none', css:{ fontWeight:600, fontStyle:'italic' } },
                           resolved:    { color:'#0e7490', bg:'#ecfeff', border:'1px solid #67e8f9', css:{ fontWeight:700, letterSpacing:'0.06em', borderRadius:'4px', padding:'0 4px' } },
                           settled:     { color:'#3730a3', bg:'#e0e7ff', border:'1px solid #a5b4fc', css:{ fontWeight:700, borderRadius:'6px', padding:'0 4px' } },
@@ -8349,59 +8349,66 @@ const PlanAssist = () => {
                 {accountTab === 'feedlabel' && (() => {
                   // Each label has unique visual style — no string parsing, direct style objects
                   const LABEL_STYLES = {
-                    // Tier 0 — plain, no fuss
                     completed:   { color:'#6b7280', bg:'#f3f4f6', border:'1px solid #d1d5db', radius:'4px', animClass:'', css:{ fontWeight:500, fontSize:'0.74rem' } },
-                    // Tier 1 — subtle personality starts
                     finished:    { color:'#7c3aed', bg:'#ede9fe', border:'1.5px solid #c4b5fd', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', letterSpacing:'0.02em' } },
-                    did:         { color:'#2563eb', bg:'#dbeafe', border:'1.5px solid #93c5fd', radius:'4px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', fontStyle:'italic' } },
-                    handled:     { color:'#065f46', bg:'#d1fae5', border:'1.5px solid #6ee7b7', radius:'8px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem' } },
-                    closed:      { color:'#991b1b', bg:'#fee2e2', border:'1.5px solid #fca5a5', radius:'2px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'line-through', textDecorationColor:'#dc2626', textDecorationThickness:'2px' } },
+                    did:         { color:'#6366f1', bg:'#f5f3ff', border:'1px solid #c4b5fd', radius:'4px', animClass:'', css:{ fontWeight:400, fontSize:'0.68rem', fontStyle:'italic', opacity:0.85 } },
+                    handled:     { color:'#065f46', bg:'#d1fae5', border:'1.5px solid #6ee7b7', radius:'8px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'underline', textDecorationColor:'#059669', textUnderlineOffset:'2px' } },
+                    banned:      { color:'#991b1b', bg:'#fee2e2', border:'1.5px solid #fca5a5', radius:'2px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'line-through', textDecorationColor:'#dc2626', textDecorationThickness:'2px' } },
                     processed:   { color:'#92400e', bg:'#fef3c7', border:'1.5px dashed #fcd34d', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.78rem', fontStyle:'italic', letterSpacing:'0.03em' } },
-                    // Tier 2 — gradients and motion enter
                     resolved:    { color:'#0e7490', bg:'linear-gradient(90deg,#cffafe,#a5f3fc)', border:'2px solid #67e8f9', radius:'8px', animClass:'fl-resolved', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.06em' } },
                     settled:     { color:'#3730a3', bg:'linear-gradient(135deg,#e0e7ff,#c7d2fe)', border:'2px solid #a5b4fc', radius:'10px', animClass:'fl-settled', css:{ fontWeight:700, fontSize:'0.81rem', letterSpacing:'0.04em' } },
-                    finalized:   { color:'#9d174d', bg:'linear-gradient(135deg,#fce7f3,#fbcfe8)', border:'2px solid #f9a8d4', radius:'12px', animClass:'fl-finalized', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic', letterSpacing:'0.03em' } },
-                    accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd,#ddd6fe)', border:'2px solid #8b5cf6', radius:'10px', animClass:'fl-accomplished', css:{ fontWeight:800, fontSize:'0.84rem', letterSpacing:'0.04em' } },
-                    // Tier 3 — bolder, more character
-                    achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a,#fef3c7)', border:'2px solid #f59e0b', radius:'6px', animClass:'fl-achieved', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em' } },
-                    fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'2px solid #34d399', radius:'12px', animClass:'fl-fulfilled', css:{ fontWeight:800, fontSize:'0.86rem', letterSpacing:'0.05em', textShadow:'0 1px 0 rgba(6,78,59,0.2)' } },
-                    delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'2px solid #3b82f6', radius:'4px', animClass:'fl-delivered', css:{ fontWeight:800, fontSize:'0.86rem', textTransform:'uppercase', letterSpacing:'0.08em' } },
-                    executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3,#fda4af)', border:'2px solid #f43f5e', radius:'2px', animClass:'fl-executed', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.12em', textShadow:'0 1px 0 rgba(136,19,55,0.25)' } },
-                    cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1,#99f6e4)', border:'2px solid #14b8a6', radius:'14px', animClass:'fl-cleared', css:{ fontWeight:800, fontSize:'0.87rem', letterSpacing:'0.06em', textShadow:'0 1px 0 rgba(19,78,74,0.2)' } },
-                    // Tier 4 — prestige, intense
-                    dispatched:  { color:'#4c1d95', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'2px solid #8b5cf6', radius:'6px', animClass:'fl-dispatched', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.14em', color:'#fff', textShadow:'0 1px 3px rgba(76,29,149,0.5)' } },
-                    secured:     { color:'#fff', bg:'linear-gradient(135deg,#1d4ed8,#2563eb,#1d4ed8)', border:'2px solid #60a5fa', radius:'4px', animClass:'fl-secured', css:{ fontWeight:900, fontSize:'0.91rem', textTransform:'uppercase', letterSpacing:'0.12em', fontStyle:'italic', textShadow:'0 1px 3px rgba(29,78,216,0.6)' } },
-                    conquered:   { color:'#fff', bg:'linear-gradient(135deg,#b91c1c,#ef4444,#b91c1c)', border:'2px solid #fca5a5', radius:'3px', animClass:'fl-conquered', css:{ fontWeight:900, fontSize:'0.93rem', textTransform:'uppercase', letterSpacing:'0.16em', textShadow:'0 1px 4px rgba(185,28,28,0.7)' } },
-                    crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316,#92400e)', border:'2px solid #fdba74', radius:'4px', animClass:'fl-crushed', css:{ fontWeight:900, fontSize:'0.94rem', textTransform:'uppercase', letterSpacing:'0.14em', fontStyle:'italic', textShadow:'0 1px 4px rgba(146,64,14,0.7)' } },
-                    dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1,#312e81)', border:'2px solid #a5b4fc', radius:'2px', animClass:'fl-dominated', css:{ fontWeight:900, fontSize:'0.97rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 2px 6px rgba(49,46,129,0.8)' } },
-                    mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fef3c7,#fbbf24,#f59e0b,#fbbf24,#fef3c7)', border:'2.5px solid #d97706', radius:'6px', animClass:'fl-mastered', css:{ fontWeight:900, fontSize:'1.0rem', textTransform:'uppercase', letterSpacing:'0.22em', textShadow:'0 1px 3px rgba(180,83,9,0.5), 0 0 8px rgba(245,158,11,0.4)' } },
+                    finalized:   { color:'#9d174d', bg:'linear-gradient(135deg,#fce7f3,#fbcfe8)', border:'2px solid #f9a8d4', radius:'12px', animClass:'fl-finalized', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic', letterSpacing:'0.03em', overflow:'hidden', position:'relative' } },
+                    accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd,#ddd6fe)', border:'2px solid #8b5cf6', radius:'10px', animClass:'fl-accomplished', css:{ fontWeight:800, fontSize:'0.84rem', letterSpacing:'0.30em', wordSpacing:'0.15em' } },
+                    achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a,#fef3c7)', border:'2px solid #f59e0b', radius:'6px', animClass:'fl-achieved', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em', display:'inline-block' } },
+                    fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'2px solid #34d399', radius:'12px', animClass:'fl-fulfilled', css:{ fontWeight:800, fontSize:'0.86rem', letterSpacing:'0.05em', textShadow:'0 1px 0 rgba(6,78,59,0.2)', display:'inline-block' } },
+                    delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'2px solid #3b82f6', radius:'4px', animClass:'fl-delivered', css:{ fontWeight:800, fontSize:'0.86rem', textTransform:'uppercase', letterSpacing:'0.08em', display:'inline-block', position:'relative', overflow:'hidden' } },
+                    executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3,#fda4af)', border:'2px solid #f43f5e', radius:'2px', animClass:'fl-executed', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.12em', textShadow:'0 1px 0 rgba(136,19,55,0.25)', display:'inline-block' } },
+                    cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1,#99f6e4)', border:'2px solid #14b8a6', radius:'14px', animClass:'fl-cleared', css:{ fontWeight:800, fontSize:'0.87rem', letterSpacing:'0.06em', textShadow:'0 1px 0 rgba(19,78,74,0.2)', display:'inline-block' } },
+                    dispatched:  { color:'#fff', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'2px solid #8b5cf6', radius:'6px', animClass:'fl-dispatched', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.14em', textShadow:'0 1px 3px rgba(76,29,149,0.5)', position:'relative', overflow:'hidden' } },
+                    secured:     { color:'#a5f3fc', bg:'#0f172a', border:'2px solid #22d3ee', radius:'4px', animClass:'fl-secured', css:{ fontWeight:900, fontSize:'0.91rem', textTransform:'uppercase', letterSpacing:'0.12em', fontFamily:'monospace', textShadow:'0 0 8px #22d3ee', display:'inline-block' } },
+                    conquered:   { color:'#fff', bg:'linear-gradient(135deg,#7f1d1d,#991b1b)', border:'2px solid #fbbf24', radius:'3px', animClass:'fl-conquered', css:{ fontWeight:900, fontSize:'0.93rem', textTransform:'uppercase', letterSpacing:'0.18em', fontFamily:'Georgia,serif', textShadow:'0 2px 4px rgba(0,0,0,0.6)', display:'inline-block' } },
+                    crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316,#92400e)', border:'2px solid #fdba74', radius:'4px', animClass:'fl-crushed', css:{ fontWeight:900, fontSize:'0.94rem', textTransform:'uppercase', letterSpacing:'0.14em', fontStyle:'italic', textShadow:'0 1px 4px rgba(146,64,14,0.7)', display:'inline-block' } },
+                    dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1,#312e81)', border:'2px solid #a5b4fc', radius:'2px', animClass:'fl-dominated', css:{ fontWeight:900, fontSize:'0.97rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 2px 6px rgba(49,46,129,0.8)', display:'inline-block' } },
+                    mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fef9c3,#fbbf24,#f59e0b,#fde68a,#fbbf24,#fef9c3)', border:'2.5px solid #d97706', radius:'6px', animClass:'fl-mastered', css:{ fontWeight:900, fontSize:'1.0rem', textTransform:'uppercase', letterSpacing:'0.22em', textShadow:'0 1px 3px rgba(180,83,9,0.4), 0 0 12px rgba(251,191,36,0.5)', display:'inline-block', position:'relative', overflow:'hidden' } },
                   };
-                  // Custom keyframe animations injected once
                   const LABEL_KEYFRAMES = `
-                    @keyframes fl-fade { 0%,100%{opacity:1} 50%{opacity:0.7} }
-                    @keyframes fl-shimmer { 0%{background-position:200% center} 100%{background-position:-200% center} }
-                    @keyframes fl-breathe { 0%,100%{transform:scale(1)} 50%{transform:scale(1.04)} }
-                    @keyframes fl-glow { 0%,100%{box-shadow:0 0 4px currentColor} 50%{box-shadow:0 0 10px currentColor,0 0 20px currentColor} }
-                    @keyframes fl-shake { 0%,100%{transform:rotate(0deg)} 25%{transform:rotate(-1.5deg)} 75%{transform:rotate(1.5deg)} }
-                    @keyframes fl-charge { 0%{filter:brightness(1)} 50%{filter:brightness(1.2)} 100%{filter:brightness(1)} }
-                    @keyframes fl-march { 0%{background-position:0 0} 100%{background-position:24px 0} }
-                    @keyframes fl-fire { 0%,100%{filter:hue-rotate(0deg) brightness(1)} 50%{filter:hue-rotate(10deg) brightness(1.15)} }
-                    @keyframes fl-nova { 0%,100%{box-shadow:0 0 6px rgba(251,191,36,0.6)} 50%{box-shadow:0 0 14px rgba(251,191,36,0.9),0 0 28px rgba(245,158,11,0.5)} }
-                    .fl-resolved  { animation: fl-fade 3s ease-in-out infinite }
-                    .fl-settled   { animation: fl-breathe 3s ease-in-out infinite }
-                    .fl-finalized { animation: fl-breathe 2.5s ease-in-out infinite }
-                    .fl-accomplished { animation: fl-shimmer 3s linear infinite; background-size: 200% auto }
-                    .fl-achieved  { animation: fl-shimmer 4s linear infinite; background-size: 200% auto }
-                    .fl-fulfilled { animation: fl-breathe 2.8s ease-in-out infinite }
-                    .fl-delivered { animation: fl-charge 2s ease-in-out infinite }
-                    .fl-executed  { animation: fl-shake 2.5s ease-in-out infinite }
-                    .fl-cleared   { animation: fl-shimmer 4s linear infinite; background-size: 200% auto }
-                    .fl-dispatched { animation: fl-glow 2s ease-in-out infinite }
-                    .fl-secured   { animation: fl-charge 1.8s ease-in-out infinite }
-                    .fl-conquered { animation: fl-fire 2s ease-in-out infinite }
-                    .fl-crushed   { animation: fl-fire 1.6s ease-in-out infinite }
-                    .fl-dominated { animation: fl-glow 1.8s ease-in-out infinite }
-                    .fl-mastered  { animation: fl-nova 2.2s ease-in-out infinite }
+                    @keyframes fl-fade { 0%,100%{opacity:1} 50%{opacity:0.65} }
+                    @keyframes fl-wiggle { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-4deg)} 40%{transform:rotate(4deg)} 60%{transform:rotate(-3deg)} 80%{transform:rotate(3deg)} }
+                    @keyframes fl-transcend { 0%{background-position:-200% center;opacity:0.85} 100%{background-position:200% center;opacity:1} }
+                    @keyframes fl-bulge { 0%,80%,100%{transform:scale(1)} 10%{transform:scale(1.28) translateY(-2px)} 20%{transform:scale(1)} }
+                    @keyframes fl-breathe-v { 0%,100%{transform:scaleY(1)} 40%{transform:scaleY(1.18)} 60%{transform:scaleY(1.14)} }
+                    @keyframes fl-gleam { 0%{background-position:200% center} 100%{background-position:-200% center} }
+                    @keyframes fl-gleam-strong { 0%{background-position:300% center;filter:brightness(1)} 50%{filter:brightness(1.25)} 100%{background-position:-300% center;filter:brightness(1)} }
+                    @keyframes fl-heartbeat { 0%,90%,100%{transform:scale(1)} 14%{transform:scale(1.06)} 28%{transform:scale(1)} 42%{transform:scale(1.04)} 56%{transform:scale(1)} }
+                    @keyframes fl-teeter { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-6deg)} 50%{transform:rotate(7deg)} 70%{transform:rotate(-5deg)} 90%{transform:rotate(4deg)} }
+                    @keyframes fl-shootline { 0%{box-shadow:none} 40%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.9),inset 0 -2px 0 0 rgba(255,255,255,0.9)} 60%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.1),inset 0 -2px 0 0 rgba(255,255,255,0.1)} 100%{box-shadow:none} }
+                    @keyframes fl-glitch { 0%,100%{opacity:1;transform:skew(0deg)} 7%{opacity:0;transform:skew(-4deg) translateX(3px)} 8%{opacity:1;transform:skew(0deg)} 15%{clip-path:inset(30% 0 20% 0);transform:translateX(-2px)} 16%{clip-path:none;transform:none} 50%{opacity:1} 85%{opacity:0.9;filter:hue-rotate(90deg)} 86%{opacity:1;filter:none} }
+                    @keyframes fl-flagwave { 0%{transform:skewX(0deg) scaleX(1)} 25%{transform:skewX(-6deg) scaleX(0.97)} 50%{transform:skewX(0deg) scaleX(1)} 75%{transform:skewX(6deg) scaleX(0.97)} 100%{transform:skewX(0deg) scaleX(1)} }
+                    @keyframes fl-crack { 0%,70%,100%{filter:none;transform:scale(1)} 72%{filter:brightness(2) contrast(1.5);transform:scale(1.05) skew(3deg,-1deg)} 74%{filter:brightness(0.5) contrast(2);transform:scale(0.97) skew(-2deg,2deg)} 76%{filter:none;transform:scale(1)} }
+                    @keyframes fl-domwave { 0%,100%{text-shadow:0 2px 6px rgba(49,46,129,0.8)} 50%{text-shadow:0 0 16px rgba(165,180,252,0.9),0 2px 6px rgba(49,46,129,0.8)} }
+                    @keyframes fl-nova-multi { 0%,100%{text-shadow:0 1px 3px rgba(180,83,9,0.4);filter:brightness(1)} 30%{text-shadow:0 0 8px rgba(251,191,36,0.9),0 0 20px rgba(245,158,11,0.6),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.2)} 60%{text-shadow:0 0 4px rgba(251,191,36,0.5),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.05)} }
+                    @keyframes fl-finalize-sweep {
+                      0%   { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
+                      40%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 30%,#fce7f3 60%,#fbcfe8 100%); }
+                      60%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 70%,#fce7f3 90%,#fbcfe8 100%); }
+                      80%  { background-image: linear-gradient(90deg,#fce7f3 80%,#fff 95%,#fbcfe8 100%); }
+                      100% { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
+                    }
+                    .fl-resolved   { animation: fl-fade 3s ease-in-out infinite }
+                    .fl-settled    { animation: fl-wiggle 2.5s ease-in-out infinite }
+                    .fl-finalized  { animation: fl-finalize-sweep 3s ease-in-out infinite }
+                    .fl-accomplished { animation: fl-gleam 5s linear infinite; background-size:300% auto }
+                    .fl-achieved   { animation: fl-bulge 1.8s ease-in-out infinite }
+                    .fl-fulfilled  { animation: fl-breathe-v 3.2s ease-in-out infinite; transform-origin: center }
+                    .fl-delivered  { animation: fl-gleam-strong 2s linear infinite; background-size:300% auto }
+                    .fl-executed   { animation: fl-heartbeat 1.4s ease-in-out infinite }
+                    .fl-cleared    { animation: fl-teeter 2.2s ease-in-out infinite }
+                    .fl-dispatched { animation: fl-shootline 2s ease-in-out infinite }
+                    .fl-secured    { animation: fl-glitch 4s ease-in-out infinite }
+                    .fl-conquered  { animation: fl-flagwave 3s ease-in-out infinite; transform-origin: left center }
+                    .fl-crushed    { animation: fl-crack 3.5s ease-in-out infinite }
+                    .fl-dominated  { animation: fl-domwave 2s ease-in-out infinite }
+                    .fl-mastered   { animation: fl-nova-multi 2.5s ease-in-out infinite; background-size:400% auto }
                   `;
                   const unlockedLabels = feedLabelUnlocked.map(u => u.label);
                   if (feedLabelLoading) return (
