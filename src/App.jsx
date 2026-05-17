@@ -340,6 +340,10 @@ const PlanAssist = () => {
   const [completionHistory, setCompletionHistory] = useState([]);
 
   const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [syncType, setSyncType] = useState(null); // 'main' | 'background' | null
+  const [syncStep, setSyncStep] = useState('');   // current step label for Main Sync overlay
+  const [courseSyncLoading, setCourseSyncLoading] = useState(false); // Course Sync spinner
+  const [gradeSyncLoading, setGradeSyncLoading] = useState(false);   // Grade Sync spinner
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
   const [showSplitTask, setShowSplitTask] = useState(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -446,6 +450,7 @@ const PlanAssist = () => {
   const [showHubExplainer, setShowHubExplainer] = useState(false);
   const [zoomBanner, setZoomBanner] = useState(null); // { period, zoomNumber, isTutorial }
   const [lastAutoSync, setLastAutoSync] = useState(null);
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState(null); // ISO string from DB
   const [autoSyncToast, setAutoSyncToast] = useState(null); // '3 new tasks added'
 
   // Hub features state
@@ -678,6 +683,9 @@ const PlanAssist = () => {
           }).then(r => r.ok ? r.json() : []).then(data => setScheduleLessons(data || [])).catch(() => {});
         }
         savedCanvasTokenRef.current = setupData.canvasApiToken || '';
+        if (setupData.lastSync) {
+          setLastSyncTimestamp(setupData.lastSync);
+        }
         
         // Update user object with grade + isAdmin + showInFeed (merge, don't clobber prior setUser)
         setUser(prev => {
@@ -814,6 +822,32 @@ const PlanAssist = () => {
         await loadUserData(data.token);
         loadAnnouncements(data.token);
         setCurrentPage('hub');
+        // Login-time sync: check last_sync to decide Main vs Background
+        // lastSyncTimestamp is set inside loadUserData from the account/setup response
+        // We read it directly from the setupData (which is returned by loadUserData's fetch)
+        // Since loadUserData doesn't return the value, we use a quick re-fetch approach
+        if (data.user.canvasApiToken || accountSetup.canvasApiToken) {
+          // Re-check last_sync from the fresh token — it was stored in state by loadUserData
+          // Use a short timeout to let React batch the state updates before we read it
+          setTimeout(async () => {
+            try {
+              const setupCheck = await apiCall('/account/setup', 'GET');
+              const lastSync = setupCheck?.lastSync ? new Date(setupCheck.lastSync) : null;
+              const now = new Date();
+              const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+              const isStale = !lastSync || (now - lastSync) >= fourteenDaysMs;
+              if (isStale) {
+                console.log('[LOGIN SYNC] last_sync is null or 14+ days old — running Main Sync');
+                fetchCanvasTasks();
+              } else {
+                console.log('[LOGIN SYNC] last_sync is recent — running Background Sync');
+                runBackgroundSync();
+              }
+            } catch (err) {
+              console.warn('[LOGIN SYNC] Could not check last_sync:', err.message);
+            }
+          }, 100);
+        }
       }
     } catch (error) {
       if (error.message === 'ACCOUNT_BLOCKED') {
@@ -989,10 +1023,7 @@ const PlanAssist = () => {
     finally { setActivityLoading(false); }
   };
 
-  const runGradeMiniSync = async () => {
-    try { await apiCall('/canvas/grades/mini-sync', 'POST'); loadCanvasGrades(); }
-    catch (err) { console.error('Grade mini-sync failed:', err); }
-  };
+  // runGradeMiniSync removed — replaced by runGradeSync (POST /canvas/grade-sync)
 
   const loadHelpContent = async () => {
     try {
@@ -1069,21 +1100,19 @@ const PlanAssist = () => {
     setAccountTab(tab);
     if (tab === 'resolved') loadResolvedTasks('', resolvedSort);
     if (tab === 'grades') {
-      // Load all sub-tabs upfront; default filter is 'grades'
-      loadCanvasGrades();
+      // Trigger Grade Sync (shows spinner over Activity pane) then load supporting data
+      runGradeSync();
       loadCanvasAnnouncements();
       loadCanvasDiscussions();
       loadActivityStream();
-      // 5-min polling for activity stream
+      // 5-min polling for activity stream while tab is open
       const actInterval = setInterval(loadActivityStream, 300000);
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return actInterval; });
-      // 60-min grade mini-sync
-      const gradeInterval = setInterval(runGradeMiniSync, 3600000);
-      setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return gradeInterval; });
     } else {
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
+    if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
     if (tab === 'help') loadHelpContent();
   };
 
@@ -1221,97 +1250,129 @@ const PlanAssist = () => {
     }
   };
 
+  // ── MAIN SYNC ────────────────────────────────────────────────────────────
   const fetchCanvasTasks = async () => {
     if (!accountSetup.canvasApiToken) {
       alert('Please enter your Canvas API Token first');
       return;
     }
+    setSyncType('main');
     setIsLoadingTasks(true);
+    setSyncStep('Fetching assignments from Canvas…');
     try {
-      // Fetch from Canvas API (replaces ICS calendar fetch)
       const data = await apiCall('/canvas/sync', 'POST', {});
-      
-      // Format tasks properly for saving to database
-      // Backend expects camelCase fields
       if (!data || !Array.isArray(data.tasks)) {
         throw new Error('Canvas sync returned unexpected data. Please try again.');
       }
+      setSyncStep(`Processing ${data.tasks.length} assignments…`);
       const formattedTasks = data.tasks.map(t => ({
-        title: t.title,
-        segment: t.segment,
-        class: t.class,
-        description: t.description,
-        url: t.url,
-        deadlineDate: t.deadlineDate,
-        deadlineTime: t.deadlineTime,
+        title: t.title, segment: t.segment, class: t.class,
+        description: t.description, url: t.url,
+        deadlineDate: t.deadlineDate, deadlineTime: t.deadlineTime,
         estimatedTime: t.estimatedTime,
-        // New Canvas API fields
-        courseId: t.courseId ?? null,
-        assignmentId: t.assignmentId ?? null,
-        pointsPossible: t.pointsPossible ?? null,
-        assignmentGroupId: t.assignmentGroupId ?? null,
-        currentScore: t.currentScore ?? null,
-        currentGrade: t.currentGrade ?? null,
+        courseId: t.courseId ?? null, assignmentId: t.assignmentId ?? null,
+        pointsPossible: t.pointsPossible ?? null, assignmentGroupId: t.assignmentGroupId ?? null,
+        currentScore: t.currentScore ?? null, currentGrade: t.currentGrade ?? null,
         gradingType: t.gradingType ?? 'points',
-        unlockAt: t.unlockAt ?? null,
-        lockAt: t.lockAt ?? null,
+        unlockAt: t.unlockAt ?? null, lockAt: t.lockAt ?? null,
         submittedAt: t.submittedAt ?? null,
-        isMissing: t.isMissing ?? false,
-        isLate: t.isLate ?? false,
+        isMissing: t.isMissing ?? false, isLate: t.isLate ?? false,
         completed: t.completed ?? false,
-        // Module fields
-        moduleId: t.moduleId ?? null,
-        moduleName: t.moduleName ?? null,
-        modulePosition: t.modulePosition ?? null,
       }));
-      
-      // Save to database - this updates existing tasks and creates new ones
-      const saveResult = await apiCall('/tasks', 'POST', { tasks: formattedTasks });
-      
-      if (!saveResult || !saveResult.stats) {
-        throw new Error('Failed to save synced tasks. Please try again.');
-      }
-      console.log(`✓ Sync complete: ${saveResult.stats.updated} updated, ${saveResult.stats.new} new, ${saveResult.stats.cleaned || 0} cleaned`);
-      
-      // CRITICAL FIX: Don't use saveResult.tasks directly as it includes deleted tasks
-      // Instead, reload from GET endpoint which properly filters deleted=false
+      setSyncStep('Saving to PlanAssist…');
+      const saveResult = await apiCall('/tasks/sync-save', 'POST', { tasks: formattedTasks, partial: false, syncType: 'main' });
+      if (!saveResult?.stats) throw new Error('Failed to save synced tasks. Please try again.');
+      setSyncStep('Done! Loading your plan…');
       await loadTasks();
-      await loadCourses(); // Refresh course grades after sync
-      
-      // Check how many new tasks we got
-      const cleanedCount = saveResult.stats.cleaned || 0;
-      let message = `Sync complete! ${saveResult.stats.updated} tasks updated`;
-      if (cleanedCount > 0) {
-        message += `, ${cleanedCount} past-due tasks removed`;
-      }
-      message += '.';
-
-      
-      alert(message);
+      const { updated, new: newCount, cleaned } = saveResult.stats;
+      let msg = `Sync complete! ${updated} tasks updated`;
+      if (newCount > 0) msg += `, ${newCount} new`;
+      if (cleaned > 0) msg += `, ${cleaned} past-due removed`;
+      alert(msg + '.');
     } catch (error) {
-      console.error('Failed to fetch Canvas calendar:', error);
-      
-      let errorMessage = 'Sync failed.';
-      
-      if (error.message.includes('unexpected data') || error.message.includes('Failed to save')) {
-        errorMessage = error.message;
-      } else if (error.message.includes('401') || error.message.includes('invalid or expired')) {
-        errorMessage = 'Canvas API token is invalid or expired. Please update your token in Settings.';
-      } else if (error.message.includes('400')) {
-        errorMessage = 'Invalid request. Please check your Canvas API token and try again.';
-      } else if (error.message.includes('404')) {
-        errorMessage = 'Canvas data not found. Please verify your API token is correct.';
-      } else if (error.message.includes('timeout') || error.message.includes('408')) {
-        errorMessage = 'Request timeout. Please check your connection and try again.';
+      console.error('Main sync failed:', error);
+      let msg = 'Sync failed.';
+      if (error.message?.includes('401') || error.message?.includes('invalid or expired')) {
+        msg = 'Canvas API token is invalid or expired. Please update your token in Settings.';
       } else if (error.message) {
-        errorMessage = 'Sync failed: ' + error.message;
+        msg = 'Sync failed: ' + error.message;
       }
-      
-      alert(errorMessage);
+      alert(msg);
     } finally {
       setIsLoadingTasks(false);
+      setSyncType(null);
+      setSyncStep('');
     }
   };
+
+  // ── BACKGROUND SYNC ───────────────────────────────────────────────────────
+  const runBackgroundSync = async () => {
+    try {
+      setSyncType('background');
+      const data = await apiCall('/canvas/background-sync', 'POST', {});
+      if (!data || !data.shouldSync === false) {
+        // shouldSync:false returned — no token, skip silently
+        if (data?.shouldSync === false) { setSyncType(null); return; }
+      }
+      if (!Array.isArray(data.tasks)) { setSyncType(null); return; }
+      if (data.tasks.length === 0) { setSyncType(null); return; }
+      const formattedTasks = data.tasks.map(t => ({
+        title: t.title, segment: t.segment, class: t.class,
+        description: t.description, url: t.url,
+        deadlineDate: t.deadlineDate, deadlineTime: t.deadlineTime,
+        estimatedTime: t.estimatedTime,
+        courseId: t.courseId ?? null, assignmentId: t.assignmentId ?? null,
+        pointsPossible: t.pointsPossible ?? null, assignmentGroupId: t.assignmentGroupId ?? null,
+        currentScore: t.currentScore ?? null, currentGrade: t.currentGrade ?? null,
+        gradingType: t.gradingType ?? 'points',
+        unlockAt: t.unlockAt ?? null, lockAt: t.lockAt ?? null,
+        submittedAt: t.submittedAt ?? null,
+        isMissing: t.isMissing ?? false, isLate: t.isLate ?? false,
+        completed: t.completed ?? false,
+      }));
+      const saveResult = await apiCall('/tasks/sync-save', 'POST', { tasks: formattedTasks, partial: true, syncType: 'background' });
+      if (saveResult?.stats) {
+        const { new: newCount } = saveResult.stats;
+        await loadTasks();
+        if (newCount > 0) {
+          setAutoSyncToast(`Background sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added`);
+          setTimeout(() => setAutoSyncToast(null), 4000);
+        }
+      }
+    } catch (err) {
+      console.error('[Background Sync] Failed:', err.message);
+    } finally {
+      setSyncType(null);
+    }
+  };
+
+  // ── COURSE SYNC ───────────────────────────────────────────────────────────
+  // clearSessionActive=true for Marks/Goals triggers; false for silent 60-min interval
+  const runCourseSync = async (clearSessionActive = false, silent = false) => {
+    if (!silent) setCourseSyncLoading(true);
+    try {
+      await apiCall('/canvas/course-sync', 'POST', { clearSessionActive });
+      await loadCourses();
+    } catch (err) {
+      console.error('[Course Sync] Failed:', err.message);
+    } finally {
+      if (!silent) setCourseSyncLoading(false);
+    }
+  };
+
+  // ── GRADE SYNC ────────────────────────────────────────────────────────────
+  const runGradeSync = async () => {
+    setGradeSyncLoading(true);
+    try {
+      await apiCall('/canvas/grade-sync', 'POST', {});
+      await loadCanvasGrades();
+    } catch (err) {
+      console.error('[Grade Sync] Failed:', err.message);
+    } finally {
+      setGradeSyncLoading(false);
+    }
+  };
+
 
   const detectTaskType = (title) => {
     const lower = title.toLowerCase();
@@ -2832,30 +2893,14 @@ const PlanAssist = () => {
   // Feature 6: Auto-sync every 30 minutes while app is visible
   useEffect(() => {
     if (!isAuthenticated) return;
-    const AUTO_SYNC_INTERVAL = 30 * 60 * 1000;
-    const runAutoSync = async () => {
+    const runBgSync = async () => {
       if (document.hidden) return;
       if (isLoadingTasks || ['session-active','agenda-active'].includes(currentPage)) return;
-      try {
-        const check = await apiCall('/canvas/auto-sync', 'POST', {});
-        if (!check?.shouldSync) return;
-        setIsLoadingTasks(true);
-        try {
-          const newCount = check.newCount || 0;
-          await loadTasks();
-          await loadCourses();
-          await loadGradeImpact();
-          setAutoSyncToast(newCount > 0 ? `Auto-sync: ${newCount} new task${newCount !== 1 ? 's' : ''} added` : 'Auto-sync complete');
-          setLastAutoSync(new Date());
-          setTimeout(() => setAutoSyncToast(null), 4000);
-        } finally {
-          setIsLoadingTasks(false);
-        }
-      } catch (err) {
-        console.error('Auto-sync error:', err);
-      }
+      console.log('[Background Sync] Interval triggered');
+      await runBackgroundSync();
     };
-    const interval = setInterval(runAutoSync, AUTO_SYNC_INTERVAL);
+    const BG_SYNC_INTERVAL = 30 * 60 * 1000; // 30 minutes
+    const interval = setInterval(runBgSync, BG_SYNC_INTERVAL);
     return () => clearInterval(interval);
   }, [isAuthenticated, isLoadingTasks, currentPage]);
 
@@ -3667,10 +3712,19 @@ const PlanAssist = () => {
         loadLeaderboard();
         loadCompletionHistory();
       }, 120000);
+
+      // Silent Course Sync every 60 minutes (regardless of page, but not if tab hidden)
+      const courseSyncInterval = setInterval(() => {
+        if (!document.hidden) {
+          console.log('[Course Sync] 60-min silent interval triggered');
+          runCourseSync(false, true); // no session_active clear, silent (no spinner)
+        }
+      }, 60 * 60 * 1000);
       
       return () => {
         clearTimeout(initialDelay);
         clearInterval(interval);
+        clearInterval(courseSyncInterval);
       };
     }
   }, [isAuthenticated, user]);
@@ -3686,7 +3740,7 @@ const PlanAssist = () => {
       loadCompletionHistory();
     }
     if (currentPage === 'marks') {
-      loadCourses();
+      runCourseSync(true, false); // Course Sync with session_active clear + spinner
     }
     if (currentPage === 'sessions') {
       loadSessionTasks();
@@ -4051,18 +4105,40 @@ const PlanAssist = () => {
         </div>
       ))}
 
-      {/* Save & Adjust Plan - Full Lock Overlay */}
-      {(isLoadingTasks) && (
-        <div className="fixed inset-0 bg-black bg-opacity-30 z-40 cursor-not-allowed flex items-center justify-center">
-          {isLoadingTasks && (
-            <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-3 pointer-events-none">
-              <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-              <p className="text-gray-800 font-semibold text-base">Syncing with Canvas...</p>
-              <p className="text-gray-400 text-sm">This may take a moment</p>
+      {/* Sync Loading Overlay — Main Sync: full-screen themed; Background Sync: silent */}
+      {isLoadingTasks && syncType === 'main' && (
+        <div className="fixed inset-0 z-[9000] flex items-center justify-center" style={{ backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', background: 'rgba(0,0,0,0.45)' }}>
+          <div className="bg-white rounded-2xl shadow-2xl px-10 py-8 flex flex-col items-center gap-4 max-w-sm w-full mx-4 pointer-events-none">
+            <div className="w-12 h-12 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+            <div className="text-center">
+              <p className="text-gray-900 font-bold text-lg mb-1">Syncing with Canvas</p>
+              <p className="text-purple-600 text-sm font-medium min-h-[20px]">{syncStep}</p>
             </div>
-          )}
+            <div className="w-full space-y-1.5">
+              {[
+                'Fetching assignments from Canvas…',
+                'Processing assignments…',
+                'Saving to PlanAssist…',
+                'Done! Loading your plan…'
+              ].map((step, i) => {
+                const steps = ['Fetching assignments from Canvas…','Processing','Saving to PlanAssist…','Done! Loading your plan…'];
+                const currentIdx = steps.findIndex(s => syncStep.startsWith(s.split(' ')[0]));
+                const done = i < currentIdx;
+                const active = syncStep.startsWith(step.split(' ')[0]);
+                return (
+                  <div key={step} className={`flex items-center gap-2.5 text-xs ${done ? 'text-green-600' : active ? 'text-purple-700 font-semibold' : 'text-gray-400'}`}>
+                    <div className={`w-4 h-4 rounded-full flex items-center justify-center flex-shrink-0 text-xs ${done ? 'bg-green-500 text-white' : active ? 'bg-purple-600 text-white' : 'bg-gray-200'}`}>
+                      {done ? '✓' : i + 1}
+                    </div>
+                    {step}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
+      {/* Background Sync: silent — no overlay, just update toast if new tasks */}
 
       {/* Tutorial Overlay */}
       {showTutorial && (
@@ -6579,7 +6655,16 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="max-w-6xl mx-auto p-6">
+          <div className="max-w-6xl mx-auto p-6 relative">
+              {/* Course Sync loading overlay for Marks page */}
+              {courseSyncLoading && (
+                <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.35)' }}>
+                  <div className="bg-white rounded-2xl shadow-2xl px-8 py-6 flex flex-col items-center gap-3">
+                    <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+                    <p className="text-gray-900 font-semibold">Refreshing course data…</p>
+                  </div>
+                </div>
+              )}
             {/* Header */}
             <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl p-8 shadow-lg mb-6 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 opacity-10" style={{ background: 'radial-gradient(circle, white 0%, transparent 70%)', transform: 'translate(30%, -30%)' }} />
@@ -7359,7 +7444,16 @@ const PlanAssist = () => {
                     : activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation');
 
                   return (
-                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+                    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative">
+                      {/* Grade Sync loading overlay for Activity pane */}
+                      {gradeSyncLoading && (
+                        <div className="absolute inset-0 z-20 flex items-center justify-center rounded-2xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', background: 'rgba(255,255,255,0.80)' }}>
+                          <div className="flex flex-col items-center gap-3">
+                            <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+                            <p className="text-purple-700 font-semibold text-sm">Refreshing grades…</p>
+                          </div>
+                        </div>
+                      )}
                       <div className="flex items-center justify-between mb-1">
                         <h2 className="text-lg font-bold text-gray-900">Canvas Activity</h2>
                         {isLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
@@ -7621,6 +7715,15 @@ const PlanAssist = () => {
 
                 {/* ── GOALS TAB ── */}
                 {accountTab === 'goals' && (
+                  <div className="relative">
+                    {courseSyncLoading && (
+                      <div className="absolute inset-0 z-20 flex items-center justify-center rounded-xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', background: 'rgba(255,255,255,0.75)' }}>
+                        <div className="flex flex-col items-center gap-3">
+                          <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+                          <p className="text-purple-700 font-semibold text-sm">Refreshing course data…</p>
+                        </div>
+                      </div>
+                    )}
                   <GoalsPanel
                     courses={courses}
                     userGoals={userGoals}
@@ -7628,6 +7731,7 @@ const PlanAssist = () => {
                     loadGoals={loadGoals}
                     apiCall={apiCall}
                   />
+                  </div>
                 )}
 
                 {/* ── HELP TAB ── */}
@@ -7834,7 +7938,7 @@ const PlanAssist = () => {
                                 </div>
                               </div>
                             </div>
-                            <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}</p>
+                            <p className="text-xs text-gray-400 mt-1">{u.active_tasks} tasks · {u.total_completed} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} · last sync {u.last_sync ? new Date(u.last_sync).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'never'}</p>
                           </div>
                         ));
                     })()}
@@ -8082,7 +8186,7 @@ const PlanAssist = () => {
                           {d.staleSyncs.map(u => (
                             <div key={u.id} className="flex justify-between text-xs p-2 bg-orange-50 rounded-lg">
                               <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
-                              <span className="text-gray-400">{u.last_task_import ? new Date(u.last_task_import).toLocaleDateString() : 'never'}</span>
+                              <span className="text-gray-400">{u.last_sync ? new Date(u.last_sync).toLocaleDateString() : 'never'}</span>
                             </div>
                           ))}
                         </div>
