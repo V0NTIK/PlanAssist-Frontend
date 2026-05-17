@@ -459,11 +459,11 @@ const PlanAssist = () => {
   const [streakShieldLog, setStreakShieldLog] = useState([]); // dates shields were used
   const [streakShieldToast, setStreakShieldToast] = useState(null);
 
-  // Feed labels
-  const [feedLabelDays, setFeedLabelDays] = useState(0);
-  const [feedLabelSelected, setFeedLabelSelected] = useState('completed');
-  const [feedLabelUnlocked, setFeedLabelUnlocked] = useState([]);
-  const [feedLabelNewUnlock, setFeedLabelNewUnlock] = useState(null); // toast
+  // Insignia
+  const [insigniaDays, setInsigniaDays] = useState(0);
+  const [insigniaSelected, setInsigniaSelected] = useState('Default');
+  const [insigniaUnlocked, setInsigniaUnlocked] = useState([]);
+  const [insigniaNewUnlock, setInsigniaNewUnlock] = useState(null); // toast
 
   // Badges / Gallery
   const [userBadges, setUserBadges] = useState([]);
@@ -488,7 +488,7 @@ const PlanAssist = () => {
   // Streak pane
   const [streakPaneData, setStreakPaneData] = useState(null);
   const [streakLoading, setStreakLoading] = useState(false);
-  const [feedLabelLoading, setFeedLabelLoading] = useState(false);
+  const [insigniaLoading, setInsigniaLoading] = useState(false);
   const [galleryLoading, setGalleryLoading] = useState(false);
   const [autoSyncToast, setAutoSyncToast] = useState(null); // '3 new tasks added'
 
@@ -1220,7 +1220,7 @@ const PlanAssist = () => {
     }
     if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
     if (tab === 'streak') { loadStreakData(); loadCompletionHistory(); }
-    if (tab === 'feedlabel') loadFeedLabel();
+    if (tab === 'feedlabel') loadInsignia();
     if (tab === 'gallery') { loadBadges(); checkNewUnlocks(computeStreak(
       [...new Set(completionHistory.map(h => h.date instanceof Date ? h.date.toISOString().slice(0,10) : String(h.date).slice(0,10)).filter(Boolean))],
       streakShieldLog
@@ -3697,77 +3697,73 @@ const PlanAssist = () => {
   }, [colorTheme]);
 
   // ── Streak data loader (client-side calculation) ──────────────────────
-  const LABEL_THRESHOLDS = [
-    [0,'completed'],[5,'finished'],[10,'did'],[20,'handled'],[30,'banned'],
-    [40,'processed'],[50,'resolved'],[60,'settled'],[70,'finalized'],[80,'accomplished'],
-    [90,'achieved'],[100,'fulfilled'],[120,'delivered'],[140,'executed'],[160,'cleared'],
-    [180,'dispatched'],[200,'secured'],[250,'conquered'],[300,'crushed'],[400,'dominated'],[500,'mastered']
+  // Insignia tiers — unlock thresholds by days with ≥1 completion
+  const INSIGNIA_THRESHOLDS = [
+    [0,'Default'],[2,'Copper'],[5,'Silver'],[10,'Gold'],[20,'Emerald'],
+    [30,'Amethyst'],[40,'Ruby'],[50,'Diamond'],[75,'Obsidian'],[100,'Aether']
   ];
 
-  // Single source of truth for Feed Label styles — used in both Feed Label pane and Live Feed
-  const LABEL_STYLES = {
-    completed:   { color:'#6b7280', bg:'#f3f4f6', border:'1px solid #d1d5db', radius:'4px', animClass:'', css:{ fontWeight:500, fontSize:'0.74rem' } },
-    finished:    { color:'#7c3aed', bg:'#ede9fe', border:'1.5px solid #c4b5fd', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', letterSpacing:'0.02em' } },
-    did:         { color:'#6366f1', bg:'#f5f3ff', border:'1px solid #c4b5fd', radius:'4px', animClass:'', css:{ fontWeight:400, fontSize:'0.68rem', fontStyle:'italic', opacity:0.85 } },
-    handled:     { color:'#065f46', bg:'#d1fae5', border:'1.5px solid #6ee7b7', radius:'8px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'underline', textDecorationColor:'#059669', textUnderlineOffset:'2px' } },
-    banned:      { color:'#991b1b', bg:'#fee2e2', border:'1.5px solid #fca5a5', radius:'2px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'line-through', textDecorationColor:'#dc2626', textDecorationThickness:'2px' } },
-    processed:   { color:'#92400e', bg:'#fef3c7', border:'1.5px dashed #fcd34d', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.78rem', fontStyle:'italic', letterSpacing:'0.03em' } },
-    resolved:    { color:'#0e7490', bg:'linear-gradient(90deg,#cffafe,#a5f3fc)', border:'2px solid #67e8f9', radius:'8px', animClass:'fl-resolved', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.06em' } },
-    settled:     { color:'#3730a3', bg:'linear-gradient(135deg,#e0e7ff,#c7d2fe)', border:'2px solid #a5b4fc', radius:'10px', animClass:'fl-settled', css:{ fontWeight:700, fontSize:'0.81rem', letterSpacing:'0.04em' } },
-    finalized:   { color:'#9d174d', bg:'linear-gradient(135deg,#fce7f3,#fbcfe8)', border:'2px solid #f9a8d4', radius:'12px', animClass:'fl-finalized', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic', letterSpacing:'0.03em', overflow:'hidden', position:'relative' } },
-    accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd,#ddd6fe)', border:'2px solid #8b5cf6', radius:'10px', animClass:'fl-accomplished', css:{ fontWeight:800, fontSize:'0.84rem', letterSpacing:'0.30em', wordSpacing:'0.15em' } },
-    achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a,#fef3c7)', border:'2px solid #f59e0b', radius:'6px', animClass:'fl-achieved', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em', display:'inline-block' } },
-    fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'2px solid #34d399', radius:'12px', animClass:'fl-fulfilled', css:{ fontWeight:800, fontSize:'0.86rem', letterSpacing:'0.05em', textShadow:'0 1px 0 rgba(6,78,59,0.2)', display:'inline-block' } },
-    delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'2px solid #3b82f6', radius:'4px', animClass:'fl-delivered', css:{ fontWeight:800, fontSize:'0.86rem', textTransform:'uppercase', letterSpacing:'0.08em', display:'inline-block', position:'relative', overflow:'hidden' } },
-    executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3,#fda4af)', border:'2px solid #f43f5e', radius:'2px', animClass:'fl-executed', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.12em', textShadow:'0 1px 0 rgba(136,19,55,0.25)', display:'inline-block' } },
-    cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1,#99f6e4)', border:'2px solid #14b8a6', radius:'14px', animClass:'fl-cleared', css:{ fontWeight:800, fontSize:'0.87rem', letterSpacing:'0.06em', textShadow:'0 1px 0 rgba(19,78,74,0.2)', display:'inline-block' } },
-    dispatched:  { color:'#fff', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'2px solid #8b5cf6', radius:'6px', animClass:'fl-dispatched', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.14em', textShadow:'0 1px 3px rgba(76,29,149,0.5)', position:'relative', overflow:'hidden' } },
-    secured:     { color:'#a5f3fc', bg:'#0f172a', border:'2px solid #22d3ee', radius:'4px', animClass:'fl-secured', css:{ fontWeight:900, fontSize:'0.91rem', textTransform:'uppercase', letterSpacing:'0.12em', fontFamily:'monospace', textShadow:'0 0 8px #22d3ee', display:'inline-block' } },
-    conquered:   { color:'#fff', bg:'linear-gradient(135deg,#7f1d1d,#991b1b)', border:'2px solid #fbbf24', radius:'3px', animClass:'fl-conquered', css:{ fontWeight:900, fontSize:'0.93rem', textTransform:'uppercase', letterSpacing:'0.18em', fontFamily:'Georgia,serif', textShadow:'0 2px 4px rgba(0,0,0,0.6)', display:'inline-block' } },
-    crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316,#92400e)', border:'2px solid #fdba74', radius:'4px', animClass:'fl-crushed', css:{ fontWeight:900, fontSize:'0.94rem', textTransform:'uppercase', letterSpacing:'0.14em', fontStyle:'italic', textShadow:'0 1px 4px rgba(146,64,14,0.7)', display:'inline-block' } },
-    dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1,#312e81)', border:'2px solid #a5b4fc', radius:'2px', animClass:'fl-dominated', css:{ fontWeight:900, fontSize:'0.97rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 2px 6px rgba(49,46,129,0.8)', display:'inline-block' } },
-    mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fef9c3,#fbbf24,#f59e0b,#fde68a,#fbbf24,#fef9c3)', border:'2.5px solid #d97706', radius:'6px', animClass:'fl-mastered', css:{ fontWeight:900, fontSize:'1.0rem', textTransform:'uppercase', letterSpacing:'0.22em', textShadow:'0 1px 3px rgba(180,83,9,0.4), 0 0 12px rgba(251,191,36,0.5)', display:'inline-block', position:'relative', overflow:'hidden' } },
+  // Single source of truth for Insignia styles — used in Insignia pane, nav, Hub, Feed, and Leaderboard
+  const INSIGNIA_STYLES = {
+    // Default — plain gray, no decoration
+    Default:   { animClass:'', nameStyle:{ color:'#374151', fontWeight:600 } },
+    // Copper — warm orange, no gradient, no animation
+    Copper:    { animClass:'', nameStyle:{ color:'#c2651a', fontWeight:700 } },
+    // Silver — cool metallic gray, slight gradient via textShadow
+    Silver:    { animClass:'', nameStyle:{ background:'linear-gradient(135deg,#9ca3af,#d1d5db,#6b7280)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+    // Gold — warm metallic gold, noticeable gradient
+    Gold:      { animClass:'', nameStyle:{ background:'linear-gradient(135deg,#d97706,#fbbf24,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+    // Emerald — vivid bright emerald, gradient + shimmer
+    Emerald:   { animClass:'ins-emerald', nameStyle:{ background:'linear-gradient(135deg,#059669,#34d399,#065f46)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
+    // Amethyst — deep mysterious amethyst, gradient + shimmer
+    Amethyst:  { animClass:'ins-amethyst', nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a78bfa,#4c1d95)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
+    // Ruby — vivid bold ruby, gradient + heavy shimmer
+    Ruby:      { animClass:'ins-ruby', nameStyle:{ background:'linear-gradient(135deg,#be123c,#f43f5e,#881337)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'200% auto' } },
+    // Diamond — fluorescent diamond, heavy gradient + bling animation
+    Diamond:   { animClass:'ins-diamond', nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
+    // Obsidian — deep obsidian, heavy gradient + murky cloud animation
+    Obsidian:  { animClass:'ins-obsidian', nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
+    // Aether — luminous iridescent cosmic color-shifting, shifting gradient + float animation
+    Aether:    { animClass:'ins-aether', nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#fbbf24,#f43f5e,#a5f3fc,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'600% auto' } },
   };
-  const LABEL_KEYFRAMES = `
-    @keyframes fl-fade { 0%,100%{opacity:1} 50%{opacity:0.65} }
-    @keyframes fl-wiggle { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-4deg)} 40%{transform:rotate(4deg)} 60%{transform:rotate(-3deg)} 80%{transform:rotate(3deg)} }
-    @keyframes fl-transcend { 0%{background-position:-200% center;opacity:0.85} 100%{background-position:200% center;opacity:1} }
-    @keyframes fl-bulge { 0%,80%,100%{transform:scale(1)} 10%{transform:scale(1.28) translateY(-2px)} 20%{transform:scale(1)} }
-    @keyframes fl-breathe-v { 0%,100%{transform:scaleY(1)} 40%{transform:scaleY(1.18)} 60%{transform:scaleY(1.14)} }
-    @keyframes fl-gleam { 0%{background-position:200% center} 100%{background-position:-200% center} }
-    @keyframes fl-gleam-strong { 0%{background-position:300% center;filter:brightness(1)} 50%{filter:brightness(1.25)} 100%{background-position:-300% center;filter:brightness(1)} }
-    @keyframes fl-heartbeat { 0%,90%,100%{transform:scale(1)} 14%{transform:scale(1.06)} 28%{transform:scale(1)} 42%{transform:scale(1.04)} 56%{transform:scale(1)} }
-    @keyframes fl-teeter { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-6deg)} 50%{transform:rotate(7deg)} 70%{transform:rotate(-5deg)} 90%{transform:rotate(4deg)} }
-    @keyframes fl-shootline { 0%{box-shadow:none} 40%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.9),inset 0 -2px 0 0 rgba(255,255,255,0.9)} 60%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.1),inset 0 -2px 0 0 rgba(255,255,255,0.1)} 100%{box-shadow:none} }
-    @keyframes fl-glitch { 0%,100%{opacity:1;transform:skew(0deg)} 7%{opacity:0;transform:skew(-4deg) translateX(3px)} 8%{opacity:1;transform:skew(0deg)} 15%{clip-path:inset(30% 0 20% 0);transform:translateX(-2px)} 16%{clip-path:none;transform:none} 50%{opacity:1} 85%{opacity:0.9;filter:hue-rotate(90deg)} 86%{opacity:1;filter:none} }
-    @keyframes fl-flagwave { 0%{transform:skewX(0deg) scaleX(1)} 25%{transform:skewX(-6deg) scaleX(0.97)} 50%{transform:skewX(0deg) scaleX(1)} 75%{transform:skewX(6deg) scaleX(0.97)} 100%{transform:skewX(0deg) scaleX(1)} }
-    @keyframes fl-crack { 0%,70%,100%{filter:none;transform:scale(1)} 72%{filter:brightness(2) contrast(1.5);transform:scale(1.05) skew(3deg,-1deg)} 74%{filter:brightness(0.5) contrast(2);transform:scale(0.97) skew(-2deg,2deg)} 76%{filter:none;transform:scale(1)} }
-    @keyframes fl-domwave { 0%,100%{text-shadow:0 2px 6px rgba(49,46,129,0.8)} 50%{text-shadow:0 0 16px rgba(165,180,252,0.9),0 2px 6px rgba(49,46,129,0.8)} }
-    @keyframes fl-nova-multi { 0%,100%{text-shadow:0 1px 3px rgba(180,83,9,0.4);filter:brightness(1)} 30%{text-shadow:0 0 8px rgba(251,191,36,0.9),0 0 20px rgba(245,158,11,0.6),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.2)} 60%{text-shadow:0 0 4px rgba(251,191,36,0.5),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.05)} }
-    @keyframes fl-finalize-sweep {
-      0%   { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
-      40%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 30%,#fce7f3 60%,#fbcfe8 100%); }
-      60%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 70%,#fce7f3 90%,#fbcfe8 100%); }
-      80%  { background-image: linear-gradient(90deg,#fce7f3 80%,#fff 95%,#fbcfe8 100%); }
-      100% { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
-    }
-    .fl-resolved   { animation: fl-fade 3s ease-in-out infinite }
-    .fl-settled    { animation: fl-wiggle 2.5s ease-in-out infinite }
-    .fl-finalized  { animation: fl-finalize-sweep 3s ease-in-out infinite }
-    .fl-accomplished { animation: fl-gleam 5s linear infinite; background-size:300% auto }
-    .fl-achieved   { animation: fl-bulge 1.8s ease-in-out infinite }
-    .fl-fulfilled  { animation: fl-breathe-v 3.2s ease-in-out infinite; transform-origin: center }
-    .fl-delivered  { animation: fl-gleam-strong 2s linear infinite; background-size:300% auto }
-    .fl-executed   { animation: fl-heartbeat 1.4s ease-in-out infinite }
-    .fl-cleared    { animation: fl-teeter 2.2s ease-in-out infinite }
-    .fl-dispatched { animation: fl-shootline 2s ease-in-out infinite }
-    .fl-secured    { animation: fl-glitch 4s ease-in-out infinite }
-    .fl-conquered  { animation: fl-flagwave 3s ease-in-out infinite; transform-origin: left center }
-    .fl-crushed    { animation: fl-crack 3.5s ease-in-out infinite }
-    .fl-dominated  { animation: fl-domwave 2s ease-in-out infinite }
-    .fl-mastered   { animation: fl-nova-multi 2.5s ease-in-out infinite; background-size:400% auto }
+  const INSIGNIA_KEYFRAMES = `
+    @keyframes ins-shimmer { 0%{background-position:0% center} 100%{background-position:200% center} }
+    @keyframes ins-shimmer-heavy { 0%{background-position:0% center} 100%{background-position:200% center} }
+    @keyframes ins-bling { 0%,100%{background-position:0% center;filter:brightness(1)} 25%{background-position:50% center;filter:brightness(1.3)} 50%{background-position:100% center;filter:brightness(1)} 75%{background-position:150% center;filter:brightness(1.4)} }
+    @keyframes ins-cloud { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+    @keyframes ins-float { 0%,100%{transform:translateY(0);opacity:1} 25%{transform:translateY(-1.5px);opacity:0.92} 50%{transform:translateY(0);opacity:1} 75%{transform:translateY(1px);opacity:0.88} }
+    @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
+    .ins-emerald  { animation: ins-shimmer 3s linear infinite }
+    .ins-amethyst { animation: ins-shimmer 2.5s linear infinite }
+    .ins-ruby     { animation: ins-shimmer-heavy 1.8s linear infinite }
+    .ins-diamond  { animation: ins-bling 2s ease-in-out infinite }
+    .ins-obsidian { animation: ins-cloud 6s ease-in-out infinite }
+    .ins-aether   { animation: ins-color-shift 5s linear infinite, ins-float 3s ease-in-out infinite }
   `;
 
+
+  // Render a name (or first name) with the user's Insignia style applied
+  // insignia: the tier key (e.g. 'Gold'). If Default or unknown, renders plain.
+  // opts.onDark: true when rendering on a dark background (Hub banner) — Obsidian gets light variant
+  const renderInsigniaName = (name, insignia, opts = {}) => {
+    const tier = insignia && INSIGNIA_STYLES[insignia] ? insignia : 'Default';
+    const s = INSIGNIA_STYLES[tier];
+    const { fontSize, fontWeight, onDark, ...rest } = opts;
+    if (tier === 'Default') {
+      // On dark bg (Hub banner) default is white, elsewhere inherit
+      return <span style={{ fontWeight: fontWeight || 600, fontSize: fontSize || 'inherit', color: onDark ? '#fff' : 'inherit', ...rest }}>{name}</span>;
+    }
+    // Obsidian on dark bg — use bright variant so name is visible
+    const nameStyle = (tier === 'Obsidian' && onDark)
+      ? { background:'linear-gradient(135deg,#a5b4fc,#c7d2fe,#818cf8)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' }
+      : s.nameStyle;
+    return (
+      <span
+        className={s.animClass || ''}
+        style={{ ...nameStyle, fontSize: fontSize || 'inherit', display:'inline-block', ...rest }}
+      >{name}</span>
+    );
+  };
 
   const isWeekday = (date) => { const d = new Date(date); const day = d.getDay(); return day !== 0 && day !== 6; };
 
@@ -3801,14 +3797,14 @@ const PlanAssist = () => {
     } catch (err) { console.error('loadStreakData error:', err.message); } finally { setStreakLoading(false); }
   };
 
-  const loadFeedLabel = async () => {
-    setFeedLabelLoading(true);
+  const loadInsignia = async () => {
+    setInsigniaLoading(true);
     try {
-      const data = await apiCall('/feed-label', 'GET');
-      setFeedLabelDays(data.days ?? 0);
-      setFeedLabelSelected(data.selected ?? 'completed');
-      setFeedLabelUnlocked(data.unlocked ?? []);
-    } catch (err) { console.error('loadFeedLabel error:', err.message); } finally { setFeedLabelLoading(false); }
+      const data = await apiCall('/insignia', 'GET');
+      setInsigniaDays(data.days ?? 0);
+      setInsigniaSelected(data.selected ?? 'Default');
+      setInsigniaUnlocked(data.unlocked ?? []);
+    } catch (err) { console.error('loadInsignia error:', err.message); } finally { setInsigniaLoading(false); }
   };
 
   const loadBadges = async () => {
@@ -3823,13 +3819,13 @@ const PlanAssist = () => {
     try {
       // Check streak badges
       await apiCall('/badges/check', 'POST', { currentStreak });
-      // Check feed label unlocks
-      const unlockData = await apiCall('/feed-label/check-unlock', 'POST', {});
+      // Check insignia unlocks
+      const unlockData = await apiCall('/insignia/check-unlock', 'POST', {});
       if (unlockData.newlyUnlocked?.length > 0) {
         const newest = unlockData.newlyUnlocked[unlockData.newlyUnlocked.length - 1];
-        setFeedLabelNewUnlock(newest);
-        setTimeout(() => setFeedLabelNewUnlock(null), 6000);
-        await loadFeedLabel();
+        setInsigniaNewUnlock(newest);
+        setTimeout(() => setInsigniaNewUnlock(null), 6000);
+        await loadInsignia();
         await loadBadges();
       }
     } catch (err) { console.error('checkNewUnlocks error:', err.message); }
@@ -4028,7 +4024,7 @@ const PlanAssist = () => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       loadCompletionHistory();
       loadStreakData();
-      loadFeedLabel();
+      loadInsignia();
       loadBadges();
     }
     if (currentPage === 'marks') {
@@ -4222,7 +4218,7 @@ const PlanAssist = () => {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900">PlanAssist</h1>
-              <p className="text-sm text-gray-600">{accountSetup.name}</p>
+              <p className="text-sm text-gray-600"><style>{INSIGNIA_KEYFRAMES}</style>{renderInsigniaName(accountSetup.name, insigniaSelected)}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -4327,10 +4323,10 @@ const PlanAssist = () => {
         </div>
       )}
 
-      {/* Feed label unlock toast */}
-      {feedLabelNewUnlock && (
+      {/* Insignia unlock toast */}
+      {insigniaNewUnlock && (
         <div className="fixed top-20 right-4 bg-purple-600 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2">
-          🎉 New Feed Label unlocked: <span className="font-bold">"{feedLabelNewUnlock}"</span>
+          🎉 New Insignia unlocked: <span className="font-bold">"{insigniaNewUnlock}"</span>
         </div>
       )}
 
@@ -4585,7 +4581,7 @@ const PlanAssist = () => {
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.name || 'Student'}!</h1>
+                  <h1 className="text-3xl font-bold mb-2">Welcome back, {renderInsigniaName(user?.name?.split(' ')[0] || 'Student', insigniaSelected, { fontSize:'inherit', onDark: true })}!</h1>
                   <p className="text-purple-100">Here's how you're doing today</p>
                 </div>
                 {/* Insight Box */}
@@ -4786,8 +4782,8 @@ const PlanAssist = () => {
                     <h2 className="text-xl font-bold text-gray-900">Live Activity</h2>
                     <span className="ml-auto text-xs text-gray-500">Updates every 30s</span>
                   </div>
-                  {/* Keyframes for feed label animations */}
-                  <style>{LABEL_KEYFRAMES}</style>
+                  {/* Insignia keyframes */}
+                  <style>{INSIGNIA_KEYFRAMES}</style>
                   <div className="space-y-3 max-h-80 overflow-y-auto">
                     {completionFeed.length > 0 ? (
                       completionFeed.map((item, index) => {
@@ -4799,17 +4795,7 @@ const PlanAssist = () => {
                           return `${Math.floor(seconds / 86400)}d ago`;
                         })();
                         
-                        const LABEL_COLORS = {
-                          completed:'#6b7280',finished:'#7c3aed',did:'#2563eb',handled:'#059669',
-                          closed:'#dc2626',processed:'#d97706',resolved:'#0891b2',settled:'#4f46e5',
-                          finalized:'#be185d',accomplished:'#7c3aed',achieved:'#b45309',fulfilled:'#065f46',
-                          delivered:'#1e40af',executed:'#9f1239',cleared:'#0f766e',dispatched:'#6d28d9',
-                          secured:'#1d4ed8',conquered:'#b91c1c',crushed:'#7c2d12',dominated:'#312e81',
-                          mastered:'#92400e'
-                        };
-                        const feedLabel = item.feed_label || 'completed';
-                        // Use LABEL_STYLES directly — single source of truth
-                        const flStyle = LABEL_STYLES[feedLabel] || LABEL_STYLES.completed;
+                        const feedInsignia = item.insignia || 'Default';
                         const reactions = item.reactions || [];
                         const userReaction = item.user_reaction;
                         const REACTION_EMOJIS = ['👏','⚡','🔥','💯','🎯'];
@@ -4820,22 +4806,9 @@ const PlanAssist = () => {
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-gray-900">
-                                <span className="font-semibold">{item.user_name.split(' ')[0]}</span>
+                                {renderInsigniaName(item.user_name.split(' ')[0], feedInsignia, { fontSize:'0.875rem' })}
                                 {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
-                                {/* Inject keyframes once per feed render */}
-                                {' '}<span
-                                  className={flStyle.animClass || ''}
-                                  style={{
-                                    color: flStyle.css?.color || flStyle.color,
-                                    background: flStyle.bg,
-                                    border: flStyle.border || 'none',
-                                    borderRadius: flStyle.radius || '4px',
-                                    ...(flStyle.css || {}),
-                                    display: 'inline-block',
-                                    lineHeight: 1.4,
-                                    padding: (flStyle.css || {}).padding || '0 4px',
-                                  }}
-                                >{feedLabel}</span>{' '}
+                                {' '}<span className="text-gray-600">completed</span>{' '}
                                 <span className="font-medium text-purple-600">{item.task_title}</span>
                               </p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -4947,6 +4920,7 @@ const PlanAssist = () => {
                         leaderboard.map((entry, index) => {
                           const isCurrentUser = entry.user_name === user?.name;
                           const medals = ['🥇', '🥈', '🥉'];
+                          const entryInsignia = entry.insignia || 'Default';
                           
                           return (
                             <div 
@@ -4964,7 +4938,7 @@ const PlanAssist = () => {
                                 <p className={`text-sm font-semibold truncate ${
                                   isCurrentUser ? 'text-purple-900' : 'text-gray-900'
                                 }`}>
-                                  {entry.user_name}
+                                  {renderInsigniaName(entry.user_name, entryInsignia, { fontSize:'0.875rem' })}
                                   {isCurrentUser && <span className="ml-2 text-xs text-purple-600">(You)</span>}
                                 </p>
                               </div>
@@ -7469,7 +7443,7 @@ const PlanAssist = () => {
                     { id: 'grades', label: 'Activity', icon: BarChart3 },
                     { id: 'goals', label: 'Goals', icon: Target },
                     { id: 'streak', label: 'Streak', icon: Zap },
-                    { id: 'feedlabel', label: 'Feed Label', icon: MessageSquare },
+                    { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
@@ -8402,34 +8376,32 @@ const PlanAssist = () => {
                   );
                 })()}
 
-                {/* ── FEED LABEL TAB ── */}
+                {/* ── INSIGNIA TAB ── */}
                 {accountTab === 'feedlabel' && (() => {
-                  // Each label has unique visual style — no string parsing, direct style objects
-                  // LABEL_STYLES and LABEL_KEYFRAMES defined at component scope above
-                  const unlockedLabels = feedLabelUnlocked.map(u => u.label);
-                  if (feedLabelLoading) return (
+                  // INSIGNIA_STYLES and INSIGNIA_KEYFRAMES defined at component scope above
+                  const unlockedLabels = insigniaUnlocked.map(u => u.label);
+                  if (insigniaLoading) return (
                     <div className="flex items-center justify-center py-20">
                       <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
                     </div>
                   );
                   return (
                     <div>
-                      <style>{LABEL_KEYFRAMES}</style>
-                      <h2 className="text-lg font-bold text-gray-900 mb-1">Feed Label</h2>
-                      <p className="text-sm text-gray-500 mb-1">Your label appears on the Live Activity feed.</p>
-                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{feedLabelDays}</span> days — unlocking {unlockedLabels.length} / {LABEL_THRESHOLDS.length} labels.</p>
+                      <style>{INSIGNIA_KEYFRAMES}</style>
+                      <h2 className="text-lg font-bold text-gray-900 mb-1">Insignia</h2>
+                      <p className="text-sm text-gray-500 mb-1">Your Insignia styles your name across PlanAssist — in the nav, Hub, Feed, and Leaderboard.</p>
+                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{insigniaDays}</span> days — unlocking {unlockedLabels.length} / {INSIGNIA_THRESHOLDS.length} Insignias.</p>
                       <div className="grid grid-cols-2 gap-2">
-                        {LABEL_THRESHOLDS.map(([threshold, label]) => {
-                          const style = LABEL_STYLES[label] || {};
+                        {INSIGNIA_THRESHOLDS.map(([threshold, label]) => {
                           const unlocked = unlockedLabels.includes(label);
-                          const selected = feedLabelSelected === label;
+                          const selected = insigniaSelected === label;
                           return (
                             <button
                               key={label}
                               disabled={!unlocked}
                               onClick={async () => {
                                 if (!unlocked) return;
-                                await apiCall('/feed-label', 'PUT', { label });
+                                await apiCall('/insignia', 'PUT', { label });
                                 setFeedLabelSelected(label);
                               }}
                               className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
@@ -8439,18 +8411,11 @@ const PlanAssist = () => {
                               }`}
                               style={{ background: '#fff' }}
                             >
-                              <span className={`px-2.5 py-1 inline-block ${style.animClass || ''}`}
-                                    style={{
-                                      color: style.css?.color || style.color,
-                                      background: style.bg,
-                                      border: style.border || `1px solid ${style.color}50`,
-                                      borderRadius: style.radius || '6px',
-                                      ...(style.css || {})
-                                    }}>
-                                {label}
+                              <span className="flex-1 text-sm font-medium">
+                                {renderInsigniaName(label, label, { fontSize:'0.875rem' })}
                               </span>
-                              <span className="text-xs text-gray-500 flex-1">{threshold === 0 ? 'default' : `${threshold} days`}</span>
-                              {selected && <span className="text-purple-600 text-xs font-bold">✓ Active</span>}
+                              <span className="text-xs text-gray-500">{threshold === 0 ? 'default' : `${threshold} days`}</span>
+                              {selected && <span className="text-purple-600 text-xs font-bold">✓</span>}
                               {!unlocked && <span className="text-gray-400 text-xs">🔒</span>}
                             </button>
                           );
