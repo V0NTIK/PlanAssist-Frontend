@@ -3704,6 +3704,71 @@ const PlanAssist = () => {
     [180,'dispatched'],[200,'secured'],[250,'conquered'],[300,'crushed'],[400,'dominated'],[500,'mastered']
   ];
 
+  // Single source of truth for Feed Label styles — used in both Feed Label pane and Live Feed
+  const LABEL_STYLES = {
+    completed:   { color:'#6b7280', bg:'#f3f4f6', border:'1px solid #d1d5db', radius:'4px', animClass:'', css:{ fontWeight:500, fontSize:'0.74rem' } },
+    finished:    { color:'#7c3aed', bg:'#ede9fe', border:'1.5px solid #c4b5fd', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', letterSpacing:'0.02em' } },
+    did:         { color:'#6366f1', bg:'#f5f3ff', border:'1px solid #c4b5fd', radius:'4px', animClass:'', css:{ fontWeight:400, fontSize:'0.68rem', fontStyle:'italic', opacity:0.85 } },
+    handled:     { color:'#065f46', bg:'#d1fae5', border:'1.5px solid #6ee7b7', radius:'8px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'underline', textDecorationColor:'#059669', textUnderlineOffset:'2px' } },
+    banned:      { color:'#991b1b', bg:'#fee2e2', border:'1.5px solid #fca5a5', radius:'2px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'line-through', textDecorationColor:'#dc2626', textDecorationThickness:'2px' } },
+    processed:   { color:'#92400e', bg:'#fef3c7', border:'1.5px dashed #fcd34d', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.78rem', fontStyle:'italic', letterSpacing:'0.03em' } },
+    resolved:    { color:'#0e7490', bg:'linear-gradient(90deg,#cffafe,#a5f3fc)', border:'2px solid #67e8f9', radius:'8px', animClass:'fl-resolved', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.06em' } },
+    settled:     { color:'#3730a3', bg:'linear-gradient(135deg,#e0e7ff,#c7d2fe)', border:'2px solid #a5b4fc', radius:'10px', animClass:'fl-settled', css:{ fontWeight:700, fontSize:'0.81rem', letterSpacing:'0.04em' } },
+    finalized:   { color:'#9d174d', bg:'linear-gradient(135deg,#fce7f3,#fbcfe8)', border:'2px solid #f9a8d4', radius:'12px', animClass:'fl-finalized', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic', letterSpacing:'0.03em', overflow:'hidden', position:'relative' } },
+    accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd,#ddd6fe)', border:'2px solid #8b5cf6', radius:'10px', animClass:'fl-accomplished', css:{ fontWeight:800, fontSize:'0.84rem', letterSpacing:'0.30em', wordSpacing:'0.15em' } },
+    achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a,#fef3c7)', border:'2px solid #f59e0b', radius:'6px', animClass:'fl-achieved', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em', display:'inline-block' } },
+    fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'2px solid #34d399', radius:'12px', animClass:'fl-fulfilled', css:{ fontWeight:800, fontSize:'0.86rem', letterSpacing:'0.05em', textShadow:'0 1px 0 rgba(6,78,59,0.2)', display:'inline-block' } },
+    delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'2px solid #3b82f6', radius:'4px', animClass:'fl-delivered', css:{ fontWeight:800, fontSize:'0.86rem', textTransform:'uppercase', letterSpacing:'0.08em', display:'inline-block', position:'relative', overflow:'hidden' } },
+    executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3,#fda4af)', border:'2px solid #f43f5e', radius:'2px', animClass:'fl-executed', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.12em', textShadow:'0 1px 0 rgba(136,19,55,0.25)', display:'inline-block' } },
+    cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1,#99f6e4)', border:'2px solid #14b8a6', radius:'14px', animClass:'fl-cleared', css:{ fontWeight:800, fontSize:'0.87rem', letterSpacing:'0.06em', textShadow:'0 1px 0 rgba(19,78,74,0.2)', display:'inline-block' } },
+    dispatched:  { color:'#fff', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'2px solid #8b5cf6', radius:'6px', animClass:'fl-dispatched', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.14em', textShadow:'0 1px 3px rgba(76,29,149,0.5)', position:'relative', overflow:'hidden' } },
+    secured:     { color:'#a5f3fc', bg:'#0f172a', border:'2px solid #22d3ee', radius:'4px', animClass:'fl-secured', css:{ fontWeight:900, fontSize:'0.91rem', textTransform:'uppercase', letterSpacing:'0.12em', fontFamily:'monospace', textShadow:'0 0 8px #22d3ee', display:'inline-block' } },
+    conquered:   { color:'#fff', bg:'linear-gradient(135deg,#7f1d1d,#991b1b)', border:'2px solid #fbbf24', radius:'3px', animClass:'fl-conquered', css:{ fontWeight:900, fontSize:'0.93rem', textTransform:'uppercase', letterSpacing:'0.18em', fontFamily:'Georgia,serif', textShadow:'0 2px 4px rgba(0,0,0,0.6)', display:'inline-block' } },
+    crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316,#92400e)', border:'2px solid #fdba74', radius:'4px', animClass:'fl-crushed', css:{ fontWeight:900, fontSize:'0.94rem', textTransform:'uppercase', letterSpacing:'0.14em', fontStyle:'italic', textShadow:'0 1px 4px rgba(146,64,14,0.7)', display:'inline-block' } },
+    dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1,#312e81)', border:'2px solid #a5b4fc', radius:'2px', animClass:'fl-dominated', css:{ fontWeight:900, fontSize:'0.97rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 2px 6px rgba(49,46,129,0.8)', display:'inline-block' } },
+    mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fef9c3,#fbbf24,#f59e0b,#fde68a,#fbbf24,#fef9c3)', border:'2.5px solid #d97706', radius:'6px', animClass:'fl-mastered', css:{ fontWeight:900, fontSize:'1.0rem', textTransform:'uppercase', letterSpacing:'0.22em', textShadow:'0 1px 3px rgba(180,83,9,0.4), 0 0 12px rgba(251,191,36,0.5)', display:'inline-block', position:'relative', overflow:'hidden' } },
+  };
+  const LABEL_KEYFRAMES = `
+    @keyframes fl-fade { 0%,100%{opacity:1} 50%{opacity:0.65} }
+    @keyframes fl-wiggle { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-4deg)} 40%{transform:rotate(4deg)} 60%{transform:rotate(-3deg)} 80%{transform:rotate(3deg)} }
+    @keyframes fl-transcend { 0%{background-position:-200% center;opacity:0.85} 100%{background-position:200% center;opacity:1} }
+    @keyframes fl-bulge { 0%,80%,100%{transform:scale(1)} 10%{transform:scale(1.28) translateY(-2px)} 20%{transform:scale(1)} }
+    @keyframes fl-breathe-v { 0%,100%{transform:scaleY(1)} 40%{transform:scaleY(1.18)} 60%{transform:scaleY(1.14)} }
+    @keyframes fl-gleam { 0%{background-position:200% center} 100%{background-position:-200% center} }
+    @keyframes fl-gleam-strong { 0%{background-position:300% center;filter:brightness(1)} 50%{filter:brightness(1.25)} 100%{background-position:-300% center;filter:brightness(1)} }
+    @keyframes fl-heartbeat { 0%,90%,100%{transform:scale(1)} 14%{transform:scale(1.06)} 28%{transform:scale(1)} 42%{transform:scale(1.04)} 56%{transform:scale(1)} }
+    @keyframes fl-teeter { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-6deg)} 50%{transform:rotate(7deg)} 70%{transform:rotate(-5deg)} 90%{transform:rotate(4deg)} }
+    @keyframes fl-shootline { 0%{box-shadow:none} 40%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.9),inset 0 -2px 0 0 rgba(255,255,255,0.9)} 60%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.1),inset 0 -2px 0 0 rgba(255,255,255,0.1)} 100%{box-shadow:none} }
+    @keyframes fl-glitch { 0%,100%{opacity:1;transform:skew(0deg)} 7%{opacity:0;transform:skew(-4deg) translateX(3px)} 8%{opacity:1;transform:skew(0deg)} 15%{clip-path:inset(30% 0 20% 0);transform:translateX(-2px)} 16%{clip-path:none;transform:none} 50%{opacity:1} 85%{opacity:0.9;filter:hue-rotate(90deg)} 86%{opacity:1;filter:none} }
+    @keyframes fl-flagwave { 0%{transform:skewX(0deg) scaleX(1)} 25%{transform:skewX(-6deg) scaleX(0.97)} 50%{transform:skewX(0deg) scaleX(1)} 75%{transform:skewX(6deg) scaleX(0.97)} 100%{transform:skewX(0deg) scaleX(1)} }
+    @keyframes fl-crack { 0%,70%,100%{filter:none;transform:scale(1)} 72%{filter:brightness(2) contrast(1.5);transform:scale(1.05) skew(3deg,-1deg)} 74%{filter:brightness(0.5) contrast(2);transform:scale(0.97) skew(-2deg,2deg)} 76%{filter:none;transform:scale(1)} }
+    @keyframes fl-domwave { 0%,100%{text-shadow:0 2px 6px rgba(49,46,129,0.8)} 50%{text-shadow:0 0 16px rgba(165,180,252,0.9),0 2px 6px rgba(49,46,129,0.8)} }
+    @keyframes fl-nova-multi { 0%,100%{text-shadow:0 1px 3px rgba(180,83,9,0.4);filter:brightness(1)} 30%{text-shadow:0 0 8px rgba(251,191,36,0.9),0 0 20px rgba(245,158,11,0.6),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.2)} 60%{text-shadow:0 0 4px rgba(251,191,36,0.5),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.05)} }
+    @keyframes fl-finalize-sweep {
+      0%   { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
+      40%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 30%,#fce7f3 60%,#fbcfe8 100%); }
+      60%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 70%,#fce7f3 90%,#fbcfe8 100%); }
+      80%  { background-image: linear-gradient(90deg,#fce7f3 80%,#fff 95%,#fbcfe8 100%); }
+      100% { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
+    }
+    .fl-resolved   { animation: fl-fade 3s ease-in-out infinite }
+    .fl-settled    { animation: fl-wiggle 2.5s ease-in-out infinite }
+    .fl-finalized  { animation: fl-finalize-sweep 3s ease-in-out infinite }
+    .fl-accomplished { animation: fl-gleam 5s linear infinite; background-size:300% auto }
+    .fl-achieved   { animation: fl-bulge 1.8s ease-in-out infinite }
+    .fl-fulfilled  { animation: fl-breathe-v 3.2s ease-in-out infinite; transform-origin: center }
+    .fl-delivered  { animation: fl-gleam-strong 2s linear infinite; background-size:300% auto }
+    .fl-executed   { animation: fl-heartbeat 1.4s ease-in-out infinite }
+    .fl-cleared    { animation: fl-teeter 2.2s ease-in-out infinite }
+    .fl-dispatched { animation: fl-shootline 2s ease-in-out infinite }
+    .fl-secured    { animation: fl-glitch 4s ease-in-out infinite }
+    .fl-conquered  { animation: fl-flagwave 3s ease-in-out infinite; transform-origin: left center }
+    .fl-crushed    { animation: fl-crack 3.5s ease-in-out infinite }
+    .fl-dominated  { animation: fl-domwave 2s ease-in-out infinite }
+    .fl-mastered   { animation: fl-nova-multi 2.5s ease-in-out infinite; background-size:400% auto }
+  `;
+
+
   const isWeekday = (date) => { const d = new Date(date); const day = d.getDay(); return day !== 0 && day !== 6; };
 
   const computeStreak = (completionDates, shieldDates) => {
@@ -4721,6 +4786,8 @@ const PlanAssist = () => {
                     <h2 className="text-xl font-bold text-gray-900">Live Activity</h2>
                     <span className="ml-auto text-xs text-gray-500">Updates every 30s</span>
                   </div>
+                  {/* Keyframes for feed label animations */}
+                  <style>{LABEL_KEYFRAMES}</style>
                   <div className="space-y-3 max-h-80 overflow-y-auto">
                     {completionFeed.length > 0 ? (
                       completionFeed.map((item, index) => {
@@ -4741,31 +4808,8 @@ const PlanAssist = () => {
                           mastered:'#92400e'
                         };
                         const feedLabel = item.feed_label || 'completed';
-                        // Per-label feed pill styles — condensed for inline use
-                        const FL = {
-                          completed:   { color:'#6b7280', bg:'transparent', border:'none', css:{ fontWeight:500 } },
-                          finished:    { color:'#7c3aed', bg:'transparent', border:'none', css:{ fontWeight:600 } },
-                          did:         { color:'#2563eb', bg:'transparent', border:'none', css:{ fontWeight:600, fontStyle:'italic' } },
-                          handled:     { color:'#059669', bg:'transparent', border:'none', css:{ fontWeight:700 } },
-                          banned:      { color:'#dc2626', bg:'transparent', border:'none', css:{ fontWeight:700, textDecoration:'line-through', textDecorationColor:'#dc2626' } },
-                          processed:   { color:'#d97706', bg:'transparent', border:'none', css:{ fontWeight:600, fontStyle:'italic' } },
-                          resolved:    { color:'#0e7490', bg:'#ecfeff', border:'1px solid #67e8f9', css:{ fontWeight:700, letterSpacing:'0.06em', borderRadius:'4px', padding:'0 4px' } },
-                          settled:     { color:'#3730a3', bg:'#e0e7ff', border:'1px solid #a5b4fc', css:{ fontWeight:700, borderRadius:'6px', padding:'0 4px' } },
-                          finalized:   { color:'#9d174d', bg:'#fce7f3', border:'1px solid #f9a8d4', css:{ fontWeight:700, fontStyle:'italic', borderRadius:'8px', padding:'0 4px' } },
-                          accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd)', border:'1px solid #8b5cf6', css:{ fontWeight:800, borderRadius:'6px', padding:'0 5px' } },
-                          achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a)', border:'1px solid #f59e0b', css:{ fontWeight:800, borderRadius:'4px', padding:'0 5px' } },
-                          fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'1px solid #34d399', css:{ fontWeight:800, borderRadius:'8px', padding:'0 5px' } },
-                          delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'1px solid #3b82f6', css:{ fontWeight:800, textTransform:'uppercase', letterSpacing:'0.08em', borderRadius:'3px', padding:'0 5px', fontSize:'0.72rem' } },
-                          executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3)', border:'1px solid #f43f5e', css:{ fontWeight:800, textTransform:'uppercase', letterSpacing:'0.10em', borderRadius:'2px', padding:'0 5px', fontSize:'0.72rem' } },
-                          cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1)', border:'1px solid #14b8a6', css:{ fontWeight:800, borderRadius:'10px', padding:'0 6px' } },
-                          dispatched:  { color:'#fff', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'none', css:{ fontWeight:800, textTransform:'uppercase', letterSpacing:'0.12em', borderRadius:'4px', padding:'0 6px', fontSize:'0.72rem', textShadow:'0 1px 2px rgba(76,29,149,0.5)' } },
-                          secured:     { color:'#fff', bg:'linear-gradient(135deg,#1d4ed8,#2563eb)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.10em', fontStyle:'italic', borderRadius:'3px', padding:'0 6px', fontSize:'0.72rem' } },
-                          conquered:   { color:'#fff', bg:'linear-gradient(135deg,#b91c1c,#ef4444)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.14em', borderRadius:'2px', padding:'0 6px', fontSize:'0.73rem', textShadow:'0 1px 3px rgba(185,28,28,0.6)' } },
-                          crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.12em', fontStyle:'italic', borderRadius:'3px', padding:'0 6px', fontSize:'0.73rem' } },
-                          dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1)', border:'none', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.18em', borderRadius:'2px', padding:'0 7px', fontSize:'0.74rem', textShadow:'0 2px 5px rgba(49,46,129,0.7)' } },
-                          mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fbbf24,#f59e0b,#fbbf24)', border:'1.5px solid #d97706', css:{ fontWeight:900, textTransform:'uppercase', letterSpacing:'0.20em', borderRadius:'4px', padding:'0 7px', fontSize:'0.75rem', textShadow:'0 1px 2px rgba(180,83,9,0.4)' } },
-                        };
-                        const flStyle = FL[feedLabel] || FL.completed;
+                        // Use LABEL_STYLES directly — single source of truth
+                        const flStyle = LABEL_STYLES[feedLabel] || LABEL_STYLES.completed;
                         const reactions = item.reactions || [];
                         const userReaction = item.user_reaction;
                         const REACTION_EMOJIS = ['👏','⚡','🔥','💯','🎯'];
@@ -4778,7 +4822,20 @@ const PlanAssist = () => {
                               <p className="text-sm text-gray-900">
                                 <span className="font-semibold">{item.user_name.split(' ')[0]}</span>
                                 {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
-                                {' '}<span style={{ color: flStyle.color, background: flStyle.bg, border: flStyle.border, ...flStyle.css, display:'inline-block', lineHeight:1.4 }}>{feedLabel}</span>{' '}
+                                {/* Inject keyframes once per feed render */}
+                                {' '}<span
+                                  className={flStyle.animClass || ''}
+                                  style={{
+                                    color: flStyle.css?.color || flStyle.color,
+                                    background: flStyle.bg,
+                                    border: flStyle.border || 'none',
+                                    borderRadius: flStyle.radius || '4px',
+                                    ...(flStyle.css || {}),
+                                    display: 'inline-block',
+                                    lineHeight: 1.4,
+                                    padding: (flStyle.css || {}).padding || '0 4px',
+                                  }}
+                                >{feedLabel}</span>{' '}
                                 <span className="font-medium text-purple-600">{item.task_title}</span>
                               </p>
                               <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -8348,68 +8405,7 @@ const PlanAssist = () => {
                 {/* ── FEED LABEL TAB ── */}
                 {accountTab === 'feedlabel' && (() => {
                   // Each label has unique visual style — no string parsing, direct style objects
-                  const LABEL_STYLES = {
-                    completed:   { color:'#6b7280', bg:'#f3f4f6', border:'1px solid #d1d5db', radius:'4px', animClass:'', css:{ fontWeight:500, fontSize:'0.74rem' } },
-                    finished:    { color:'#7c3aed', bg:'#ede9fe', border:'1.5px solid #c4b5fd', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.76rem', letterSpacing:'0.02em' } },
-                    did:         { color:'#6366f1', bg:'#f5f3ff', border:'1px solid #c4b5fd', radius:'4px', animClass:'', css:{ fontWeight:400, fontSize:'0.68rem', fontStyle:'italic', opacity:0.85 } },
-                    handled:     { color:'#065f46', bg:'#d1fae5', border:'1.5px solid #6ee7b7', radius:'8px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'underline', textDecorationColor:'#059669', textUnderlineOffset:'2px' } },
-                    banned:      { color:'#991b1b', bg:'#fee2e2', border:'1.5px solid #fca5a5', radius:'2px', animClass:'', css:{ fontWeight:700, fontSize:'0.78rem', textDecoration:'line-through', textDecorationColor:'#dc2626', textDecorationThickness:'2px' } },
-                    processed:   { color:'#92400e', bg:'#fef3c7', border:'1.5px dashed #fcd34d', radius:'6px', animClass:'', css:{ fontWeight:600, fontSize:'0.78rem', fontStyle:'italic', letterSpacing:'0.03em' } },
-                    resolved:    { color:'#0e7490', bg:'linear-gradient(90deg,#cffafe,#a5f3fc)', border:'2px solid #67e8f9', radius:'8px', animClass:'fl-resolved', css:{ fontWeight:700, fontSize:'0.80rem', letterSpacing:'0.06em' } },
-                    settled:     { color:'#3730a3', bg:'linear-gradient(135deg,#e0e7ff,#c7d2fe)', border:'2px solid #a5b4fc', radius:'10px', animClass:'fl-settled', css:{ fontWeight:700, fontSize:'0.81rem', letterSpacing:'0.04em' } },
-                    finalized:   { color:'#9d174d', bg:'linear-gradient(135deg,#fce7f3,#fbcfe8)', border:'2px solid #f9a8d4', radius:'12px', animClass:'fl-finalized', css:{ fontWeight:700, fontSize:'0.82rem', fontStyle:'italic', letterSpacing:'0.03em', overflow:'hidden', position:'relative' } },
-                    accomplished:{ color:'#5b21b6', bg:'linear-gradient(90deg,#ddd6fe,#c4b5fd,#ddd6fe)', border:'2px solid #8b5cf6', radius:'10px', animClass:'fl-accomplished', css:{ fontWeight:800, fontSize:'0.84rem', letterSpacing:'0.30em', wordSpacing:'0.15em' } },
-                    achieved:    { color:'#78350f', bg:'linear-gradient(90deg,#fef3c7,#fde68a,#fef3c7)', border:'2px solid #f59e0b', radius:'6px', animClass:'fl-achieved', css:{ fontWeight:800, fontSize:'0.85rem', letterSpacing:'0.05em', display:'inline-block' } },
-                    fulfilled:   { color:'#064e3b', bg:'linear-gradient(135deg,#d1fae5,#6ee7b7)', border:'2px solid #34d399', radius:'12px', animClass:'fl-fulfilled', css:{ fontWeight:800, fontSize:'0.86rem', letterSpacing:'0.05em', textShadow:'0 1px 0 rgba(6,78,59,0.2)', display:'inline-block' } },
-                    delivered:   { color:'#1e3a8a', bg:'linear-gradient(135deg,#bfdbfe,#93c5fd)', border:'2px solid #3b82f6', radius:'4px', animClass:'fl-delivered', css:{ fontWeight:800, fontSize:'0.86rem', textTransform:'uppercase', letterSpacing:'0.08em', display:'inline-block', position:'relative', overflow:'hidden' } },
-                    executed:    { color:'#881337', bg:'linear-gradient(90deg,#ffe4e6,#fecdd3,#fda4af)', border:'2px solid #f43f5e', radius:'2px', animClass:'fl-executed', css:{ fontWeight:800, fontSize:'0.88rem', textTransform:'uppercase', letterSpacing:'0.12em', textShadow:'0 1px 0 rgba(136,19,55,0.25)', display:'inline-block' } },
-                    cleared:     { color:'#134e4a', bg:'linear-gradient(135deg,#99f6e4,#ccfbf1,#99f6e4)', border:'2px solid #14b8a6', radius:'14px', animClass:'fl-cleared', css:{ fontWeight:800, fontSize:'0.87rem', letterSpacing:'0.06em', textShadow:'0 1px 0 rgba(19,78,74,0.2)', display:'inline-block' } },
-                    dispatched:  { color:'#fff', bg:'linear-gradient(135deg,#7c3aed,#6d28d9)', border:'2px solid #8b5cf6', radius:'6px', animClass:'fl-dispatched', css:{ fontWeight:800, fontSize:'0.90rem', textTransform:'uppercase', letterSpacing:'0.14em', textShadow:'0 1px 3px rgba(76,29,149,0.5)', position:'relative', overflow:'hidden' } },
-                    secured:     { color:'#a5f3fc', bg:'#0f172a', border:'2px solid #22d3ee', radius:'4px', animClass:'fl-secured', css:{ fontWeight:900, fontSize:'0.91rem', textTransform:'uppercase', letterSpacing:'0.12em', fontFamily:'monospace', textShadow:'0 0 8px #22d3ee', display:'inline-block' } },
-                    conquered:   { color:'#fff', bg:'linear-gradient(135deg,#7f1d1d,#991b1b)', border:'2px solid #fbbf24', radius:'3px', animClass:'fl-conquered', css:{ fontWeight:900, fontSize:'0.93rem', textTransform:'uppercase', letterSpacing:'0.18em', fontFamily:'Georgia,serif', textShadow:'0 2px 4px rgba(0,0,0,0.6)', display:'inline-block' } },
-                    crushed:     { color:'#fff', bg:'linear-gradient(135deg,#92400e,#f97316,#92400e)', border:'2px solid #fdba74', radius:'4px', animClass:'fl-crushed', css:{ fontWeight:900, fontSize:'0.94rem', textTransform:'uppercase', letterSpacing:'0.14em', fontStyle:'italic', textShadow:'0 1px 4px rgba(146,64,14,0.7)', display:'inline-block' } },
-                    dominated:   { color:'#fff', bg:'linear-gradient(135deg,#312e81,#6366f1,#312e81)', border:'2px solid #a5b4fc', radius:'2px', animClass:'fl-dominated', css:{ fontWeight:900, fontSize:'0.97rem', textTransform:'uppercase', letterSpacing:'0.20em', textShadow:'0 2px 6px rgba(49,46,129,0.8)', display:'inline-block' } },
-                    mastered:    { color:'#713f12', bg:'linear-gradient(90deg,#fef9c3,#fbbf24,#f59e0b,#fde68a,#fbbf24,#fef9c3)', border:'2.5px solid #d97706', radius:'6px', animClass:'fl-mastered', css:{ fontWeight:900, fontSize:'1.0rem', textTransform:'uppercase', letterSpacing:'0.22em', textShadow:'0 1px 3px rgba(180,83,9,0.4), 0 0 12px rgba(251,191,36,0.5)', display:'inline-block', position:'relative', overflow:'hidden' } },
-                  };
-                  const LABEL_KEYFRAMES = `
-                    @keyframes fl-fade { 0%,100%{opacity:1} 50%{opacity:0.65} }
-                    @keyframes fl-wiggle { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-4deg)} 40%{transform:rotate(4deg)} 60%{transform:rotate(-3deg)} 80%{transform:rotate(3deg)} }
-                    @keyframes fl-transcend { 0%{background-position:-200% center;opacity:0.85} 100%{background-position:200% center;opacity:1} }
-                    @keyframes fl-bulge { 0%,80%,100%{transform:scale(1)} 10%{transform:scale(1.28) translateY(-2px)} 20%{transform:scale(1)} }
-                    @keyframes fl-breathe-v { 0%,100%{transform:scaleY(1)} 40%{transform:scaleY(1.18)} 60%{transform:scaleY(1.14)} }
-                    @keyframes fl-gleam { 0%{background-position:200% center} 100%{background-position:-200% center} }
-                    @keyframes fl-gleam-strong { 0%{background-position:300% center;filter:brightness(1)} 50%{filter:brightness(1.25)} 100%{background-position:-300% center;filter:brightness(1)} }
-                    @keyframes fl-heartbeat { 0%,90%,100%{transform:scale(1)} 14%{transform:scale(1.06)} 28%{transform:scale(1)} 42%{transform:scale(1.04)} 56%{transform:scale(1)} }
-                    @keyframes fl-teeter { 0%,100%{transform:rotate(0deg)} 20%{transform:rotate(-6deg)} 50%{transform:rotate(7deg)} 70%{transform:rotate(-5deg)} 90%{transform:rotate(4deg)} }
-                    @keyframes fl-shootline { 0%{box-shadow:none} 40%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.9),inset 0 -2px 0 0 rgba(255,255,255,0.9)} 60%{box-shadow:inset 0 2px 0 0 rgba(255,255,255,0.1),inset 0 -2px 0 0 rgba(255,255,255,0.1)} 100%{box-shadow:none} }
-                    @keyframes fl-glitch { 0%,100%{opacity:1;transform:skew(0deg)} 7%{opacity:0;transform:skew(-4deg) translateX(3px)} 8%{opacity:1;transform:skew(0deg)} 15%{clip-path:inset(30% 0 20% 0);transform:translateX(-2px)} 16%{clip-path:none;transform:none} 50%{opacity:1} 85%{opacity:0.9;filter:hue-rotate(90deg)} 86%{opacity:1;filter:none} }
-                    @keyframes fl-flagwave { 0%{transform:skewX(0deg) scaleX(1)} 25%{transform:skewX(-6deg) scaleX(0.97)} 50%{transform:skewX(0deg) scaleX(1)} 75%{transform:skewX(6deg) scaleX(0.97)} 100%{transform:skewX(0deg) scaleX(1)} }
-                    @keyframes fl-crack { 0%,70%,100%{filter:none;transform:scale(1)} 72%{filter:brightness(2) contrast(1.5);transform:scale(1.05) skew(3deg,-1deg)} 74%{filter:brightness(0.5) contrast(2);transform:scale(0.97) skew(-2deg,2deg)} 76%{filter:none;transform:scale(1)} }
-                    @keyframes fl-domwave { 0%,100%{text-shadow:0 2px 6px rgba(49,46,129,0.8)} 50%{text-shadow:0 0 16px rgba(165,180,252,0.9),0 2px 6px rgba(49,46,129,0.8)} }
-                    @keyframes fl-nova-multi { 0%,100%{text-shadow:0 1px 3px rgba(180,83,9,0.4);filter:brightness(1)} 30%{text-shadow:0 0 8px rgba(251,191,36,0.9),0 0 20px rgba(245,158,11,0.6),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.2)} 60%{text-shadow:0 0 4px rgba(251,191,36,0.5),0 1px 3px rgba(180,83,9,0.4);filter:brightness(1.05)} }
-                    @keyframes fl-finalize-sweep {
-                      0%   { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
-                      40%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 30%,#fce7f3 60%,#fbcfe8 100%); }
-                      60%  { background-image: linear-gradient(90deg,#fce7f3 0%,#fff 70%,#fce7f3 90%,#fbcfe8 100%); }
-                      80%  { background-image: linear-gradient(90deg,#fce7f3 80%,#fff 95%,#fbcfe8 100%); }
-                      100% { background-image: linear-gradient(135deg,#fce7f3,#fbcfe8); }
-                    }
-                    .fl-resolved   { animation: fl-fade 3s ease-in-out infinite }
-                    .fl-settled    { animation: fl-wiggle 2.5s ease-in-out infinite }
-                    .fl-finalized  { animation: fl-finalize-sweep 3s ease-in-out infinite }
-                    .fl-accomplished { animation: fl-gleam 5s linear infinite; background-size:300% auto }
-                    .fl-achieved   { animation: fl-bulge 1.8s ease-in-out infinite }
-                    .fl-fulfilled  { animation: fl-breathe-v 3.2s ease-in-out infinite; transform-origin: center }
-                    .fl-delivered  { animation: fl-gleam-strong 2s linear infinite; background-size:300% auto }
-                    .fl-executed   { animation: fl-heartbeat 1.4s ease-in-out infinite }
-                    .fl-cleared    { animation: fl-teeter 2.2s ease-in-out infinite }
-                    .fl-dispatched { animation: fl-shootline 2s ease-in-out infinite }
-                    .fl-secured    { animation: fl-glitch 4s ease-in-out infinite }
-                    .fl-conquered  { animation: fl-flagwave 3s ease-in-out infinite; transform-origin: left center }
-                    .fl-crushed    { animation: fl-crack 3.5s ease-in-out infinite }
-                    .fl-dominated  { animation: fl-domwave 2s ease-in-out infinite }
-                    .fl-mastered   { animation: fl-nova-multi 2.5s ease-in-out infinite; background-size:400% auto }
-                  `;
+                  // LABEL_STYLES and LABEL_KEYFRAMES defined at component scope above
                   const unlockedLabels = feedLabelUnlocked.map(u => u.label);
                   if (feedLabelLoading) return (
                     <div className="flex items-center justify-center py-20">
