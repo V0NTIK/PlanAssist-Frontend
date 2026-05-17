@@ -8397,6 +8397,9 @@ const PlanAssist = () => {
                                 setInsigniaSelected(label); // optimistic
                                 try {
                                   await apiCall('/insignia', 'PUT', { label });
+                                  // Refresh feed and leaderboard so the new insignia is reflected immediately
+                                  loadCompletionFeed();
+                                  loadLeaderboard();
                                 } catch (err) {
                                   console.error('Insignia update failed:', err.message);
                                   await loadInsignia(); // revert on failure
