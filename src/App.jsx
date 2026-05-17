@@ -8656,11 +8656,11 @@ const PlanAssist = () => {
                           case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
                           case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
                           case 'health_desc': {
-                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,((u.completed_this_week||0)/Math.max(1,u.active_tasks||1))*25)+(u.in_session?25:(u.completed_this_week>0?20:0)); };
+                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.round(Math.min(100,Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25))+(u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)))); };
                             return hs(b) - hs(a);
                           }
                           case 'health_asc': {
-                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,((u.completed_this_week||0)/Math.max(1,u.active_tasks||1))*25)+(u.in_session?25:(u.completed_this_week>0?20:0)); };
+                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.round(Math.min(100,Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25))+(u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)))); };
                             return hs(a) - hs(b);
                           }
                           default: return (a.name || '').localeCompare(b.name || '');
@@ -8693,7 +8693,7 @@ const PlanAssist = () => {
                                   <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
                                   {(() => {
                                     const daysSinceSync = u.last_sync ? Math.floor((Date.now() - new Date(u.last_sync)) / 86400000) : 99;
-                                    const s = Math.min(100, Math.max(0,25-daysSinceSync*3) + (u.has_canvas_token?25:0) + Math.min(25,((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25) + (u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)));
+                                    const s = Math.round(Math.min(100, Math.max(0,25-daysSinceSync*3) + (u.has_canvas_token?25:0) + Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25)) + (u.in_session?25:(parseInt(u.completed_this_week)>0?20:0))));
                                     return <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${s>=75?'text-green-700 bg-green-100':s>=45?'text-amber-700 bg-amber-100':'text-red-700 bg-red-100'}`}>{s}</span>;
                                   })()}
                                 </div>
