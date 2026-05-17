@@ -3742,25 +3742,18 @@ const PlanAssist = () => {
   `;
 
 
-  // Render a name (or first name) with the user's Insignia style applied
-  // insignia: the tier key (e.g. 'Gold'). If Default or unknown, renders plain.
-  // opts.onDark: true when rendering on a dark background (Hub banner) — Obsidian gets light variant
+  // Render a name with the user's Insignia tier style applied — used in Feed and Leaderboard.
   const renderInsigniaName = (name, insignia, opts = {}) => {
     const tier = insignia && INSIGNIA_STYLES[insignia] ? insignia : 'Default';
     const s = INSIGNIA_STYLES[tier];
-    const { fontSize, fontWeight, onDark, ...rest } = opts;
+    const { fontSize, fontWeight, ...rest } = opts;
     if (tier === 'Default') {
-      // On dark bg (Hub banner) default is white, elsewhere inherit
-      return <span style={{ fontWeight: fontWeight || 600, fontSize: fontSize || 'inherit', color: onDark ? '#fff' : 'inherit', ...rest }}>{name}</span>;
+      return <span style={{ fontWeight: fontWeight || 600, fontSize: fontSize || 'inherit', ...rest }}>{name}</span>;
     }
-    // Obsidian on dark bg — use bright variant so name is visible
-    const nameStyle = (tier === 'Obsidian' && onDark)
-      ? { background:'linear-gradient(135deg,#a5b4fc,#c7d2fe,#818cf8)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' }
-      : s.nameStyle;
     return (
       <span
         className={s.animClass || ''}
-        style={{ ...nameStyle, fontSize: fontSize || 'inherit', display:'inline-block', ...rest }}
+        style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block', ...rest }}
       >{name}</span>
     );
   };
@@ -4218,7 +4211,7 @@ const PlanAssist = () => {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900">PlanAssist</h1>
-              <p className="text-sm text-gray-600"><style>{INSIGNIA_KEYFRAMES}</style>{renderInsigniaName(accountSetup.name, insigniaSelected)}</p>
+              <p className="text-sm text-gray-600">{accountSetup.name}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -4581,7 +4574,7 @@ const PlanAssist = () => {
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
-                  <h1 className="text-3xl font-bold mb-2">Welcome back, {renderInsigniaName(user?.name?.split(' ')[0] || 'Student', insigniaSelected, { fontSize:'inherit', onDark: true })}!</h1>
+                  <h1 className="text-3xl font-bold mb-2">Welcome back, {user?.name?.split(' ')[0] || 'Student'}!</h1>
                   <p className="text-purple-100">Here's how you're doing today</p>
                 </div>
                 {/* Insight Box */}
@@ -8398,11 +8391,16 @@ const PlanAssist = () => {
                           return (
                             <button
                               key={label}
-                              disabled={!unlocked}
+                              disabled={!unlocked || insigniaLoading}
                               onClick={async () => {
-                                if (!unlocked) return;
-                                await apiCall('/insignia', 'PUT', { label });
-                                setFeedLabelSelected(label);
+                                if (!unlocked || insigniaSelected === label) return;
+                                setInsigniaSelected(label); // optimistic
+                                try {
+                                  await apiCall('/insignia', 'PUT', { label });
+                                } catch (err) {
+                                  console.error('Insignia update failed:', err.message);
+                                  await loadInsignia(); // revert on failure
+                                }
                               }}
                               className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
                                 selected ? 'border-purple-500 shadow-md ring-2 ring-purple-200' :
