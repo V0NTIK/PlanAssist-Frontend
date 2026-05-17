@@ -675,8 +675,9 @@ const PlanAssist = () => {
         return;
       }
       if (key === 's') { e.preventDefault(); setCurrentPage('account'); setAccountTab('settings'); return; }
+      if (key === 'r') { e.preventDefault(); if (!isLoadingTasks) fetchCanvasTasks(); return; }
+      if (key === 'h') { e.preventDefault(); if (!isLoadingTasks) setCurrentPage('hub'); return; }
       if (key === 'g') { e.preventDefault(); setCurrentPage('account'); setAccountTab('goals'); return; }
-      if (key === 'h') { e.preventDefault(); setCurrentPage('account'); setAccountTab('help'); return; }
       if (key === 'u' && user?.isAdmin) { e.preventDefault(); setCurrentPage('admin'); setAdminTab('users'); return; }
       if (key === 'l') { e.preventDefault(); handleLogout(); return; }
     };
@@ -8849,21 +8850,49 @@ const PlanAssist = () => {
 
                         {/* Tasks */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-semibold text-gray-700 mb-3 text-sm">Active Tasks ({adminUserDetail.tasks.filter(t => !t.deleted && !t.completed).length})</h4>
-                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                            {adminUserDetail.tasks.filter(t => !t.deleted && !t.completed).map(t => (
-                              <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
-                                <div className="flex-1 min-w-0">
-                                  <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
-                                  <span className="text-gray-400">{t.class} · {(() => { if (!t.deadline_date) return 'no date'; const dp = (t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date); const d = t.deadline_time ? new Date(dp + 'T' + t.deadline_time + 'Z') : new Date(dp + 'T23:59:00'); return d.toLocaleDateString(); })()}</span>
+                          <h4 className="font-semibold text-gray-700 mb-3 text-sm">Active Tasks ({adminUserDetail.tasks.length})</h4>
+                          {adminUserDetail.tasks.length === 0 ? (
+                            <p className="text-xs text-gray-400 text-center py-4">No active tasks.</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                              {adminUserDetail.tasks.map(t => (
+                                <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
+                                  <div className="flex-1 min-w-0">
+                                    <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
+                                    <span className="text-gray-400">{t.class} · {(() => { if (!t.deadline_date) return 'no date'; const dp = (t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date); const d = t.deadline_time ? new Date(dp + 'T' + t.deadline_time + 'Z') : new Date(dp + 'T23:59:00'); return d.toLocaleDateString(); })()}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                                    {t.session_active && <span className="text-green-500 text-xs font-medium">Active</span>}
+                                    <button onClick={() => adminDeleteTask(t.id)} className="text-red-400 hover:text-red-600">
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
                                 </div>
-                                <button onClick={() => adminDeleteTask(t.id)} className="ml-2 text-red-400 hover:text-red-600 flex-shrink-0">
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
+
+                        {/* Recent completions */}
+                        {adminUserDetail.recentCompletions?.length > 0 && (
+                          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                            <h4 className="font-semibold text-gray-700 mb-3 text-sm">Recent Completions ({adminUserDetail.recentCompletions.length})</h4>
+                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                              {adminUserDetail.recentCompletions.map((tc, i) => (
+                                <div key={i} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
+                                  <div className="flex-1 min-w-0">
+                                    <span className="font-medium text-gray-800 truncate block">{tc.title}</span>
+                                    <span className="text-gray-400">{tc.class}</span>
+                                  </div>
+                                  <div className="text-right flex-shrink-0 ml-2">
+                                    <p className="text-gray-600">{tc.actual_time}m logged</p>
+                                    <p className="text-gray-400">{new Date(tc.completed_at).toLocaleDateString()}</p>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
 
 
                       </div>
