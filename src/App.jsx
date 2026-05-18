@@ -3993,73 +3993,109 @@ const PlanAssist = () => {
     `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
   // ── Streak helpers ────────────────────────────────────────────────────────
-  // All streak logic operates on plain calendar days (no weekday filtering).
-  // curatedDates: array or Set of 'YYYY-MM-DD' strings already in campus timezone.
+  // Weekends are completely transparent to streak calculations:
+  //   - They are stripped from curatedDates before any calculation.
+  //   - Fri→Mon counts as consecutive (no gap).
+  //   - Auto-shields are never placed on weekends.
+  // curatedDates always contains weekdays only.
 
   // Adds offsetHours to a UTC ISO string and returns 'YYYY-MM-DD' in that offset.
-  // (Component-scope wrapper — uses the module-level utcToCampusDateStr.)
   const toCampusDate = (isoString, offsetHours) => utcToCampusDateStr(isoString, offsetHours);
 
-  // Compute current streak given a Set of curated dates and todayStr (campus tz).
+  // Returns true if a 'YYYY-MM-DD' date string (parsed as local midnight) is a weekend.
+  const isWeekendStr = (s) => { const d = parseLocalDate(s); const day = d.getDay(); return day === 0 || day === 6; };
+
+  // Walk backwards from a date (exclusive), skipping weekends, returning the
+  // previous weekday as a 'YYYY-MM-DD' string.
+  const prevWeekdayStr = (dateStr) => {
+    const d = parseLocalDate(dateStr);
+    do { d.setDate(d.getDate() - 1); } while (isWeekendStr(fmtLocal(d)));
+    return fmtLocal(d);
+  };
+
+  // Compute current streak given a Set of curated WEEKDAY dates and todayStr (local date).
   // Returns { streak, state } where state is one of:
-  //   'safe_completed'  — today is in curatedDates AND today's date came from completions
-  //   'safe_shielded'   — today is in curatedDates AND today's date came from shields only
-  //   'at_risk'         — today not in curatedDates but yesterday is (streak alive, not yet extended)
-  //   'broken'          — neither today nor yesterday in curatedDates
+  //   'weekend'         — today is Saturday or Sunday (streak always safe)
+  //   'safe_completed'  — today (a weekday) is in curatedDates from completions
+  //   'safe_shielded'   — today (a weekday) is in curatedDates from shields only
+  //   'at_risk'         — today is a weekday, not in curatedDates, but prev weekday is
+  //   'broken'          — today is a weekday, neither today nor prev weekday in curatedDates
   const computeStreak = (curatedDates, todayStr, completionDatesSet, shieldDatesSet) => {
     const dateSet = curatedDates instanceof Set ? curatedDates : new Set(curatedDates);
-    const today   = todayStr;
-    const todayD  = parseLocalDate(today);
-    const yestD   = new Date(todayD); yestD.setDate(yestD.getDate() - 1);
-    const yest    = fmtLocal(yestD);
 
-    const todayIn  = dateSet.has(today);
-    const yesterIn = dateSet.has(yest);
+    // Weekend short-circuit — streak is always safe, count stays as-is
+    if (isWeekendStr(todayStr)) {
+      // Count backwards from last weekday to find current run length
+      const lastWD = prevWeekdayStr(todayStr);  // most recent weekday before today
+      // Walk back from lastWD to count the run
+      let count = 0;
+      let d = parseLocalDate(lastWD);
+      while (true) {
+        const ds = fmtLocal(d);
+        if (isWeekendStr(ds)) { d.setDate(d.getDate() - 1); continue; }
+        if (!dateSet.has(ds)) break;
+        count++;
+        d.setDate(d.getDate() - 1);
+      }
+      return { streak: count, state: 'weekend' };
+    }
+
+    const todayIn = dateSet.has(todayStr);
+    const prevWD  = prevWeekdayStr(todayStr);
+    const prevIn  = dateSet.has(prevWD);
 
     // Determine state
     let state;
     if (todayIn) {
       const fromCompletion = completionDatesSet instanceof Set
-        ? completionDatesSet.has(today)
-        : (completionDatesSet || []).includes(today);
+        ? completionDatesSet.has(todayStr)
+        : (completionDatesSet || []).includes(todayStr);
       state = fromCompletion ? 'safe_completed' : 'safe_shielded';
-    } else if (yesterIn) {
+    } else if (prevIn) {
       state = 'at_risk';
     } else {
       state = 'broken';
     }
 
-    // Count the streak length — walk backwards from the most recent covered day
-    // (today if covered, else yesterday) counting consecutive days.
-    let startStr = todayIn ? today : (yesterIn ? yest : null);
-    if (!startStr) return { streak: 0, state };
+    // Count the streak — walk backwards from the anchor weekday, skipping weekends.
+    const anchorStr = todayIn ? todayStr : (prevIn ? prevWD : null);
+    if (!anchorStr) return { streak: 0, state };
 
     let count = 0;
-    let d = parseLocalDate(startStr);
-    while (dateSet.has(fmtLocal(d))) {
+    let d = parseLocalDate(anchorStr);
+    while (true) {
+      const ds = fmtLocal(d);
+      if (isWeekendStr(ds)) { d.setDate(d.getDate() - 1); continue; } // skip weekends transparently
+      if (!dateSet.has(ds)) break;
       count++;
       d.setDate(d.getDate() - 1);
     }
     return { streak: count, state };
   };
 
-  // Compute personal record — longest chain of consecutive calendar days in curatedDates.
+  // Compute personal record — longest chain of consecutive WEEKDAYS in curatedDates.
+  // Fri→Mon (gap of 3 calendar days) counts as consecutive.
   const computePersonalRecord = (curatedDates) => {
-    const sorted = [...(curatedDates instanceof Set ? curatedDates : new Set(curatedDates))].sort();
+    const sorted = [...(curatedDates instanceof Set ? curatedDates : new Set(curatedDates))]
+      .filter(d => !isWeekendStr(d))
+      .sort();
     if (sorted.length === 0) return 0;
     let max = 1, cur = 1;
     for (let i = 1; i < sorted.length; i++) {
       const prev = parseLocalDate(sorted[i - 1]);
       const curr = parseLocalDate(sorted[i]);
       const diff = Math.round((curr - prev) / 86400000);
-      if (diff === 1) { cur++; if (cur > max) max = cur; }
+      // 1 day gap = consecutive weekdays (Mon–Fri)
+      // 3 day gap = Fri→Mon over a weekend
+      const consecutive = diff === 1 || (diff === 3 && prev.getDay() === 5 && curr.getDay() === 1);
+      if (consecutive) { cur++; if (cur > max) max = cur; }
       else cur = 1;
     }
     return max;
   };
 
-  // Master streak loader — called when the streak pane opens (and silently on hub refresh).
-  // Handles the full spec flow including auto-shield insertion.
+  // Master streak loader — called every time the streak pane opens (and silently on hub refresh).
+  // Handles the full spec flow: timezone conversion → weekend filtering → auto-shield → state commit.
   const loadStreakData = async ({ silent = false } = {}) => {
     if (!silent) setStreakLoading(true);
     try {
@@ -4075,39 +4111,48 @@ const PlanAssist = () => {
       const offsetHours = getCampusOffsetHours(campus);
       const localToday  = getLocalDateStr(); // user's browser local date
 
-      // Convert all timestamps to campus-tz dates
-      const completionDateSet = new Set(completedAt.map(ts => toCampusDate(ts, offsetHours)));
-      const shieldDateSet     = new Set(consumedAt.map(ts  => toCampusDate(ts, offsetHours)));
+      // Convert all timestamps to campus-tz dates, then strip weekends immediately.
+      // Any completion or shield that falls on a weekend is discarded — weekends
+      // are invisible to streak calculations.
+      const completionDateSet = new Set(
+        completedAt.map(ts => toCampusDate(ts, offsetHours)).filter(d => !isWeekendStr(d))
+      );
+      const shieldDateSet = new Set(
+        consumedAt.map(ts => toCampusDate(ts, offsetHours)).filter(d => !isWeekendStr(d))
+      );
 
-      // Build curated dates = union of both sets
+      // Build curated dates = union of both weekday-only sets
       let curatedDates = new Set([...completionDateSet, ...shieldDateSet]);
 
       // ── Auto-shield logic ────────────────────────────────────────────────
-      // Only runs if mode is 'automatic' AND shields are available.
+      // Runs if mode = 'automatic' AND shields > 0 AND there are covered dates.
       let shieldsLeft = shieldsAvailable;
       const autoShieldedDates = [];
 
       if (shieldMode === 'automatic' && shieldsLeft > 0 && curatedDates.size > 0) {
-        // Find the most recent date in the curated chain
         const sortedDates = [...curatedDates].sort();
         const mostRecentStr = sortedDates[sortedDates.length - 1];
         const mostRecent = parseLocalDate(mostRecentStr);
+
+        // Find yesterday (the last day we're allowed to shield — never today)
         const todayD = parseLocalDate(localToday);
         const yestD  = new Date(todayD); yestD.setDate(yestD.getDate() - 1);
         const yest   = fmtLocal(yestD);
 
-        // Walk forward from the day after the most recent covered date,
-        // filling shields sequentially until we either run out of shields
-        // or reach yesterday (we never shield today itself).
+        // Walk forward from the day after the most recent covered date.
+        // Skip weekends — shields are never placed on weekends.
+        // Stop once we've reached or passed yesterday.
         let cursor = new Date(mostRecent);
-        cursor.setDate(cursor.getDate() + 1); // day after most recent
+        cursor.setDate(cursor.getDate() + 1);
 
         while (shieldsLeft > 0) {
           const cursorStr = fmtLocal(cursor);
-          // Stop once we've passed yesterday (never auto-shield today)
-          if (cursorStr > yest) break;
-          // Skip dates that are already covered
-          if (!curatedDates.has(cursorStr)) {
+          if (cursorStr > yest) break;               // never shield today
+          if (isWeekendStr(cursorStr)) {              // skip weekends silently
+            cursor.setDate(cursor.getDate() + 1);
+            continue;
+          }
+          if (!curatedDates.has(cursorStr)) {         // gap weekday — shield it
             autoShieldedDates.push(cursorStr);
             shieldsLeft--;
           }
@@ -4137,7 +4182,7 @@ const PlanAssist = () => {
       setStreakShieldMode(shieldMode);
       setStreakCompletionDates(completionDateSet);
       setStreakShieldDates(shieldDateSet);
-      setStreakShieldLog([...shieldDateSet]); // keep array form for legacy callers (hub stats etc.)
+      setStreakShieldLog([...shieldDateSet]); // keep array form for legacy hub callers
 
     } catch (err) {
       console.error('loadStreakData error:', err.message);
@@ -8622,6 +8667,12 @@ const PlanAssist = () => {
                   const personalRecord = Math.max(computePersonalRecord(curatedDates), currentStreak);
 
                   const stateConfig = {
+                    weekend: {
+                      color: 'from-blue-400 to-indigo-500',
+                      label: 'Weekend — Streak Safe!',
+                      sub:   'No tasks required on weekends. Enjoy your break!',
+                      icon:  '🏖️',
+                    },
                     safe_completed: {
                       color: 'from-green-400 to-emerald-500',
                       label: 'Streak Extended!',
@@ -8649,7 +8700,7 @@ const PlanAssist = () => {
                   };
                   const cfg = stateConfig[streakState] || stateConfig.broken;
 
-                  // Manual shield button is only useful when streak is at_risk
+                  // Manual shield button: only useful on at_risk weekdays
                   const canUseShield = streakShieldsAvailable >= 1 && streakState === 'at_risk';
 
                   if (streakLoading) return (
