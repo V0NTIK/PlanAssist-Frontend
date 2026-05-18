@@ -6,14 +6,81 @@ import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, 
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
+// ── Campus → period range lookup (mirrors server CAMPUS_PERIODS) ─────────────
+const CAMPUS_PERIODS = {
+  'Ashland':        { std: '2-6', dst: '2-6' },
+  'Barbados':       { std: '1-5', dst: '2-6' },
+  'Calgary':        { std: '3-7', dst: '3-7' },
+  'Chesapeake':     { std: '2-6', dst: '2-6' },
+  'Chicago':        { std: '3-7', dst: '3-7' },
+  'Council Bluffs': { std: '3-7', dst: '3-7' },
+  'Des Moines':     { std: '3-7', dst: '3-7' },
+  'Detroit':        { std: '2-6', dst: '2-6' },
+  'Edmonton':       { std: '3-7', dst: '3-7' },
+  'Gothenburg':     { std: '3-7', dst: '3-7' },
+  'Hamilton':       { std: '2-6', dst: '2-6' },
+  'Indianapolis':   { std: '2-6', dst: '2-6' },
+  'Jamaica':        { std: '2-6', dst: '3-7' },
+  'Kalispell':      { std: '4-8', dst: '4-8' },
+  'Knoxville':      { std: '2-6', dst: '2-6' },
+  'Los Angeles':    { std: '4-8', dst: '4-8' },
+  'Maple Creek':    { std: '3-7', dst: '3-7' },
+  'Minneapolis':    { std: '3-7', dst: '3-7' },
+  'Montreal':       { std: '2-6', dst: '2-6' },
+  'Mossley':        { std: '2-6', dst: '2-6' },
+  'New England':    { std: '2-6', dst: '2-6' },
+  'New York':       { std: '2-6', dst: '2-6' },
+  'Oxbow':          { std: '3-7', dst: '3-7' },
+  'Pembina':        { std: '3-7', dst: '3-7' },
+  'Portland':       { std: '4-8', dst: '4-8' },
+  'Redwood Falls':  { std: '3-7', dst: '3-7' },
+  'Regina':         { std: '3-7', dst: '3-7' },
+  'Rideau Lakes':   { std: '2-6', dst: '2-6' },
+  'Rochester':      { std: '2-6', dst: '2-6' },
+  'San Antonio':    { std: '3-7', dst: '3-7' },
+  'San Francisco':  { std: '4-8', dst: '4-8' },
+  'Seattle':        { std: '4-8', dst: '4-8' },
+  'St. Vincent':    { std: '1-5', dst: '2-6' },
+  'Stonewall':      { std: '3-7', dst: '3-7' },
+  'Trinidad':       { std: '1-5', dst: '2-6' },
+  'Vancouver':      { std: '4-8', dst: '4-8' },
+};
+const VALID_CAMPUSES = Object.keys(CAMPUS_PERIODS);
+
+// Returns nth Sunday of a given month/year (month 0-indexed)
+function nthSundayOfMonth(year, month, n) {
+  const d = new Date(year, month, 1);
+  let count = 0;
+  while (true) {
+    if (d.getDay() === 0) { count++; if (count === n) return new Date(d); }
+    d.setDate(d.getDate() + 1);
+  }
+}
+
+// Returns the DST-aware period range string for a campus.
+// Uses client local date. North American DST: 2nd Sun Mar → 1st Sun Nov.
+function getCampusPeriods(campus) {
+  const entry = CAMPUS_PERIODS[campus] || CAMPUS_PERIODS['Ashland'];
+  const now = new Date();
+  const year = now.getFullYear();
+  const dstStart = nthSundayOfMonth(year, 2, 2);  // March 2nd Sunday
+  const dstEnd   = nthSundayOfMonth(year, 10, 1); // November 1st Sunday
+  const inDST = now >= dstStart && now < dstEnd;
+  return inDST ? entry.dst : entry.std;
+}
+
+
+
 // ── EditUserForm helper (used inside Admin Console) ─────────────────────────
 const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
   const [form, setForm] = React.useState({
     name: user.name || '',
     grade: user.grade || '',
-    present_periods: user.present_periods || '',
+    campus: user.campus || 'Ashland',
     is_admin: user.is_admin || false,
   });
+  const [campusInput, setCampusInput] = React.useState(user.campus || 'Ashland');
+  const [campusSuggestions, setCampusSuggestions] = React.useState([]);
   return (
     <div className="space-y-3 mt-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
       <div className="grid grid-cols-2 gap-3">
@@ -27,11 +94,24 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
           <input value={form.grade} onChange={e => setForm(p => ({...p, grade: e.target.value}))}
             className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
         </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Present Periods</label>
-          <input value={form.present_periods} onChange={e => setForm(p => ({...p, present_periods: e.target.value}))}
-            placeholder="e.g. 2-6"
+        <div className="relative">
+          <label className="block text-xs font-medium text-gray-600 mb-1">Campus</label>
+          <input value={campusInput}
+            onChange={e => {
+              setCampusInput(e.target.value);
+              const q = e.target.value.toLowerCase();
+              setCampusSuggestions(q ? VALID_CAMPUSES.filter(c => c.toLowerCase().includes(q)) : []);
+            }}
+            placeholder="Type campus name..."
             className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+          {campusSuggestions.length > 0 && (
+            <ul className="absolute z-20 left-0 right-0 bg-white border border-gray-200 rounded shadow-md max-h-36 overflow-y-auto mt-0.5">
+              {campusSuggestions.map(c => (
+                <li key={c} onMouseDown={() => { setForm(p => ({...p, campus: c})); setCampusInput(c); setCampusSuggestions([]); }}
+                  className="px-2 py-1.5 text-xs hover:bg-purple-50 cursor-pointer">{c}</li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="flex items-center gap-2 pt-4">
           <input type="checkbox" id="isAdminCheck" checked={form.is_admin}
@@ -226,7 +306,7 @@ const PlanAssist = () => {
     name: '',
     grade: '',
     canvasApiToken: '',
-    presentPeriods: '2-6',
+    campus: 'Ashland',
     schedule: {},
     classColors: {},
     calendarShowHomeroom: true,
@@ -508,15 +588,14 @@ const PlanAssist = () => {
     streak: 0
   });
 
-  // Calculate selected periods based on presentPeriods
+  // Calculate selected periods from campus (DST-aware)
   const selectedPeriods = React.useMemo(() => {
-    const [start, end] = accountSetup.presentPeriods.split('-').map(Number);
+    const range = getCampusPeriods(accountSetup.campus || 'Ashland');
+    const [start, end] = range.split('-').map(Number);
     const periods = [];
-    for (let i = start; i <= end; i++) {
-      periods.push(i);
-    }
+    for (let i = start; i <= end; i++) periods.push(i);
     return periods;
-  }, [accountSetup.presentPeriods]);
+  }, [accountSetup.campus]);
 
   // Extract class name from task class field or title
   const extractClassName = (task) => {
@@ -759,7 +838,7 @@ const PlanAssist = () => {
           name: userName || '',
           grade: setupData.grade || '',
           canvasApiToken: setupData.canvasApiToken || '',
-          presentPeriods: setupData.presentPeriods || '2-6',
+          campus: setupData.campus || 'Ashland',
         calendarShowHomeroom: setupData.calendarShowHomeroom ?? true,
         calendarShowCompleted: setupData.calendarShowCompleted ?? true,
         calendarShowPrevWeek: setupData.calendarShowPrevWeek ?? false,
@@ -1016,7 +1095,7 @@ const PlanAssist = () => {
       await apiCall('/account/setup', 'POST', {
         grade: accountSetup.grade,
         canvasApiToken: accountSetup.canvasApiToken,
-        presentPeriods: accountSetup.presentPeriods,
+        campus: accountSetup.campus,
         schedule: accountSetup.schedule,
         calendarShowHomeroom: accountSetup.calendarShowHomeroom,
         calendarShowCompleted: accountSetup.calendarShowCompleted,
@@ -1066,7 +1145,7 @@ const PlanAssist = () => {
       const merged = { ...accountSetup, ...patch };
       await apiCall('/account/setup', 'POST', {
         grade: merged.grade,
-        presentPeriods: merged.presentPeriods,
+        campus: merged.campus,
         schedule: merged.schedule,
         calendarShowHomeroom: merged.calendarShowHomeroom,
         calendarShowCompleted: merged.calendarShowCompleted,
@@ -3021,7 +3100,7 @@ const PlanAssist = () => {
 
   // Feature 1: Period Zoom banner — check every 30s if a period is starting within 2 min or started within 5 min
   useEffect(() => {
-    if (!isAuthenticated || !accountSetup.presentPeriods) return;
+    if (!isAuthenticated || !accountSetup.campus) return;
     const PERIOD_TIMES_UTC = {
       1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
       4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
@@ -3051,7 +3130,7 @@ const PlanAssist = () => {
     check(); // run immediately on mount / when deps change
     const interval = setInterval(check, 30000); // check every 30s for tighter window
     return () => clearInterval(interval);
-  }, [isAuthenticated, accountSetup.presentPeriods, scheduleLessons, tutorials]);
+  }, [isAuthenticated, accountSetup.campus, scheduleLessons, tutorials]);
 
   // Feature 6: Auto-sync every 30 minutes while app is visible
   useEffect(() => {
@@ -4197,8 +4276,9 @@ const PlanAssist = () => {
   };
 
   useEffect(() => {
-    if (accountSetup.presentPeriods) {
-      const [start, end] = accountSetup.presentPeriods.split('-').map(Number);
+    if (accountSetup.campus) {
+      const range = getCampusPeriods(accountSetup.campus);
+      const [start, end] = range.split('-').map(Number);
       const newSchedule = {};
       const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
       days.forEach(day => {
@@ -4211,7 +4291,7 @@ const PlanAssist = () => {
         setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
       }
     }
-  }, [accountSetup.presentPeriods]);
+  }, [accountSetup.campus]);
 
   if (!isAuthenticated) {
     return (
@@ -7065,7 +7145,7 @@ const PlanAssist = () => {
           );
 
           // Build period list based on the viewed day's schedule
-          const range = accountSetup.presentPeriods || '2-6';
+          const range = getCampusPeriods(accountSetup.campus || 'Ashland');
           const [pStart, pEnd] = range.split('-').map(Number);
           const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
@@ -7653,17 +7733,31 @@ const PlanAssist = () => {
                       </div>
                     </div>
 
-                    {/* Present Periods */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">Present Periods (Time Zone) <span className="text-red-500">*</span></label>
-                      <select value={accountSetup.presentPeriods}
-                        onChange={(e) => setAccountSetup(prev => ({ ...prev, presentPeriods: e.target.value }))}
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
-                        <option value="1-5">Periods 1-5</option>
-                        <option value="2-6">Periods 2-6</option>
-                        <option value="3-7">Periods 3-7</option>
-                        <option value="4-8">Periods 4-8</option>
-                      </select>
+                    {/* Campus */}
+                    <div className="relative">
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Campus <span className="text-red-500">*</span></label>
+                      <input
+                        value={accountSetup.campus || ''}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setAccountSetup(prev => ({ ...prev, campus: val }));
+                        }}
+                        onFocus={(e) => {
+                          const val = e.target.value;
+                          const q = val.toLowerCase();
+                          const matches = q ? VALID_CAMPUSES.filter(c => c.toLowerCase().includes(q)) : VALID_CAMPUSES;
+                          e.target.setAttribute('data-show-list', 'true');
+                          // Use a sibling state via a tiny inline trick — we'll rely on a wrapper state
+                        }}
+                        list="campus-list-signup"
+                        placeholder="Type or select your campus..."
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500" />
+                      <datalist id="campus-list-signup">
+                        {VALID_CAMPUSES.map(c => <option key={c} value={c} />)}
+                      </datalist>
+                      {accountSetup.campus && !VALID_CAMPUSES.includes(accountSetup.campus) && (
+                        <p className="text-xs text-red-500 mt-1">Please select a valid campus from the list.</p>
+                      )}
                     </div>
 
                     {/* Weekly Schedule */}
@@ -8016,7 +8110,7 @@ const PlanAssist = () => {
                                     await apiCall('/account/setup', 'POST', {
                                       grade: accountSetup.grade,
                                       canvasApiToken: accountSetup.canvasApiToken,
-                                      presentPeriods: accountSetup.presentPeriods,
+                                      campus: accountSetup.campus,
                                       schedule: accountSetup.schedule,
                                     });
                                     const tokenChanged = accountSetup.canvasApiToken !== savedCanvasTokenRef.current;
@@ -8052,21 +8146,27 @@ const PlanAssist = () => {
                               {['3','4','5','6','7','8','9','10','11','12'].map(g => <option key={g} value={g}>{g}</option>)}
                             </select>
                           </div>
-                          {/* Present Periods */}
-                          <div>
-                            <h3 className="text-sm font-semibold text-gray-700 mb-2">Present Periods (Time Zone)</h3>
-                            <select value={accountSetup.presentPeriods}
-                              onChange={async (e) => {
-                                const updated = { ...accountSetup, presentPeriods: e.target.value };
-                                setAccountSetup(updated);
-                                await autoSaveSetting({ presentPeriods: e.target.value });
+                          {/* Campus */}
+                          <div className="relative">
+                            <h3 className="text-sm font-semibold text-gray-700 mb-2">Campus</h3>
+                            <input
+                              value={accountSetup.campus || ''}
+                              onChange={(e) => setAccountSetup(prev => ({ ...prev, campus: e.target.value }))}
+                              onBlur={async (e) => {
+                                const val = e.target.value;
+                                if (VALID_CAMPUSES.includes(val)) {
+                                  await autoSaveSetting({ campus: val });
+                                }
                               }}
-                              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
-                              <option value="1-5">Periods 1-5</option>
-                              <option value="2-6">Periods 2-6</option>
-                              <option value="3-7">Periods 3-7</option>
-                              <option value="4-8">Periods 4-8</option>
-                            </select>
+                              list="campus-list-settings"
+                              placeholder="Type or select your campus..."
+                              className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500" />
+                            <datalist id="campus-list-settings">
+                              {VALID_CAMPUSES.map(c => <option key={c} value={c} />)}
+                            </datalist>
+                            {accountSetup.campus && !VALID_CAMPUSES.includes(accountSetup.campus) && (
+                              <p className="text-xs text-red-500 mt-1">Please select a valid campus from the list.</p>
+                            )}
                           </div>
                           {/* Feedback */}
                           <div className="border-t pt-4">
@@ -9404,7 +9504,7 @@ const PlanAssist = () => {
       {/* ── Enhance Schedule Dialog ─────────────────────────────────────────── */}
       {showEnhanceDialog && (() => {
         const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-        const range = accountSetup.presentPeriods || '2-6';
+        const range = getCampusPeriods(accountSetup.campus || 'Ashland');
         const [start, end] = range.split('-').map(Number);
         const enhancePeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
@@ -9596,7 +9696,7 @@ const PlanAssist = () => {
             : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
           const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-          const range = accountSetup.presentPeriods || '2-6';
+          const range = getCampusPeriods(accountSetup.campus || 'Ashland');
           const [pStart, pEnd] = range.split('-').map(Number);
           const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const canSave = tutorialDate && tutorialPeriod;
