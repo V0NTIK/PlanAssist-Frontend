@@ -7862,7 +7862,7 @@ const PlanAssist = () => {
 
                     <button
                       onClick={saveAccountSetup}
-                      disabled={settingsSaving || !accountSetup.grade || !accountSetup.canvasApiToken}
+                      disabled={settingsSaving || !accountSetup.grade || !accountSetup.canvasApiToken || !accountSetup.campus || !VALID_CAMPUSES.includes(accountSetup.campus)}
                       className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-4 rounded-xl font-bold hover:from-yellow-500 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-base transition-all shadow-md"
                     >
                       {settingsSaving ? (
