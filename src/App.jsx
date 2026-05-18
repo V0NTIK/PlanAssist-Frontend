@@ -3923,7 +3923,7 @@ const PlanAssist = () => {
   // Insignia tiers — unlock thresholds by days with ≥1 completion
   const INSIGNIA_THRESHOLDS = [
     [0,'Default'],[2,'Copper'],[5,'Silver'],[10,'Gold'],[20,'Emerald'],
-    [30,'Amethyst'],[40,'Ruby'],[50,'Diamond'],[75,'Obsidian'],[100,'Aether']
+    [30,'Amethyst'],[40,'Ruby'],[50,'Diamond'],[75,'Obsidian'],[100,'Antimatter']
   ];
 
   // Single source of truth for Insignia styles — used in Feed and Leaderboard only.
@@ -3946,8 +3946,8 @@ const PlanAssist = () => {
     Diamond:   { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
     // Obsidian — deep obsidian, cloud shift + subtle jitter only
     Obsidian:  { animClass:'ins-obsidian', wave:false, nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
-    // Aether — luminous iridescent cosmic, color-shift + per-letter wave float
-    Aether:    { animClass:'ins-aether', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#fbbf24,#f43f5e,#a5f3fc,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'600% auto' } },
+    // Antimatter — cosmic distortion: rainbowing colors + black + white flashes, per-letter wave float
+    Antimatter: { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#000000,#f0abfc,#818cf8,#ffffff,#34d399,#000000,#fbbf24,#f43f5e,#ffffff,#a5f3fc,#000000,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
   };
   const INSIGNIA_KEYFRAMES = `
     @keyframes ins-shimmer { 0%{background-position:0% center} 100%{background-position:200% center} }
@@ -3957,17 +3957,17 @@ const PlanAssist = () => {
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
     @keyframes ins-jitter { 0%,100%{transform:translateY(0) translateX(0)} 20%{transform:translateY(-3px) translateX(0.4px)} 40%{transform:translateY(0.5px) translateX(-0.4px)} 60%{transform:translateY(-1.5px) translateX(0.3px)} 80%{transform:translateY(0.8px) translateX(-0.2px)} }
-    .ins-emerald  { animation: ins-shimmer 3s linear infinite }
-    .ins-amethyst { animation: ins-shimmer 2.5s linear infinite }
-    .ins-ruby     { animation: ins-shimmer-heavy 1.8s linear infinite }
-    .ins-diamond  { animation: ins-bling 2s ease-in-out infinite }
-    .ins-obsidian { animation: ins-cloud 6s ease-in-out infinite, ins-jitter 0.55s ease-in-out infinite }
-    .ins-aether   { animation: ins-color-shift 5s linear infinite }
+    .ins-emerald    { animation: ins-shimmer 3s linear infinite }
+    .ins-amethyst   { animation: ins-shimmer 2.5s linear infinite }
+    .ins-ruby       { animation: ins-shimmer-heavy 1.8s linear infinite }
+    .ins-diamond    { animation: ins-bling 2s ease-in-out infinite }
+    .ins-obsidian   { animation: ins-cloud 6s ease-in-out infinite, ins-jitter 0.55s ease-in-out infinite }
+    .ins-antimatter { animation: ins-color-shift 7s linear infinite }
   `;
 
 
   // Render a name with the user's Insignia tier style applied — used in Feed and Leaderboard only.
-  // Only Aether splits into per-letter spans for the staggered wave float effect.
+  // Only Antimatter splits into per-letter spans for the staggered wave float effect.
   const renderInsigniaName = (name, insignia, opts = {}) => {
     const tier = insignia && INSIGNIA_STYLES[insignia] ? insignia : 'Default';
     const s = INSIGNIA_STYLES[tier];
@@ -3977,7 +3977,7 @@ const PlanAssist = () => {
       return <span style={{ fontWeight: fontWeight || 600, fontSize: fontSize || 'inherit', ...rest }}>{name}</span>;
     }
 
-    // All tiers except Aether: single span, animation driven by CSS class.
+    // All tiers except Antimatter: single span, animation driven by CSS class.
     if (!s.wave) {
       return (
         <span
@@ -3987,11 +3987,11 @@ const PlanAssist = () => {
       );
     }
 
-    // Aether only: split into per-letter spans with staggered ins-wave delays.
+    // Antimatter only: split into per-letter spans with staggered ins-wave delays.
     // Inline animation includes both the color-shift and the wave so the inline
     // style doesn't silently drop the background-position animation from the class.
-    const WAVE_DURATION = 1.6; // seconds per full wave cycle
-    const WAVE_STAGGER  = 0.1; // seconds delay between each successive letter
+    const WAVE_DURATION = 2.8; // slower, more cosmic float
+    const WAVE_STAGGER  = 0.18; // seconds delay between each successive letter
     return (
       <span style={{ display:'inline-block', ...rest }}>
         {name.split('').map((ch, i) => {
@@ -4004,7 +4004,7 @@ const PlanAssist = () => {
                   ...s.nameStyle,
                   fontSize: fontSize || 'inherit',
                   display: 'inline-block',
-                  animation: `ins-color-shift 5s linear ${delay}s infinite, ins-wave ${WAVE_DURATION}s ease-in-out ${delay}s infinite`,
+                  animation: `ins-color-shift 7s linear ${delay}s infinite, ins-wave ${WAVE_DURATION}s ease-in-out ${delay}s infinite`,
                 }}
               >{ch}</span>;
         })}
@@ -8933,7 +8933,7 @@ const PlanAssist = () => {
                             Ruby:     'bg-rose-50 border-rose-300',
                             Diamond:  'bg-cyan-50 border-cyan-300',
                             Obsidian: 'bg-indigo-950 border-indigo-800',
-                            Aether:   'bg-fuchsia-50 border-fuchsia-300',
+                            Antimatter: 'bg-fuchsia-50 border-fuchsia-300',
                           };
                           const baseBg = bgMap[label] || 'bg-gray-50 border-gray-200';
                           return (
