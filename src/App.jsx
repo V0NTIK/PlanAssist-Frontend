@@ -3888,13 +3888,14 @@ const PlanAssist = () => {
       ]);
       setStreakShieldsAvailable(shieldsR.available ?? 0);
       setStreakShieldMode(shieldsR.mode ?? 'manual');
-      setStreakShieldLog((logR.shieldDates ?? []).map(d => {
-        // DB DATE columns come back as 'YYYY-MM-DD' strings from node-postgres.
-        // Guard against unexpected Date objects by extracting local date components.
+      const serverDates = (logR.shieldDates ?? []).map(d => {
         if (typeof d === 'string') return d.slice(0, 10);
         const dt = new Date(d);
         return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-      }));
+      });
+      // Merge server dates with any optimistic local additions so a just-used shield
+      // is never wiped out by a loadStreakData call that races with the DB write.
+      setStreakShieldLog(prev => [...new Set([...prev, ...serverDates])]);
     } catch (err) { console.error('loadStreakData error:', err.message); } finally { setStreakLoading(false); }
   };
 
@@ -8505,8 +8506,11 @@ const PlanAssist = () => {
                             onClick={async () => {
                               try {
                                 const r = await apiCall('/streak/shields/use', 'POST', { date: today });
+                                // Optimistic update so the UI snaps immediately
                                 setStreakShieldsAvailable(r.remaining);
-                                setStreakShieldLog(prev => [...prev, today]);
+                                setStreakShieldLog(prev => [...new Set([...prev, today])]);
+                                // Then sync authoritative state from server so nothing is stale
+                                loadStreakData();
                                 setStreakShieldToast('🛡️ Streak Shield used! Your streak is protected.');
                                 setTimeout(() => setStreakShieldToast(null), 4000);
                               } catch (err) { alert(err.message); }
