@@ -3946,8 +3946,8 @@ const PlanAssist = () => {
     Diamond:   { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
     // Obsidian — deep obsidian, cloud shift + subtle jitter only
     Obsidian:  { animClass:'ins-obsidian', wave:false, nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
-    // Antimatter — cosmic distortion: rainbowing colors + black + white flashes, per-letter wave float
-    Antimatter: { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#000000,#f0abfc,#818cf8,#ffffff,#34d399,#000000,#fbbf24,#f43f5e,#ffffff,#a5f3fc,#000000,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
+    // Antimatter — cosmic distortion: rainbowing colors with occasional black/white flashes
+    Antimatter: { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#000000,#34d399,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#000000,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
   };
   const INSIGNIA_KEYFRAMES = `
     @keyframes ins-shimmer { 0%{background-position:0% center} 100%{background-position:200% center} }
@@ -3956,12 +3956,15 @@ const PlanAssist = () => {
     @keyframes ins-cloud { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
-    @keyframes ins-jitter { 0%,100%{transform:translateY(0) translateX(0)} 20%{transform:translateY(-3px) translateX(0.4px)} 40%{transform:translateY(0.5px) translateX(-0.4px)} 60%{transform:translateY(-1.5px) translateX(0.3px)} 80%{transform:translateY(0.8px) translateX(-0.2px)} }
+    @keyframes ins-jitter { 0%,100%{transform:translate(0,0)} 25%{transform:translate(0.3px,-1.5px)} 50%{transform:translate(-0.3px,0.4px)} 75%{transform:translate(0.2px,-0.8px)} }
+    @keyframes ins-star-a { 0%{transform:translateX(-130%);opacity:0} 5%{opacity:1} 40%{transform:translateX(230%);opacity:0} 100%{transform:translateX(230%);opacity:0} }
+    @keyframes ins-star-b { 0%{transform:translateX(230%);opacity:0} 5%{opacity:1} 40%{transform:translateX(-130%);opacity:0} 100%{transform:translateX(-130%);opacity:0} }
+    @keyframes ins-star-c { 0%{transform:translateX(-130%);opacity:0} 5%{opacity:1} 35%{transform:translateX(230%);opacity:0} 100%{transform:translateX(230%);opacity:0} }
     .ins-emerald    { animation: ins-shimmer 3s linear infinite }
     .ins-amethyst   { animation: ins-shimmer 2.5s linear infinite }
     .ins-ruby       { animation: ins-shimmer-heavy 1.8s linear infinite }
     .ins-diamond    { animation: ins-bling 2s ease-in-out infinite }
-    .ins-obsidian   { animation: ins-cloud 6s ease-in-out infinite, ins-jitter 0.55s ease-in-out infinite }
+    .ins-obsidian   { animation: ins-cloud 6s ease-in-out infinite, ins-jitter 0.4s ease-in-out infinite }
     .ins-antimatter { animation: ins-color-shift 7s linear infinite }
   `;
 
@@ -3978,6 +3981,33 @@ const PlanAssist = () => {
     }
 
     // All tiers except Antimatter: single span, animation driven by CSS class.
+    // Diamond gets a shooting-star overlay on top of the standard single span.
+    if (tier === 'Diamond') {
+      // Three star variants — different vertical positions (top), directions (a=LTR, b=RTL, c=LTR shifted),
+      // fired at staggered intervals so they appear to randomly streak across the name.
+      const starBase = {
+        position:'absolute', left:0, right:0,
+        height:'2px', width:'32%',
+        background:'linear-gradient(90deg,transparent,rgba(255,255,255,0.95),rgba(200,230,255,0.7),transparent)',
+        borderRadius:'1px',
+        pointerEvents:'none',
+      };
+      return (
+        <span style={{ position:'relative', display:'inline-block', ...rest }}>
+          <span
+            className={s.animClass || ''}
+            style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block' }}
+          >{name}</span>
+          {/* Star A — LTR, middle-ish */}
+          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite' }} />
+          {/* Star B — RTL, slightly higher */}
+          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite' }} />
+          {/* Star C — LTR, slightly lower */}
+          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite' }} />
+        </span>
+      );
+    }
+
     if (!s.wave) {
       return (
         <span
