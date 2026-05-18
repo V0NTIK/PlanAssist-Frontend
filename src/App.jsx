@@ -3886,10 +3886,11 @@ const PlanAssist = () => {
     const today = getLocalDateStr();
     const todayDate = parseLocalDate(today);
 
-    // Walk back up to 30 calendar days finding uncovered weekday gaps
+    // Walk back up to 30 calendar days finding uncovered weekday gaps.
+    // Never shield today — only past days.
     const gapDates = [];
     let d = new Date(todayDate);
-    d.setDate(d.getDate() - 1); // start from yesterday
+    d.setDate(d.getDate() - 1); // always start from yesterday
     let consecutiveGaps = 0;
 
     for (let i = 0; i < 30; i++) {
@@ -4122,7 +4123,7 @@ const PlanAssist = () => {
 
   useEffect(() => {
     calculateHubStats();
-  }, [completionHistory]);
+  }, [completionHistory, streakShieldLog]);
 
   // Trigger auto-shield whenever completion history or shield data changes and mode is automatic
   useEffect(() => {
