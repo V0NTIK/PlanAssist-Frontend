@@ -116,7 +116,62 @@ function getEffectivePeriods(campus) {
 
 
 
-// ── EditUserForm helper (used inside Admin Console) ─────────────────────────
+// ── Campus → UTC offset lookup for streak calculations ───────────────────────
+// standard = offset in hours during standard time (no DST)
+// dst      = offset in hours during daylight saving time
+const CAMPUS_OFFSETS = {
+  'Ashland':        { standard: -5, dst: -4 },
+  'Barbados':       { standard: -4, dst: -4 },
+  'Calgary':        { standard: -7, dst: -6 },
+  'Chesapeake':     { standard: -5, dst: -4 },
+  'Chicago':        { standard: -6, dst: -5 },
+  'Council Bluffs': { standard: -6, dst: -5 },
+  'Des Moines':     { standard: -6, dst: -5 },
+  'Detroit':        { standard: -5, dst: -4 },
+  'Edmonton':       { standard: -7, dst: -6 },
+  'Gothenburg':     { standard: -6, dst: -5 },
+  'Hamilton':       { standard: -5, dst: -4 },
+  'Indianapolis':   { standard: -5, dst: -4 },
+  'Jamaica':        { standard: -5, dst: -5 },
+  'Kalispell':      { standard: -7, dst: -6 },
+  'Knoxville':      { standard: -5, dst: -4 },
+  'Los Angeles':    { standard: -8, dst: -7 },
+  'Maple Creek':    { standard: -6, dst: -6 },
+  'Minneapolis':    { standard: -6, dst: -5 },
+  'Montreal':       { standard: -5, dst: -4 },
+  'Mossley':        { standard: -5, dst: -4 },
+  'New England':    { standard: -5, dst: -4 },
+  'New York':       { standard: -5, dst: -4 },
+  'Oxbow':          { standard: -6, dst: -6 },
+  'Pembina':        { standard: -6, dst: -5 },
+  'Portland':       { standard: -8, dst: -7 },
+  'Redwood Falls':  { standard: -6, dst: -5 },
+  'Regina':         { standard: -6, dst: -6 },
+  'Rideau Lakes':   { standard: -5, dst: -4 },
+  'Rochester':      { standard: -5, dst: -4 },
+  'San Antonio':    { standard: -6, dst: -5 },
+  'San Francisco':  { standard: -8, dst: -7 },
+  'Seattle':        { standard: -8, dst: -7 },
+  'St. Vincent':    { standard: -4, dst: -4 },
+  'Stonewall':      { standard: -6, dst: -5 },
+  'Trinidad':       { standard: -4, dst: -4 },
+  'Vancouver':      { standard: -8, dst: -7 },
+};
+
+// Returns the campus UTC offset in hours, accounting for current DST state.
+function getCampusOffsetHours(campus) {
+  const entry = CAMPUS_OFFSETS[campus] || CAMPUS_OFFSETS['Ashland'];
+  return isLocalDST() ? entry.dst : entry.standard;
+}
+
+// Converts a UTC ISO timestamp string to a YYYY-MM-DD date string in the
+// given UTC offset (e.g. -5 for UTC−5).
+function utcToCampusDateStr(isoString, offsetHours) {
+  const ms = new Date(isoString).getTime() + offsetHours * 3600000;
+  const d = new Date(ms);
+  // Use UTC getters because we've already manually shifted the epoch
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+}
 const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
   const [form, setForm] = React.useState({
     name: user.name || '',
@@ -586,6 +641,9 @@ const PlanAssist = () => {
   const [streakShieldMode, setStreakShieldMode] = useState('manual');
   const [streakShieldLog, setStreakShieldLog] = useState([]); // dates shields were used
   const [streakShieldToast, setStreakShieldToast] = useState(null);
+  // Campus-tz converted date sets used by streak pane UI
+  const [streakCompletionDates, setStreakCompletionDates] = useState(new Set()); // YYYY-MM-DD strings
+  const [streakShieldDates, setStreakShieldDates] = useState(new Set());         // YYYY-MM-DD strings
 
   // Insignia
   const [insigniaDays, setInsigniaDays] = useState(0);
@@ -1371,17 +1429,15 @@ const PlanAssist = () => {
     }
     if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
     if (tab === 'streak') {
-      // Load both concurrently. Auto-consume (if mode=automatic) is triggered by the
-      // useEffect watching [completionHistory, streakShieldLog, streakShieldMode].
-      Promise.all([loadStreakData(), loadCompletionHistory()]);
+      loadStreakData();
     }
     if (tab === 'feedlabel') loadInsignia();
     if (tab === 'gallery') { loadBadges(); checkNewUnlocks(computeStreak(
-      [...new Set(completionHistory.map(h => h.localDate || (h.date instanceof Date
-        ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
-        : String(h.date).slice(0,10))).filter(Boolean))],
-      streakShieldLog
-    )); }
+      new Set([...streakCompletionDates, ...streakShieldDates]),
+      getLocalDateStr(),
+      streakCompletionDates,
+      streakShieldDates
+    ).streak); }
     if (tab === 'help') loadHelpContent();
   };
 
@@ -3936,133 +3992,157 @@ const PlanAssist = () => {
   const fmtLocal = (d) =>
     `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 
-  // Compute current streak.
-  // completionDates: 'YYYY-MM-DD' strings in LOCAL time.
-  // shieldDates:     'YYYY-MM-DD' strings (from DB DATE column — already date-only, no shift needed).
-  const computeStreak = (completionDates, shieldDates) => {
-    const allDays = new Set([...completionDates, ...shieldDates]);
-    const today = getLocalDateStr();
+  // ── Streak helpers ────────────────────────────────────────────────────────
+  // All streak logic operates on plain calendar days (no weekday filtering).
+  // curatedDates: array or Set of 'YYYY-MM-DD' strings already in campus timezone.
 
-    // Walk backwards from today counting consecutive covered weekdays.
-    // If today (or the most recent weekday) is uncovered, allow skipping it once —
-    // the streak is "at risk" but its length is still the run ending on the last
-    // covered weekday. A second consecutive uncovered weekday breaks the chain.
-    let d = parseLocalDate(today);
-    let streak = 0;
-    let passedAtRiskDay = false; // true once we've skipped one uncovered weekday
+  // Adds offsetHours to a UTC ISO string and returns 'YYYY-MM-DD' in that offset.
+  // (Component-scope wrapper — uses the module-level utcToCampusDateStr.)
+  const toCampusDate = (isoString, offsetHours) => utcToCampusDateStr(isoString, offsetHours);
 
-    while (true) {
-      const ds = fmtLocal(d);
-      if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; } // skip weekend
-      if (allDays.has(ds)) {
-        streak++;
-        d.setDate(d.getDate() - 1);
-        continue;
-      }
-      // Uncovered weekday
-      if (!passedAtRiskDay) {
-        // First uncovered weekday — this is the at-risk day (today or last weekday).
-        // Allow skipping it once and keep looking for the chain behind it.
-        passedAtRiskDay = true;
-        d.setDate(d.getDate() - 1);
-        continue;
-      }
-      // Second consecutive uncovered weekday — chain is truly broken.
-      break;
+  // Compute current streak given a Set of curated dates and todayStr (campus tz).
+  // Returns { streak, state } where state is one of:
+  //   'safe_completed'  — today is in curatedDates AND today's date came from completions
+  //   'safe_shielded'   — today is in curatedDates AND today's date came from shields only
+  //   'at_risk'         — today not in curatedDates but yesterday is (streak alive, not yet extended)
+  //   'broken'          — neither today nor yesterday in curatedDates
+  const computeStreak = (curatedDates, todayStr, completionDatesSet, shieldDatesSet) => {
+    const dateSet = curatedDates instanceof Set ? curatedDates : new Set(curatedDates);
+    const today   = todayStr;
+    const todayD  = parseLocalDate(today);
+    const yestD   = new Date(todayD); yestD.setDate(yestD.getDate() - 1);
+    const yest    = fmtLocal(yestD);
+
+    const todayIn  = dateSet.has(today);
+    const yesterIn = dateSet.has(yest);
+
+    // Determine state
+    let state;
+    if (todayIn) {
+      const fromCompletion = completionDatesSet instanceof Set
+        ? completionDatesSet.has(today)
+        : (completionDatesSet || []).includes(today);
+      state = fromCompletion ? 'safe_completed' : 'safe_shielded';
+    } else if (yesterIn) {
+      state = 'at_risk';
+    } else {
+      state = 'broken';
     }
-    return streak;
+
+    // Count the streak length — walk backwards from the most recent covered day
+    // (today if covered, else yesterday) counting consecutive days.
+    let startStr = todayIn ? today : (yesterIn ? yest : null);
+    if (!startStr) return { streak: 0, state };
+
+    let count = 0;
+    let d = parseLocalDate(startStr);
+    while (dateSet.has(fmtLocal(d))) {
+      count++;
+      d.setDate(d.getDate() - 1);
+    }
+    return { streak: count, state };
   };
 
-  // Compute personal record streak from a sorted array of unique local-date strings.
-  // Accounts for weekends (Fri→Mon gap of 3 days is continuous) and shields.
-  const computePersonalRecord = (uniqueDays, shieldDates) => {
-    const allDays = new Set([...uniqueDays, ...(shieldDates || [])]);
-    const sorted = [...allDays].filter(d => isWeekday(d)).sort();
+  // Compute personal record — longest chain of consecutive calendar days in curatedDates.
+  const computePersonalRecord = (curatedDates) => {
+    const sorted = [...(curatedDates instanceof Set ? curatedDates : new Set(curatedDates))].sort();
     if (sorted.length === 0) return 0;
-    let max = 0, cur = 1;
+    let max = 1, cur = 1;
     for (let i = 1; i < sorted.length; i++) {
       const prev = parseLocalDate(sorted[i - 1]);
       const curr = parseLocalDate(sorted[i]);
-      const diffDays = Math.round((curr - prev) / 86400000);
-      // Gap of 1 = consecutive weekdays; gap of 3 = Fri→Mon over weekend; anything else breaks streak
-      const bridgesWeekend = diffDays === 3 &&
-        parseLocalDate(sorted[i - 1]).getDay() === 5 && // prev is Friday
-        parseLocalDate(sorted[i]).getDay() === 1;       // curr is Monday
-      if (diffDays === 1 || bridgesWeekend) {
-        cur++;
-      } else {
-        cur = 1;
-      }
-      if (cur > max) max = cur;
+      const diff = Math.round((curr - prev) / 86400000);
+      if (diff === 1) { cur++; if (cur > max) max = cur; }
+      else cur = 1;
     }
-    if (sorted.length > 0 && max === 0) max = 1; // at least 1 if there are days
     return max;
   };
 
+  // Master streak loader — called when the streak pane opens (and silently on hub refresh).
+  // Handles the full spec flow including auto-shield insertion.
   const loadStreakData = async ({ silent = false } = {}) => {
     if (!silent) setStreakLoading(true);
     try {
-      const [shieldsR, logR] = await Promise.all([
-        apiCall('/streak/shields', 'GET'),
-        apiCall('/streak/shields/log', 'GET'),
-      ]);
-      setStreakShieldsAvailable(shieldsR.available ?? 0);
-      setStreakShieldMode(shieldsR.mode ?? 'manual');
-      const serverDates = (logR.shieldDates ?? []).map(d =>
-        (typeof d === 'string' ? d : d.toISOString()).slice(0, 10)
-      );
-      // Merge server dates with any optimistic local additions so a just-used shield
-      // is never wiped out by a loadStreakData call that races with the DB write.
-      setStreakShieldLog(prev => [...new Set([...prev, ...serverDates])]);
-    } catch (err) { console.error('loadStreakData error:', err.message); } finally { if (!silent) setStreakLoading(false); }
-  };
+      const data = await apiCall('/streak/data', 'GET');
+      const {
+        campus,
+        shieldsAvailable,
+        shieldMode,
+        completedAt,   // UTC ISO strings from tasks_completed
+        consumedAt,    // UTC ISO strings from streak_shield_log
+      } = data;
 
-  // Auto-consume shields for gap weekdays when mode is 'automatic'.
-  // Called after completion history and shield log are both loaded.
-  const autoConsumeShieldsIfNeeded = async (completionDays, shieldLog, shieldsAvailable, mode) => {
-    if (mode !== 'automatic') return;
-    if (shieldsAvailable <= 0) return;
+      const offsetHours = getCampusOffsetHours(campus);
+      const localToday  = getLocalDateStr(); // user's browser local date
 
-    const allCovered = new Set([...completionDays, ...shieldLog]);
-    const today = getLocalDateStr();
-    const todayDate = parseLocalDate(today);
+      // Convert all timestamps to campus-tz dates
+      const completionDateSet = new Set(completedAt.map(ts => toCampusDate(ts, offsetHours)));
+      const shieldDateSet     = new Set(consumedAt.map(ts  => toCampusDate(ts, offsetHours)));
 
-    // Walk backwards from yesterday, looking only for gaps in the chain
-    // immediately behind today. Stop at the first covered day — gaps further
-    // back are unrelated to today's at-risk streak and must never be auto-shielded.
-    const gapDates = [];
-    let d = new Date(todayDate);
-    d.setDate(d.getDate() - 1); // start from yesterday
+      // Build curated dates = union of both sets
+      let curatedDates = new Set([...completionDateSet, ...shieldDateSet]);
 
-    for (let i = 0; i < 30; i++) {
-      const ds = fmtLocal(d);
-      if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; }
-      if (allCovered.has(ds)) {
-        // Covered day found — chain is intact here, nothing to shield
-        break;
+      // ── Auto-shield logic ────────────────────────────────────────────────
+      // Only runs if mode is 'automatic' AND shields are available.
+      let shieldsLeft = shieldsAvailable;
+      const autoShieldedDates = [];
+
+      if (shieldMode === 'automatic' && shieldsLeft > 0 && curatedDates.size > 0) {
+        // Find the most recent date in the curated chain
+        const sortedDates = [...curatedDates].sort();
+        const mostRecentStr = sortedDates[sortedDates.length - 1];
+        const mostRecent = parseLocalDate(mostRecentStr);
+        const todayD = parseLocalDate(localToday);
+        const yestD  = new Date(todayD); yestD.setDate(yestD.getDate() - 1);
+        const yest   = fmtLocal(yestD);
+
+        // Walk forward from the day after the most recent covered date,
+        // filling shields sequentially until we either run out of shields
+        // or reach yesterday (we never shield today itself).
+        let cursor = new Date(mostRecent);
+        cursor.setDate(cursor.getDate() + 1); // day after most recent
+
+        while (shieldsLeft > 0) {
+          const cursorStr = fmtLocal(cursor);
+          // Stop once we've passed yesterday (never auto-shield today)
+          if (cursorStr > yest) break;
+          // Skip dates that are already covered
+          if (!curatedDates.has(cursorStr)) {
+            autoShieldedDates.push(cursorStr);
+            shieldsLeft--;
+          }
+          cursor.setDate(cursor.getDate() + 1);
+        }
+
+        if (autoShieldedDates.length > 0) {
+          try {
+            const result = await apiCall('/streak/shields/auto-consume', 'POST', { gapDates: autoShieldedDates });
+            if (result.consumed > 0) {
+              autoShieldedDates.forEach(d => {
+                shieldDateSet.add(d);
+                curatedDates.add(d);
+              });
+              shieldsLeft = result.remaining;
+              setStreakShieldToast(`🛡️ Auto-shield used${result.consumed > 1 ? ` ×${result.consumed}` : ''}: streak protected!`);
+              setTimeout(() => setStreakShieldToast(null), 5000);
+            }
+          } catch (err) {
+            console.error('[AUTO-SHIELD] Failed:', err.message);
+          }
+        }
       }
-      // Single uncovered weekday immediately behind today — shield it
-      gapDates.push(ds);
-      break; // only ever shield one day; two consecutive gaps = streak already broken
-    }
 
-    if (gapDates.length === 0) return;
+      // Commit all derived state
+      setStreakShieldsAvailable(shieldsLeft);
+      setStreakShieldMode(shieldMode);
+      setStreakCompletionDates(completionDateSet);
+      setStreakShieldDates(shieldDateSet);
+      setStreakShieldLog([...shieldDateSet]); // keep array form for legacy callers (hub stats etc.)
 
-    // Only auto-shield gaps we can cover without breaking the chain
-    const toShield = gapDates.slice(0, shieldsAvailable);
-    if (toShield.length === 0) return;
-
-    try {
-      const result = await apiCall('/streak/shields/auto-consume', 'POST', { gapDates: toShield });
-      if (result.consumed > 0) {
-        setStreakShieldsAvailable(result.remaining);
-        setStreakShieldLog(prev => [...new Set([...prev, ...toShield])]);
-        setStreakShieldToast(`🛡️ Auto-shield used ${result.consumed > 1 ? `(×${result.consumed})` : ''}: streak protected!`);
-        setTimeout(() => setStreakShieldToast(null), 5000);
-        console.log(`[AUTO-SHIELD] Consumed ${result.consumed} shield(s) for: ${toShield.join(', ')}`);
-      }
     } catch (err) {
-      console.error('[AUTO-SHIELD] Failed:', err.message);
+      console.error('loadStreakData error:', err.message);
+    } finally {
+      if (!silent) setStreakLoading(false);
     }
   };
 
@@ -4203,14 +4283,9 @@ const PlanAssist = () => {
       ? Math.round(accuracySum / tasksWithBothTimes.length) 
       : 0;
 
-    // Streak: use the canonical computeStreak (shield-aware, local-date-correct).
-    // completionHistory already has localDate populated from loadCompletionHistory.
-    const hubCompletionDays = [...new Set(completionHistory.map(h =>
-      h.localDate || (h.date instanceof Date
-        ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
-        : String(h.date).slice(0,10))
-    ).filter(Boolean))];
-    const streak = computeStreak(hubCompletionDays, streakShieldLog);
+    // Streak: use the campus-tz converted sets populated by loadStreakData.
+    const curatedForHub = new Set([...streakCompletionDates, ...streakShieldDates]);
+    const { streak } = computeStreak(curatedForHub, getLocalDateStr(), streakCompletionDates, streakShieldDates);
 
     setHubStats({
       tasksCompletedToday,
@@ -4261,20 +4336,7 @@ const PlanAssist = () => {
 
   useEffect(() => {
     calculateHubStats();
-  }, [completionHistory, streakShieldLog]);
-
-  // Trigger auto-shield whenever completion history or shield data changes and mode is automatic
-  useEffect(() => {
-    if (streakShieldMode !== 'automatic') return;
-    if (streakShieldsAvailable <= 0) return;
-    if (completionHistory.length === 0) return;
-    const completionDays = [...new Set(completionHistory.map(h =>
-      h.localDate || (h.date instanceof Date
-        ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
-        : String(h.date).slice(0,10))
-    ).filter(Boolean))];
-    autoConsumeShieldsIfNeeded(completionDays, streakShieldLog, streakShieldsAvailable, streakShieldMode);
-  }, [completionHistory, streakShieldLog, streakShieldMode]);
+  }, [completionHistory, streakCompletionDates, streakShieldDates]);
 
   // Scroll to top when navigating to Hub; reload courses when navigating to Marks
   useEffect(() => {
@@ -8552,51 +8614,43 @@ const PlanAssist = () => {
 
                 {/* ── STREAK TAB ── */}
                 {accountTab === 'streak' && (() => {
-                  const completionDays = completionHistory
-                    .map(h => h.localDate || (h.date instanceof Date
-                      ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
-                      : String(h.date).slice(0,10)))
-                    .filter(Boolean);
-                  const uniqueDays = [...new Set(completionDays)];
-                  const currentStreak = computeStreak(uniqueDays, streakShieldLog);
-                  const today = getLocalDateStr();
-                  const todayWeekday = isWeekday(today);
-                  const todayDone = uniqueDays.includes(today);
-                  const todayShielded = streakShieldLog.includes(today);
-
-                  // Find the previous weekday (skipping weekend days backwards from yesterday)
-                  const prevWeekday = (() => {
-                    let d = parseLocalDate(today);
-                    d.setDate(d.getDate() - 1);
-                    while (!isWeekday(fmtLocal(d))) d.setDate(d.getDate() - 1);
-                    return fmtLocal(d);
-                  })();
-                  const prevWeekdayShielded = streakShieldLog.includes(prevWeekday);
-                  const prevWeekdayDone = uniqueDays.includes(prevWeekday);
-
-                  // Streak state — determines colour and label only, not the streak count
-                  let streakState = 'safe';
-                  if (!todayWeekday) {
-                    streakState = 'weekend';
-                  } else if (todayDone || todayShielded) {
-                    streakState = 'safe';
-                  } else if (prevWeekdayShielded && !prevWeekdayDone) {
-                    // The last weekday was shielded but not completed — streak is alive but fragile
-                    streakState = 'shield_used_prev';
-                  } else {
-                    streakState = 'at_risk';
-                  }
+                  const localToday = getLocalDateStr();
+                  const curatedDates = new Set([...streakCompletionDates, ...streakShieldDates]);
+                  const { streak: currentStreak, state: streakState } = computeStreak(
+                    curatedDates, localToday, streakCompletionDates, streakShieldDates
+                  );
+                  const personalRecord = Math.max(computePersonalRecord(curatedDates), currentStreak);
 
                   const stateConfig = {
-                    weekend:          { color: 'from-blue-400 to-indigo-500',   label: 'Weekend',                  sub: 'Streak safe — enjoy your break!',             icon: '🏖️' },
-                    safe:             { color: 'from-green-400 to-emerald-500',  label: 'Streak Safe!',             sub: todayShielded ? 'Streak protected by a shield today.' : "You've completed a task today.",  icon: todayShielded ? '🛡️' : '✅' },
-                    at_risk:          { color: 'from-orange-400 to-red-500',     label: 'Streak at Risk!',          sub: 'Complete a task today to keep your streak.',  icon: '⚠️' },
-                    shield_used_prev: { color: 'from-yellow-400 to-orange-400', label: 'Streak Hanging On!',       sub: 'Last weekday was shielded. Complete a task today!', icon: '🛡️' },
+                    safe_completed: {
+                      color: 'from-green-400 to-emerald-500',
+                      label: 'Streak Extended!',
+                      sub:   'You\'ve completed a task today.',
+                      icon:  '✅',
+                    },
+                    safe_shielded: {
+                      color: 'from-yellow-400 to-orange-400',
+                      label: 'Streak Shielded!',
+                      sub:   'A shield was used for today.',
+                      icon:  '🛡️',
+                    },
+                    at_risk: {
+                      color: 'from-orange-400 to-red-500',
+                      label: 'Streak at Risk!',
+                      sub:   'Complete a task today to extend your streak.',
+                      icon:  '⚠️',
+                    },
+                    broken: {
+                      color: 'from-gray-400 to-gray-500',
+                      label: currentStreak === 0 ? 'No Streak Yet' : 'Streak Broken',
+                      sub:   currentStreak === 0 ? 'Complete a task to start your streak!' : 'Complete a task today to start a new streak.',
+                      icon:  currentStreak === 0 ? '🌱' : '💔',
+                    },
                   };
-                  const cfg = stateConfig[streakState];
+                  const cfg = stateConfig[streakState] || stateConfig.broken;
 
-                  // Personal record — uses shield dates too so shielded days count toward PR
-                  const personalRecord = Math.max(computePersonalRecord(uniqueDays, streakShieldLog), currentStreak);
+                  // Manual shield button is only useful when streak is at_risk
+                  const canUseShield = streakShieldsAvailable >= 1 && streakState === 'at_risk';
 
                   if (streakLoading) return (
                     <div className="flex items-center justify-center py-20">
@@ -8625,7 +8679,7 @@ const PlanAssist = () => {
                           <div className="text-xs text-gray-500 mt-0.5">Shields available</div>
                         </div>
                         <div className="bg-white rounded-xl border border-gray-100 p-4 text-center shadow-sm">
-                          <div className="text-2xl font-bold text-blue-500">{streakShieldLog.length}</div>
+                          <div className="text-2xl font-bold text-blue-500">{streakShieldDates.size}</div>
                           <div className="text-xs text-gray-500 mt-0.5">Shields used</div>
                         </div>
                       </div>
@@ -8635,29 +8689,27 @@ const PlanAssist = () => {
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <p className="font-semibold text-gray-900 text-sm">Streak Shield</p>
-                            <p className="text-xs text-gray-500 mt-0.5">Protect your streak on missed weekdays</p>
+                            <p className="text-xs text-gray-500 mt-0.5">Protect your streak on missed days</p>
                           </div>
                           <button
-                            disabled={streakShieldsAvailable < 1 || streakState === 'safe' || streakState === 'weekend'}
+                            disabled={!canUseShield}
                             onClick={async () => {
                               try {
-                                const r = await apiCall('/streak/shields/use', 'POST', { date: today });
-                                const confirmedDate = r.shieldedDate || today;
-                                // Optimistic update — snaps UI to 'safe' immediately
-                                setStreakShieldsAvailable(r.remaining);
-                                setStreakShieldLog(prev => [...new Set([...prev, confirmedDate])]);
+                                const r = await apiCall('/streak/shields/use', 'POST', { date: localToday });
                                 if (r.alreadyShielded) {
                                   setStreakShieldToast('🛡️ This day is already shielded.');
                                 } else {
+                                  setStreakShieldsAvailable(r.remaining);
+                                  setStreakShieldDates(prev => new Set([...prev, localToday]));
+                                  setStreakShieldLog(prev => [...new Set([...prev, localToday])]);
                                   setStreakShieldToast('🛡️ Streak Shield used! Your streak is protected.');
                                 }
                                 setTimeout(() => setStreakShieldToast(null), 4000);
-                                // Silent background sync to confirm server state
                                 loadStreakData({ silent: true });
                               } catch (err) { alert(err.message); }
                             }}
                             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                              streakShieldsAvailable < 1 || streakState === 'safe' || streakState === 'weekend'
+                              !canUseShield
                                 ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                 : 'bg-yellow-400 hover:bg-yellow-500 text-white shadow-md'
                             }`}
@@ -8677,7 +8729,7 @@ const PlanAssist = () => {
                             </button>
                           ))}
                           <span className="text-xs text-gray-400 ml-1">
-                            {streakShieldMode === 'automatic' ? '(shields auto-fill gaps on Hub load)' : '(tap Use Shield to save your streak)'}
+                            {streakShieldMode === 'automatic' ? '(shields auto-fill gaps when pane opens)' : '(tap Use Shield to save your streak)'}
                           </span>
                         </div>
                       </div>
