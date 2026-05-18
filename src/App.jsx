@@ -45,11 +45,73 @@ const CAMPUS_PERIODS = {
   'Trinidad':       '1-5',
   'Vancouver':      '4-8',
 };
+// DST (daylight saving time) period ranges — differ for campuses whose local
+// clocks shift but the OSG broadcast time (UTC) stays fixed.
+const CAMPUS_PERIODS_DST = {
+  'Ashland':        '2-6',
+  'Barbados':       '2-6',
+  'Calgary':        '4-8',
+  'Chesapeake':     '2-6',
+  'Chicago':        '3-7',
+  'Council Bluffs': '3-7',
+  'Des Moines':     '3-7',
+  'Detroit':        '2-6',
+  'Edmonton':       '4-8',
+  'Gothenburg':     '3-7',
+  'Hamilton':       '2-6',
+  'Indianapolis':   '2-6',
+  'Jamaica':        '3-7',
+  'Kalispell':      '4-8',
+  'Knoxville':      '2-6',
+  'Los Angeles':    '4-8',
+  'Maple Creek':    '3-7',
+  'Minneapolis':    '3-7',
+  'Montreal':       '2-6',
+  'Mossley':        '2-6',
+  'New England':    '2-6',
+  'New York':       '2-6',
+  'Oxbow':          '3-7',
+  'Pembina':        '3-7',
+  'Portland':       '4-8',
+  'Redwood Falls':  '3-7',
+  'Regina':         '3-7',
+  'Rideau Lakes':   '2-6',
+  'Rochester':      '2-6',
+  'San Antonio':    '3-7',
+  'San Francisco':  '4-8',
+  'Seattle':        '4-8',
+  'St. Vincent':    '2-6',
+  'Stonewall':      '3-7',
+  'Trinidad':       '2-6',
+  'Vancouver':      '4-8',
+};
 const VALID_CAMPUSES = Object.keys(CAMPUS_PERIODS);
 
-// Returns the period range string for a campus.
+// Returns the standard-time period range string for a campus.
 function getCampusPeriods(campus) {
   return CAMPUS_PERIODS[campus] || CAMPUS_PERIODS['Ashland'];
+}
+
+// Returns the DST period range string for a campus.
+function getCampusPeriodsDST(campus) {
+  return CAMPUS_PERIODS_DST[campus] || CAMPUS_PERIODS_DST['Ashland'];
+}
+
+// Returns true if the user's local clock is currently observing DST.
+// Compares the UTC offset in January (always standard time) with the current
+// UTC offset; if the current offset is smaller (less negative / more positive)
+// than January's, the clock has sprung forward → DST is active.
+function isLocalDST() {
+  const now = new Date();
+  const jan = new Date(now.getFullYear(), 0, 1);  // 1 Jan — always standard time
+  return now.getTimezoneOffset() < jan.getTimezoneOffset();
+}
+
+// Returns the correct period range string for a campus, accounting for DST.
+function getEffectivePeriods(campus) {
+  return isLocalDST()
+    ? (CAMPUS_PERIODS_DST[campus] || CAMPUS_PERIODS_DST['Ashland'])
+    : (CAMPUS_PERIODS[campus]     || CAMPUS_PERIODS['Ashland']);
 }
 
 
@@ -573,7 +635,7 @@ const PlanAssist = () => {
 
   // Calculate selected periods from campus (DST-aware)
   const selectedPeriods = React.useMemo(() => {
-    const range = getCampusPeriods(accountSetup.campus || 'Ashland');
+    const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
     const [start, end] = range.split('-').map(Number);
     const periods = [];
     for (let i = start; i <= end; i++) periods.push(i);
@@ -3092,12 +3154,16 @@ const PlanAssist = () => {
     const check = () => {
       const now = new Date();
       const nowUTCMins = now.getUTCHours() * 60 + now.getUTCMinutes();
+      // Use DST-aware period range based on the user's local clock
+      const periodRange = getEffectivePeriods(accountSetup.campus);
+      const [rangeStart, rangeEnd] = periodRange.split('-').map(Number);
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
+        const period = parseInt(p);
+        if (period < rangeStart || period > rangeEnd) continue;
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins; // negative = period already started
         // Show banner from 5 min before start up to 2 min after start
         if (diff >= -2 && diff <= 5) {
-          const period = parseInt(p);
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
@@ -7128,7 +7194,7 @@ const PlanAssist = () => {
           );
 
           // Build period list based on the viewed day's schedule
-          const range = getCampusPeriods(accountSetup.campus || 'Ashland');
+          const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
           const [pStart, pEnd] = range.split('-').map(Number);
           const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
@@ -9487,7 +9553,7 @@ const PlanAssist = () => {
       {/* ── Enhance Schedule Dialog ─────────────────────────────────────────── */}
       {showEnhanceDialog && (() => {
         const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-        const range = getCampusPeriods(accountSetup.campus || 'Ashland');
+        const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
         const [start, end] = range.split('-').map(Number);
         const enhancePeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
@@ -9679,7 +9745,7 @@ const PlanAssist = () => {
             : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
           const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-          const range = getCampusPeriods(accountSetup.campus || 'Ashland');
+          const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
           const [pStart, pEnd] = range.split('-').map(Number);
           const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const canSave = tutorialDate && tutorialPeriod;
