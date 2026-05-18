@@ -1247,14 +1247,9 @@ const PlanAssist = () => {
     }
     if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
     if (tab === 'streak') {
-      // Load both concurrently, then run auto-shield if needed
-      Promise.all([loadStreakData(), loadCompletionHistory()]).then(() => {
-        // streakShieldMode/streakShieldsAvailable/streakShieldLog are updated asynchronously,
-        // so read from state refs isn't reliable here — the auto-consume is also
-        // triggered from calculateHubStats when the hub loads (see below).
-      });
-      loadStreakData();
-      loadCompletionHistory();
+      // Load both concurrently. Auto-consume (if mode=automatic) is triggered by the
+      // useEffect watching [completionHistory, streakShieldLog, streakShieldMode].
+      Promise.all([loadStreakData(), loadCompletionHistory()]);
     }
     if (tab === 'feedlabel') loadInsignia();
     if (tab === 'gallery') { loadBadges(); checkNewUnlocks(computeStreak(
@@ -3820,34 +3815,31 @@ const PlanAssist = () => {
     const allDays = new Set([...completionDates, ...shieldDates]);
     const today = getLocalDateStr();
 
-    // Find the most recent weekday to start counting from.
-    // If today is a weekday and NOT covered, the chain is at risk but its length is
-    // still the count of the continuous run ending on the previous covered weekday.
-    // We walk backwards, skipping weekends, skipping today if it's uncovered,
-    // counting every covered weekday until we hit a gap.
+    // Walk backwards from today counting consecutive covered weekdays.
+    // If today (or the most recent weekday) is uncovered, allow skipping it once —
+    // the streak is "at risk" but its length is still the run ending on the last
+    // covered weekday. A second consecutive uncovered weekday breaks the chain.
     let d = parseLocalDate(today);
     let streak = 0;
-    let started = false; // true once we've hit the first covered weekday
+    let passedAtRiskDay = false; // true once we've skipped one uncovered weekday
 
     while (true) {
       const ds = fmtLocal(d);
       if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; } // skip weekend
       if (allDays.has(ds)) {
         streak++;
-        started = true;
         d.setDate(d.getDate() - 1);
         continue;
       }
       // Uncovered weekday
-      if (!started) {
-        // Haven't found any covered day yet — today (or the latest weekday) is uncovered.
-        // Skip it and keep walking; we're still looking for the start of the chain.
-        // But only do this once (for today/the current uncovered day).
-        started = true; // mark as "we passed the at-risk day"
+      if (!passedAtRiskDay) {
+        // First uncovered weekday — this is the at-risk day (today or last weekday).
+        // Allow skipping it once and keep looking for the chain behind it.
+        passedAtRiskDay = true;
         d.setDate(d.getDate() - 1);
         continue;
       }
-      // We already started counting — this is a real gap. Chain is broken.
+      // Second consecutive uncovered weekday — chain is truly broken.
       break;
     }
     return streak;
@@ -3888,11 +3880,9 @@ const PlanAssist = () => {
       ]);
       setStreakShieldsAvailable(shieldsR.available ?? 0);
       setStreakShieldMode(shieldsR.mode ?? 'manual');
-      const serverDates = (logR.shieldDates ?? []).map(d => {
-        if (typeof d === 'string') return d.slice(0, 10);
-        const dt = new Date(d);
-        return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
-      });
+      const serverDates = (logR.shieldDates ?? []).map(d =>
+        (typeof d === 'string' ? d : d.toISOString()).slice(0, 10)
+      );
       // Merge server dates with any optimistic local additions so a just-used shield
       // is never wiped out by a loadStreakData call that races with the DB write.
       setStreakShieldLog(prev => [...new Set([...prev, ...serverDates])]);
