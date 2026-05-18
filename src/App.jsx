@@ -1246,10 +1246,21 @@ const PlanAssist = () => {
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
     if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
-    if (tab === 'streak') { loadStreakData(); loadCompletionHistory(); }
+    if (tab === 'streak') {
+      // Load both concurrently, then run auto-shield if needed
+      Promise.all([loadStreakData(), loadCompletionHistory()]).then(() => {
+        // streakShieldMode/streakShieldsAvailable/streakShieldLog are updated asynchronously,
+        // so read from state refs isn't reliable here — the auto-consume is also
+        // triggered from calculateHubStats when the hub loads (see below).
+      });
+      loadStreakData();
+      loadCompletionHistory();
+    }
     if (tab === 'feedlabel') loadInsignia();
     if (tab === 'gallery') { loadBadges(); checkNewUnlocks(computeStreak(
-      [...new Set(completionHistory.map(h => h.date instanceof Date ? h.date.toISOString().slice(0,10) : String(h.date).slice(0,10)).filter(Boolean))],
+      [...new Set(completionHistory.map(h => h.localDate || (h.date instanceof Date
+        ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
+        : String(h.date).slice(0,10))).filter(Boolean))],
       streakShieldLog
     )); }
     if (tab === 'help') loadHelpContent();
@@ -3785,23 +3796,65 @@ const PlanAssist = () => {
     );
   };
 
-  const isWeekday = (date) => { const d = new Date(date); const day = d.getDay(); return day !== 0 && day !== 6; };
+  // Parse a 'YYYY-MM-DD' string as LOCAL midnight (avoids UTC-offset day shift).
+  const parseLocalDate = (s) => {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  };
 
+  // Get day-of-week from a 'YYYY-MM-DD' string in LOCAL time (0=Sun, 6=Sat).
+  const isWeekday = (dateStr) => {
+    const d = parseLocalDate(dateStr);
+    const day = d.getDay();
+    return day !== 0 && day !== 6;
+  };
+
+  // Format a Date object as 'YYYY-MM-DD' in local time.
+  const fmtLocal = (d) =>
+    `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
+  // Compute current streak.
+  // completionDates: 'YYYY-MM-DD' strings in LOCAL time.
+  // shieldDates:     'YYYY-MM-DD' strings (from DB DATE column — already date-only, no shift needed).
   const computeStreak = (completionDates, shieldDates) => {
-    // completionDates: array of 'YYYY-MM-DD' strings (local dates)
-    // shieldDates: array of 'YYYY-MM-DD' strings
     const allDays = new Set([...completionDates, ...shieldDates]);
     const today = getLocalDateStr();
     let streak = 0;
-    let d = new Date(today);
-    // Walk backwards day-by-day; skip weekends; stop on first unshielded weekday miss
+    // Start from today and walk backwards in local calendar days.
+    let d = parseLocalDate(today);
     while (true) {
-      const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; }
-      if (allDays.has(ds)) { streak++; d.setDate(d.getDate() - 1); continue; }
-      break;
+      const ds = fmtLocal(d);
+      if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; } // skip weekend
+      if (allDays.has(ds)) { streak++; d.setDate(d.getDate() - 1); continue; } // counted
+      break; // first missed weekday — streak ends
     }
     return streak;
+  };
+
+  // Compute personal record streak from a sorted array of unique local-date strings.
+  // Accounts for weekends (Fri→Mon gap of 3 days is continuous) and shields.
+  const computePersonalRecord = (uniqueDays, shieldDates) => {
+    const allDays = new Set([...uniqueDays, ...(shieldDates || [])]);
+    const sorted = [...allDays].filter(d => isWeekday(d)).sort();
+    if (sorted.length === 0) return 0;
+    let max = 0, cur = 1;
+    for (let i = 1; i < sorted.length; i++) {
+      const prev = parseLocalDate(sorted[i - 1]);
+      const curr = parseLocalDate(sorted[i]);
+      const diffDays = Math.round((curr - prev) / 86400000);
+      // Gap of 1 = consecutive weekdays; gap of 3 = Fri→Mon over weekend; anything else breaks streak
+      const bridgesWeekend = diffDays === 3 &&
+        parseLocalDate(sorted[i - 1]).getDay() === 5 && // prev is Friday
+        parseLocalDate(sorted[i]).getDay() === 1;       // curr is Monday
+      if (diffDays === 1 || bridgesWeekend) {
+        cur++;
+      } else {
+        cur = 1;
+      }
+      if (cur > max) max = cur;
+    }
+    if (sorted.length > 0 && max === 0) max = 1; // at least 1 if there are days
+    return max;
   };
 
   const loadStreakData = async () => {
@@ -3813,8 +3866,65 @@ const PlanAssist = () => {
       ]);
       setStreakShieldsAvailable(shieldsR.available ?? 0);
       setStreakShieldMode(shieldsR.mode ?? 'manual');
-      setStreakShieldLog((logR.shieldDates ?? []).map(d => typeof d === 'string' ? d.slice(0,10) : new Date(d).toISOString().slice(0,10)));
+      setStreakShieldLog((logR.shieldDates ?? []).map(d => {
+        // DB DATE columns come back as 'YYYY-MM-DD' strings from node-postgres.
+        // Guard against unexpected Date objects by extracting local date components.
+        if (typeof d === 'string') return d.slice(0, 10);
+        const dt = new Date(d);
+        return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      }));
     } catch (err) { console.error('loadStreakData error:', err.message); } finally { setStreakLoading(false); }
+  };
+
+  // Auto-consume shields for gap weekdays when mode is 'automatic'.
+  // Called after completion history and shield log are both loaded.
+  const autoConsumeShieldsIfNeeded = async (completionDays, shieldLog, shieldsAvailable, mode) => {
+    if (mode !== 'automatic') return;
+    if (shieldsAvailable <= 0) return;
+
+    const allCovered = new Set([...completionDays, ...shieldLog]);
+    const today = getLocalDateStr();
+    const todayDate = parseLocalDate(today);
+
+    // Walk back up to 30 calendar days finding uncovered weekday gaps
+    const gapDates = [];
+    let d = new Date(todayDate);
+    d.setDate(d.getDate() - 1); // start from yesterday
+    let consecutiveGaps = 0;
+
+    for (let i = 0; i < 30; i++) {
+      const ds = fmtLocal(d);
+      if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; }
+      if (allCovered.has(ds)) {
+        consecutiveGaps = 0; // reset — there was a covered day
+        d.setDate(d.getDate() - 1);
+        continue;
+      }
+      // Uncovered weekday — this is a gap
+      consecutiveGaps++;
+      if (consecutiveGaps > 1) break; // two consecutive gaps = streak already broken, no point shielding
+      gapDates.push(ds);
+      d.setDate(d.getDate() - 1);
+    }
+
+    if (gapDates.length === 0) return;
+
+    // Only auto-shield gaps we can cover without breaking the chain
+    const toShield = gapDates.slice(0, shieldsAvailable);
+    if (toShield.length === 0) return;
+
+    try {
+      const result = await apiCall('/streak/shields/auto-consume', 'POST', { gapDates: toShield });
+      if (result.consumed > 0) {
+        setStreakShieldsAvailable(result.remaining);
+        setStreakShieldLog(prev => [...new Set([...prev, ...toShield])]);
+        setStreakShieldToast(`🛡️ Auto-shield used ${result.consumed > 1 ? `(×${result.consumed})` : ''}: streak protected!`);
+        setTimeout(() => setStreakShieldToast(null), 5000);
+        console.log(`[AUTO-SHIELD] Consumed ${result.consumed} shield(s) for: ${toShield.join(', ')}`);
+      }
+    } catch (err) {
+      console.error('[AUTO-SHIELD] Failed:', err.message);
+    }
   };
 
   const loadInsignia = async () => {
@@ -3855,13 +3965,21 @@ const PlanAssist = () => {
     try {
       const historyData = await apiCall('/learning', 'GET');
       if (Array.isArray(historyData)) {
-        setCompletionHistory(historyData.map(h => ({
-          taskTitle: h.task_title,
-          type: h.task_type,
-          estimatedTime: h.estimated_time,
-          actualTime: h.actual_time,
-          date: new Date(h.completed_at)
-        })));
+        setCompletionHistory(historyData.map(h => {
+          // completed_at is a UTC timestamp from Postgres.
+          // Convert to LOCAL date string immediately so streak calculations
+          // credit the day the student actually completed the task, not the UTC date.
+          const utcDate = new Date(h.completed_at);
+          const localDateString = `${utcDate.getFullYear()}-${String(utcDate.getMonth()+1).padStart(2,'0')}-${String(utcDate.getDate()).padStart(2,'0')}`;
+          return {
+            taskTitle: h.task_title,
+            type: h.task_type,
+            estimatedTime: h.estimated_time,
+            actualTime: h.actual_time,
+            date: utcDate,
+            localDate: localDateString, // pre-computed local YYYY-MM-DD
+          };
+        }));
       }
     } catch (error) {
       console.error('Failed to refresh completion history:', error);
@@ -3946,46 +4064,14 @@ const PlanAssist = () => {
       ? Math.round(accuracySum / tasksWithBothTimes.length) 
       : 0;
 
-    // Calculate streak (consecutive WEEKDAYS with completions, excluding weekends)
-    const sortedCompletions = [...completionHistory].sort((a, b) => 
-      b.date - a.date
-    );
-    
-    // Get unique dates (ignore time)
-    const completionDates = [...new Set(sortedCompletions.map(task => {
-      const d = new Date(task.date);
-      return d.toDateString();
-    }))].map(dateStr => new Date(dateStr));
-    
-    let streak = 0;
-    let checkDate = new Date();
-    checkDate.setHours(0, 0, 0, 0);
-    
-    // Skip weekends when looking backwards
-    while (checkDate.getDay() === 0 || checkDate.getDay() === 6) {
-      checkDate.setDate(checkDate.getDate() - 1);
-    }
-    
-    // Check each weekday going backwards
-    while (true) {
-      const dateStr = checkDate.toDateString();
-      const hasCompletion = completionDates.some(d => d.toDateString() === dateStr);
-      
-      if (hasCompletion) {
-        streak++;
-        // Move to previous weekday
-        checkDate.setDate(checkDate.getDate() - 1);
-        while (checkDate.getDay() === 0 || checkDate.getDay() === 6) {
-          checkDate.setDate(checkDate.getDate() - 1);
-        }
-      } else {
-        // Streak broken
-        break;
-      }
-      
-      // Safety: don't go back more than 365 days
-      if (streak > 365) break;
-    }
+    // Streak: use the canonical computeStreak (shield-aware, local-date-correct).
+    // completionHistory already has localDate populated from loadCompletionHistory.
+    const hubCompletionDays = [...new Set(completionHistory.map(h =>
+      h.localDate || (h.date instanceof Date
+        ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
+        : String(h.date).slice(0,10))
+    ).filter(Boolean))];
+    const streak = computeStreak(hubCompletionDays, streakShieldLog);
 
     setHubStats({
       tasksCompletedToday,
@@ -4037,6 +4123,19 @@ const PlanAssist = () => {
   useEffect(() => {
     calculateHubStats();
   }, [completionHistory]);
+
+  // Trigger auto-shield whenever completion history or shield data changes and mode is automatic
+  useEffect(() => {
+    if (streakShieldMode !== 'automatic') return;
+    if (streakShieldsAvailable <= 0) return;
+    if (completionHistory.length === 0) return;
+    const completionDays = [...new Set(completionHistory.map(h =>
+      h.localDate || (h.date instanceof Date
+        ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
+        : String(h.date).slice(0,10))
+    ).filter(Boolean))];
+    autoConsumeShieldsIfNeeded(completionDays, streakShieldLog, streakShieldsAvailable, streakShieldMode);
+  }, [completionHistory, streakShieldLog, streakShieldMode]);
 
   // Scroll to top when navigating to Hub; reload courses when navigating to Marks
   useEffect(() => {
@@ -8294,7 +8393,9 @@ const PlanAssist = () => {
                 {/* ── STREAK TAB ── */}
                 {accountTab === 'streak' && (() => {
                   const completionDays = completionHistory
-                    .map(h => h.date instanceof Date ? h.date.toISOString().slice(0,10) : String(h.date).slice(0,10))
+                    .map(h => h.localDate || (h.date instanceof Date
+                      ? `${h.date.getFullYear()}-${String(h.date.getMonth()+1).padStart(2,'0')}-${String(h.date.getDate()).padStart(2,'0')}`
+                      : String(h.date).slice(0,10)))
                     .filter(Boolean);
                   const uniqueDays = [...new Set(completionDays)];
                   const currentStreak = computeStreak(uniqueDays, streakShieldLog);
@@ -8302,7 +8403,7 @@ const PlanAssist = () => {
                   const todayWeekday = isWeekday(today);
                   const todayDone = uniqueDays.includes(today);
                   const todayShielded = streakShieldLog.includes(today);
-                  const yesterday = (() => { const d = new Date(today); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
+                  const yesterday = (() => { const d = parseLocalDate(today); d.setDate(d.getDate()-1); return fmtLocal(d); })();
                   const yesterdayShielded = streakShieldLog.includes(yesterday);
                   const yesterdayDone = uniqueDays.includes(yesterday);
 
@@ -8321,23 +8422,8 @@ const PlanAssist = () => {
                   };
                   const cfg = stateConfig[streakState];
 
-                  // Personal record
-                  const personalRecord = (() => {
-                    const sorted = [...uniqueDays].sort();
-                    let max = 0, cur = 0;
-                    for (let i = 0; i < sorted.length; i++) {
-                      if (!isWeekday(sorted[i])) continue;
-                      if (i === 0) { cur = 1; }
-                      else {
-                        const prev = sorted[i-1];
-                        const diff = (new Date(sorted[i]) - new Date(prev)) / 86400000;
-                        if (diff <= 3 && isWeekday(prev)) cur++;
-                        else cur = 1;
-                      }
-                      if (cur > max) max = cur;
-                    }
-                    return Math.max(max, currentStreak);
-                  })();
+                  // Personal record — uses shield dates too so shielded days count toward PR
+                  const personalRecord = Math.max(computePersonalRecord(uniqueDays, streakShieldLog), currentStreak);
 
                   if (streakLoading) return (
                     <div className="flex items-center justify-center py-20">
