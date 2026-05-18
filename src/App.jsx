@@ -3879,8 +3879,8 @@ const PlanAssist = () => {
     return max;
   };
 
-  const loadStreakData = async () => {
-    setStreakLoading(true);
+  const loadStreakData = async ({ silent = false } = {}) => {
+    if (!silent) setStreakLoading(true);
     try {
       const [shieldsR, logR] = await Promise.all([
         apiCall('/streak/shields', 'GET'),
@@ -3896,7 +3896,7 @@ const PlanAssist = () => {
       // Merge server dates with any optimistic local additions so a just-used shield
       // is never wiped out by a loadStreakData call that races with the DB write.
       setStreakShieldLog(prev => [...new Set([...prev, ...serverDates])]);
-    } catch (err) { console.error('loadStreakData error:', err.message); } finally { setStreakLoading(false); }
+    } catch (err) { console.error('loadStreakData error:', err.message); } finally { if (!silent) setStreakLoading(false); }
   };
 
   // Auto-consume shields for gap weekdays when mode is 'automatic'.
@@ -4125,7 +4125,7 @@ const PlanAssist = () => {
         loadCompletionFeed();
         loadLeaderboard();
         loadCompletionHistory();
-        loadStreakData();
+        loadStreakData({ silent: true });
       }, 120000);
 
       // Silent Course Sync every 60 minutes (regardless of page, but not if tab hidden)
@@ -4166,7 +4166,7 @@ const PlanAssist = () => {
     if (currentPage === 'hub') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       loadCompletionHistory();
-      loadStreakData();
+      loadStreakData({ silent: true });
       loadInsignia();
       loadBadges();
     }
@@ -8506,13 +8506,13 @@ const PlanAssist = () => {
                             onClick={async () => {
                               try {
                                 const r = await apiCall('/streak/shields/use', 'POST', { date: today });
-                                // Optimistic update so the UI snaps immediately
+                                // Optimistic update — snaps UI to 'safe' immediately
                                 setStreakShieldsAvailable(r.remaining);
                                 setStreakShieldLog(prev => [...new Set([...prev, today])]);
-                                // Then sync authoritative state from server so nothing is stale
-                                loadStreakData();
                                 setStreakShieldToast('🛡️ Streak Shield used! Your streak is protected.');
                                 setTimeout(() => setStreakShieldToast(null), 4000);
+                                // Silent background sync — no spinner, just confirms server state
+                                loadStreakData({ silent: true });
                               } catch (err) { alert(err.message); }
                             }}
                             className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
