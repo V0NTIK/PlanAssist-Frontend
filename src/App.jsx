@@ -8,65 +8,48 @@ const API_URL = 'https://planassist-api.onrender.com/api';
 
 // ── Campus → period range lookup (mirrors server CAMPUS_PERIODS) ─────────────
 const CAMPUS_PERIODS = {
-  'Ashland':        { std: '2-6', dst: '2-6' },
-  'Barbados':       { std: '1-5', dst: '2-6' },
-  'Calgary':        { std: '3-7', dst: '3-7' },
-  'Chesapeake':     { std: '2-6', dst: '2-6' },
-  'Chicago':        { std: '3-7', dst: '3-7' },
-  'Council Bluffs': { std: '3-7', dst: '3-7' },
-  'Des Moines':     { std: '3-7', dst: '3-7' },
-  'Detroit':        { std: '2-6', dst: '2-6' },
-  'Edmonton':       { std: '3-7', dst: '3-7' },
-  'Gothenburg':     { std: '3-7', dst: '3-7' },
-  'Hamilton':       { std: '2-6', dst: '2-6' },
-  'Indianapolis':   { std: '2-6', dst: '2-6' },
-  'Jamaica':        { std: '2-6', dst: '3-7' },
-  'Kalispell':      { std: '4-8', dst: '4-8' },
-  'Knoxville':      { std: '2-6', dst: '2-6' },
-  'Los Angeles':    { std: '4-8', dst: '4-8' },
-  'Maple Creek':    { std: '3-7', dst: '3-7' },
-  'Minneapolis':    { std: '3-7', dst: '3-7' },
-  'Montreal':       { std: '2-6', dst: '2-6' },
-  'Mossley':        { std: '2-6', dst: '2-6' },
-  'New England':    { std: '2-6', dst: '2-6' },
-  'New York':       { std: '2-6', dst: '2-6' },
-  'Oxbow':          { std: '3-7', dst: '3-7' },
-  'Pembina':        { std: '3-7', dst: '3-7' },
-  'Portland':       { std: '4-8', dst: '4-8' },
-  'Redwood Falls':  { std: '3-7', dst: '3-7' },
-  'Regina':         { std: '3-7', dst: '3-7' },
-  'Rideau Lakes':   { std: '2-6', dst: '2-6' },
-  'Rochester':      { std: '2-6', dst: '2-6' },
-  'San Antonio':    { std: '3-7', dst: '3-7' },
-  'San Francisco':  { std: '4-8', dst: '4-8' },
-  'Seattle':        { std: '4-8', dst: '4-8' },
-  'St. Vincent':    { std: '1-5', dst: '2-6' },
-  'Stonewall':      { std: '3-7', dst: '3-7' },
-  'Trinidad':       { std: '1-5', dst: '2-6' },
-  'Vancouver':      { std: '4-8', dst: '4-8' },
+  'Ashland':        '2-6',
+  'Barbados':       '1-5',
+  'Calgary':        '4-8',
+  'Chesapeake':     '2-6',
+  'Chicago':        '3-7',
+  'Council Bluffs': '3-7',
+  'Des Moines':     '3-7',
+  'Detroit':        '2-6',
+  'Edmonton':       '4-8',
+  'Gothenburg':     '3-7',
+  'Hamilton':       '2-6',
+  'Indianapolis':   '2-6',
+  'Jamaica':        '2-6',
+  'Kalispell':      '4-8',
+  'Knoxville':      '2-6',
+  'Los Angeles':    '4-8',
+  'Maple Creek':    '3-7',
+  'Minneapolis':    '3-7',
+  'Montreal':       '2-6',
+  'Mossley':        '2-6',
+  'New England':    '2-6',
+  'New York':       '2-6',
+  'Oxbow':          '3-7',
+  'Pembina':        '3-7',
+  'Portland':       '4-8',
+  'Redwood Falls':  '3-7',
+  'Regina':         '3-7',
+  'Rideau Lakes':   '2-6',
+  'Rochester':      '2-6',
+  'San Antonio':    '3-7',
+  'San Francisco':  '4-8',
+  'Seattle':        '4-8',
+  'St. Vincent':    '1-5',
+  'Stonewall':      '3-7',
+  'Trinidad':       '1-5',
+  'Vancouver':      '4-8',
 };
 const VALID_CAMPUSES = Object.keys(CAMPUS_PERIODS);
 
-// Returns nth Sunday of a given month/year (month 0-indexed)
-function nthSundayOfMonth(year, month, n) {
-  const d = new Date(year, month, 1);
-  let count = 0;
-  while (true) {
-    if (d.getDay() === 0) { count++; if (count === n) return new Date(d); }
-    d.setDate(d.getDate() + 1);
-  }
-}
-
-// Returns the DST-aware period range string for a campus.
-// Uses client local date. North American DST: 2nd Sun Mar → 1st Sun Nov.
+// Returns the period range string for a campus.
 function getCampusPeriods(campus) {
-  const entry = CAMPUS_PERIODS[campus] || CAMPUS_PERIODS['Ashland'];
-  const now = new Date();
-  const year = now.getFullYear();
-  const dstStart = nthSundayOfMonth(year, 2, 2);  // March 2nd Sunday
-  const dstEnd   = nthSundayOfMonth(year, 10, 1); // November 1st Sunday
-  const inDST = now >= dstStart && now < dstEnd;
-  return inDST ? entry.dst : entry.std;
+  return CAMPUS_PERIODS[campus] || CAMPUS_PERIODS['Ashland'];
 }
 
 
