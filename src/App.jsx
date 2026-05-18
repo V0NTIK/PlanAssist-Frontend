@@ -3819,14 +3819,36 @@ const PlanAssist = () => {
   const computeStreak = (completionDates, shieldDates) => {
     const allDays = new Set([...completionDates, ...shieldDates]);
     const today = getLocalDateStr();
-    let streak = 0;
-    // Start from today and walk backwards in local calendar days.
+
+    // Find the most recent weekday to start counting from.
+    // If today is a weekday and NOT covered, the chain is at risk but its length is
+    // still the count of the continuous run ending on the previous covered weekday.
+    // We walk backwards, skipping weekends, skipping today if it's uncovered,
+    // counting every covered weekday until we hit a gap.
     let d = parseLocalDate(today);
+    let streak = 0;
+    let started = false; // true once we've hit the first covered weekday
+
     while (true) {
       const ds = fmtLocal(d);
       if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; } // skip weekend
-      if (allDays.has(ds)) { streak++; d.setDate(d.getDate() - 1); continue; } // counted
-      break; // first missed weekday — streak ends
+      if (allDays.has(ds)) {
+        streak++;
+        started = true;
+        d.setDate(d.getDate() - 1);
+        continue;
+      }
+      // Uncovered weekday
+      if (!started) {
+        // Haven't found any covered day yet — today (or the latest weekday) is uncovered.
+        // Skip it and keep walking; we're still looking for the start of the chain.
+        // But only do this once (for today/the current uncovered day).
+        started = true; // mark as "we passed the at-risk day"
+        d.setDate(d.getDate() - 1);
+        continue;
+      }
+      // We already started counting — this is a real gap. Chain is broken.
+      break;
     }
     return streak;
   };
@@ -8404,22 +8426,35 @@ const PlanAssist = () => {
                   const todayWeekday = isWeekday(today);
                   const todayDone = uniqueDays.includes(today);
                   const todayShielded = streakShieldLog.includes(today);
-                  const yesterday = (() => { const d = parseLocalDate(today); d.setDate(d.getDate()-1); return fmtLocal(d); })();
-                  const yesterdayShielded = streakShieldLog.includes(yesterday);
-                  const yesterdayDone = uniqueDays.includes(yesterday);
 
-                  // Streak state
+                  // Find the previous weekday (skipping weekend days backwards from yesterday)
+                  const prevWeekday = (() => {
+                    let d = parseLocalDate(today);
+                    d.setDate(d.getDate() - 1);
+                    while (!isWeekday(fmtLocal(d))) d.setDate(d.getDate() - 1);
+                    return fmtLocal(d);
+                  })();
+                  const prevWeekdayShielded = streakShieldLog.includes(prevWeekday);
+                  const prevWeekdayDone = uniqueDays.includes(prevWeekday);
+
+                  // Streak state — determines colour and label only, not the streak count
                   let streakState = 'safe';
-                  if (!todayWeekday) streakState = 'weekend';
-                  else if (todayDone) streakState = 'safe';
-                  else if (yesterdayShielded && !yesterdayDone && !todayDone) streakState = 'shield_used_yesterday';
-                  else streakState = 'at_risk';
+                  if (!todayWeekday) {
+                    streakState = 'weekend';
+                  } else if (todayDone || todayShielded) {
+                    streakState = 'safe';
+                  } else if (prevWeekdayShielded && !prevWeekdayDone) {
+                    // The last weekday was shielded but not completed — streak is alive but fragile
+                    streakState = 'shield_used_prev';
+                  } else {
+                    streakState = 'at_risk';
+                  }
 
                   const stateConfig = {
-                    weekend: { color: 'from-blue-400 to-indigo-500', label: 'Weekend', sub: 'Streak safe — enjoy your break!', icon: '🏖️' },
-                    safe: { color: 'from-green-400 to-emerald-500', label: 'Streak Safe!', sub: "You've completed a task today.", icon: '✅' },
-                    at_risk: { color: 'from-orange-400 to-red-500', label: 'Streak at Risk!', sub: 'Complete a task today to keep your streak.', icon: '⚠️' },
-                    shield_used_yesterday: { color: 'from-yellow-400 to-orange-400', label: 'Shield Used Yesterday', sub: 'Streak barely saved! Complete a task today.', icon: '🛡️' },
+                    weekend:          { color: 'from-blue-400 to-indigo-500',   label: 'Weekend',                  sub: 'Streak safe — enjoy your break!',             icon: '🏖️' },
+                    safe:             { color: 'from-green-400 to-emerald-500',  label: 'Streak Safe!',             sub: todayShielded ? 'Streak protected by a shield today.' : "You've completed a task today.",  icon: todayShielded ? '🛡️' : '✅' },
+                    at_risk:          { color: 'from-orange-400 to-red-500',     label: 'Streak at Risk!',          sub: 'Complete a task today to keep your streak.',  icon: '⚠️' },
+                    shield_used_prev: { color: 'from-yellow-400 to-orange-400', label: 'Streak Hanging On!',       sub: 'Last weekday was shielded. Complete a task today!', icon: '🛡️' },
                   };
                   const cfg = stateConfig[streakState];
 
