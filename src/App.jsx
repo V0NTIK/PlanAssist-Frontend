@@ -1030,6 +1030,10 @@ const PlanAssist = () => {
       setPartialTaskTimes(partialTimes);
 
       // Session state stored on tasks (session_active, accumulated_time)
+
+      // Run full streak calculation (campus-tz conversion, auto-shield, etc.)
+      // so the Hub streak card is accurate immediately on login/reload.
+      loadStreakData({ silent: true });
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -1045,7 +1049,9 @@ const PlanAssist = () => {
       if (typeof dateString !== 'string') dateString = new Date(dateString).toISOString();
       const datePart = dateString.split('T')[0];
       if (t.deadline_time !== null && t.deadline_time !== undefined) {
-        dueDate = new Date(`${datePart}T${t.deadline_time}Z`);
+        // deadline_date is a date-only DB column (YYYY-MM-DD), deadline_time is a local time (HH:MM:SS).
+        // Construct WITHOUT 'Z' so the browser treats it as local time, not UTC.
+        dueDate = new Date(`${datePart}T${t.deadline_time}`);
         hasSpecificTime = true;
       } else {
         dueDate = new Date(`${datePart}T23:59:00`);
@@ -8735,6 +8741,79 @@ const PlanAssist = () => {
                         </div>
                       </div>
 
+                      {/* Day timeline strip */}
+                      {(() => {
+                        // Show 7 days: 3 before today, today, 3 after today (local date)
+                        const days = [];
+                        const todayD = parseLocalDate(localToday);
+                        for (let offset = -3; offset <= 3; offset++) {
+                          const d = new Date(todayD);
+                          d.setDate(d.getDate() + offset);
+                          const ds = fmtLocal(d);
+                          const dow = d.getDay(); // 0=Sun,6=Sat
+                          const isWknd = dow === 0 || dow === 6;
+                          const isFuture = ds > localToday;
+                          const isToday = ds === localToday;
+                          const inCompletion = streakCompletionDates.has(ds);
+                          const inShield = streakShieldDates.has(ds);
+                          // Classify
+                          let kind;
+                          if (isWknd)           kind = 'weekend';
+                          else if (isFuture)    kind = 'future';
+                          else if (inCompletion) kind = 'completed';
+                          else if (inShield)    kind = 'shielded';
+                          else                  kind = 'missed';
+                          days.push({ ds, d, isToday, isWknd, kind });
+                        }
+                        const kindStyle = {
+                          completed: { ring: 'ring-2 ring-green-400', bg: 'bg-green-400', text: 'text-white', icon: '✓' },
+                          shielded:  { ring: 'ring-2 ring-yellow-400', bg: 'bg-yellow-400', text: 'text-white', icon: '🛡' },
+                          missed:    { ring: 'ring-2 ring-red-300', bg: 'bg-red-100', text: 'text-red-400', icon: '✕' },
+                          future:    { ring: '', bg: 'bg-gray-100', text: 'text-gray-400', icon: '' },
+                          weekend:   { ring: '', bg: 'bg-blue-50', text: 'text-blue-300', icon: '–' },
+                        };
+                        const dayLabels = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+                        return (
+                          <div className="bg-white rounded-xl border border-gray-100 p-4 shadow-sm">
+                            <p className="text-xs font-semibold text-gray-500 mb-3 text-center tracking-wide uppercase">This Week</p>
+                            <div className="flex justify-between items-end gap-1">
+                              {days.map(({ ds, d, isToday, kind }) => {
+                                const s = kindStyle[kind];
+                                return (
+                                  <div key={ds} className="flex flex-col items-center gap-1 flex-1">
+                                    <span className="text-xs text-gray-400 font-medium">{dayLabels[d.getDay()]}</span>
+                                    <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold ${s.bg} ${s.text} ${s.ring} ${isToday ? 'shadow-md scale-110' : ''} transition-transform`}>
+                                      {kind === 'future' ? (
+                                        <span className="text-gray-300 text-base">·</span>
+                                      ) : kind === 'weekend' ? (
+                                        <span className="text-xs">–</span>
+                                      ) : kind === 'completed' ? (
+                                        <span>✓</span>
+                                      ) : kind === 'shielded' ? (
+                                        <span style={{fontSize:'0.7rem'}}>🛡️</span>
+                                      ) : (
+                                        <span className="text-xs">✕</span>
+                                      )}
+                                    </div>
+                                    <span className={`text-xs font-semibold ${isToday ? 'text-purple-600' : 'text-gray-400'}`}>
+                                      {d.getDate()}
+                                    </span>
+                                    {isToday && <span className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-0.5" />}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="flex justify-center gap-4 mt-3 flex-wrap">
+                              {[['bg-green-400','Completed'],['bg-yellow-400','Shielded'],['bg-red-100 ring-1 ring-red-300','Missed'],['bg-blue-50','Weekend'],['bg-gray-100','Upcoming']].map(([cls, lbl]) => (
+                                <span key={lbl} className="flex items-center gap-1 text-xs text-gray-400">
+                                  <span className={`w-2.5 h-2.5 rounded-full ${cls} inline-block`} />{lbl}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {/* Shield controls */}
                       <div className="bg-white rounded-xl border border-gray-100 p-5 shadow-sm">
                         <div className="flex items-center justify-between mb-3">
@@ -8742,6 +8821,8 @@ const PlanAssist = () => {
                             <p className="font-semibold text-gray-900 text-sm">Streak Shield</p>
                             <p className="text-xs text-gray-500 mt-0.5">Protect your streak on missed days</p>
                           </div>
+                          {/* Use Shield button — only shown in manual mode */}
+                          {streakShieldMode === 'manual' && (
                           <button
                             disabled={!canUseShield}
                             onClick={async () => {
@@ -8767,6 +8848,7 @@ const PlanAssist = () => {
                           >
                             {streakShieldsAvailable < 1 ? '🛡️ No shields' : '🛡️ Use Shield'}
                           </button>
+                          )}
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="text-xs text-gray-500">Mode:</span>
@@ -8803,40 +8885,56 @@ const PlanAssist = () => {
                       <h2 className="text-lg font-bold text-gray-900 mb-1">Insignia</h2>
                       <p className="text-sm text-gray-500 mb-1">Your Insignia styles your name across PlanAssist — in the nav, Hub, Feed, and Leaderboard.</p>
                       <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{insigniaDays}</span> days — unlocking {unlockedLabels.length} / {INSIGNIA_THRESHOLDS.length} Insignias.</p>
-                      <div className="grid grid-cols-2 gap-2">
+                      <div className="grid grid-cols-2 gap-3">
                         {INSIGNIA_THRESHOLDS.map(([threshold, label]) => {
                           const unlocked = unlockedLabels.includes(label);
                           const selected = insigniaSelected === label;
+                          // Derive a subtle tinted background from each insignia's color
+                          const bgMap = {
+                            Default:  'bg-gray-50 border-gray-200',
+                            Copper:   'bg-orange-50 border-orange-200',
+                            Silver:   'bg-slate-50 border-slate-300',
+                            Gold:     'bg-yellow-50 border-yellow-300',
+                            Emerald:  'bg-emerald-50 border-emerald-300',
+                            Amethyst: 'bg-violet-50 border-violet-300',
+                            Ruby:     'bg-rose-50 border-rose-300',
+                            Diamond:  'bg-cyan-50 border-cyan-300',
+                            Obsidian: 'bg-indigo-950 border-indigo-800',
+                            Aether:   'bg-fuchsia-50 border-fuchsia-300',
+                          };
+                          const baseBg = bgMap[label] || 'bg-gray-50 border-gray-200';
                           return (
                             <button
                               key={label}
                               disabled={!unlocked || insigniaLoading}
                               onClick={async () => {
                                 if (!unlocked || insigniaSelected === label) return;
-                                setInsigniaSelected(label); // optimistic
+                                setInsigniaSelected(label);
                                 try {
                                   await apiCall('/insignia', 'PUT', { label });
-                                  // Refresh feed and leaderboard so the new insignia is reflected immediately
                                   loadCompletionFeed();
                                   loadLeaderboard();
                                 } catch (err) {
                                   console.error('Insignia update failed:', err.message);
-                                  await loadInsignia(); // revert on failure
+                                  await loadInsignia();
                                 }
                               }}
-                              className={`flex items-center gap-3 p-3 rounded-xl border-2 text-left transition-all ${
-                                selected ? 'border-purple-500 shadow-md ring-2 ring-purple-200' :
-                                unlocked ? 'border-gray-200 hover:border-gray-300 hover:shadow-sm' :
-                                'border-gray-100 opacity-35 cursor-not-allowed'
+                              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[100px] ${
+                                selected
+                                  ? `${baseBg} border-purple-500 shadow-lg ring-2 ring-purple-300`
+                                  : unlocked
+                                  ? `${baseBg} hover:shadow-md hover:scale-[1.02]`
+                                  : 'bg-gray-50 border-gray-100 opacity-40 cursor-not-allowed'
                               }`}
-                              style={{ background: '#fff' }}
                             >
-                              <span className="flex-1 text-sm font-medium">
-                                {renderInsigniaName(label, label, { fontSize:'0.875rem' })}
+                              <span className="text-base font-semibold leading-tight">
+                                {renderInsigniaName(label, label, { fontSize: '1rem' })}
                               </span>
-                              <span className="text-xs text-gray-500">{threshold === 0 ? 'default' : `${threshold} days`}</span>
-                              {selected && <span className="text-purple-600 text-xs font-bold">✓</span>}
-                              {!unlocked && <span className="text-gray-400 text-xs">🔒</span>}
+                              <span className="text-xs text-gray-400 font-medium">
+                                {threshold === 0 ? 'Default' : `${threshold} days`}
+                              </span>
+                              {selected && <span className="text-purple-600 text-xs font-bold">✓ Active</span>}
+                              {!unlocked && <span className="text-gray-400 text-lg">🔒</span>}
                             </button>
                           );
                         })}
