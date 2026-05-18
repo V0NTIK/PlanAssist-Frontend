@@ -3909,26 +3909,23 @@ const PlanAssist = () => {
     const today = getLocalDateStr();
     const todayDate = parseLocalDate(today);
 
-    // Walk back up to 30 calendar days finding uncovered weekday gaps.
-    // Never shield today — only past days.
+    // Walk backwards from yesterday, looking only for gaps in the chain
+    // immediately behind today. Stop at the first covered day — gaps further
+    // back are unrelated to today's at-risk streak and must never be auto-shielded.
     const gapDates = [];
     let d = new Date(todayDate);
-    d.setDate(d.getDate() - 1); // always start from yesterday
-    let consecutiveGaps = 0;
+    d.setDate(d.getDate() - 1); // start from yesterday
 
     for (let i = 0; i < 30; i++) {
       const ds = fmtLocal(d);
       if (!isWeekday(ds)) { d.setDate(d.getDate() - 1); continue; }
       if (allCovered.has(ds)) {
-        consecutiveGaps = 0; // reset — there was a covered day
-        d.setDate(d.getDate() - 1);
-        continue;
+        // Covered day found — chain is intact here, nothing to shield
+        break;
       }
-      // Uncovered weekday — this is a gap
-      consecutiveGaps++;
-      if (consecutiveGaps > 1) break; // two consecutive gaps = streak already broken, no point shielding
+      // Single uncovered weekday immediately behind today — shield it
       gapDates.push(ds);
-      d.setDate(d.getDate() - 1);
+      break; // only ever shield one day; two consecutive gaps = streak already broken
     }
 
     if (gapDates.length === 0) return;
@@ -8506,12 +8503,17 @@ const PlanAssist = () => {
                             onClick={async () => {
                               try {
                                 const r = await apiCall('/streak/shields/use', 'POST', { date: today });
+                                const confirmedDate = r.shieldedDate || today;
                                 // Optimistic update — snaps UI to 'safe' immediately
                                 setStreakShieldsAvailable(r.remaining);
-                                setStreakShieldLog(prev => [...new Set([...prev, today])]);
-                                setStreakShieldToast('🛡️ Streak Shield used! Your streak is protected.');
+                                setStreakShieldLog(prev => [...new Set([...prev, confirmedDate])]);
+                                if (r.alreadyShielded) {
+                                  setStreakShieldToast('🛡️ This day is already shielded.');
+                                } else {
+                                  setStreakShieldToast('🛡️ Streak Shield used! Your streak is protected.');
+                                }
                                 setTimeout(() => setStreakShieldToast(null), 4000);
-                                // Silent background sync — no spinner, just confirms server state
+                                // Silent background sync to confirm server state
                                 loadStreakData({ silent: true });
                               } catch (err) { alert(err.message); }
                             }}
