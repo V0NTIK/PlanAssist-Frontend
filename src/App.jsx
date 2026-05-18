@@ -3926,58 +3926,89 @@ const PlanAssist = () => {
     [30,'Amethyst'],[40,'Ruby'],[50,'Diamond'],[75,'Obsidian'],[100,'Aether']
   ];
 
-  // Single source of truth for Insignia styles — used in Insignia pane, nav, Hub, Feed, and Leaderboard
+  // Single source of truth for Insignia styles — used in Feed and Leaderboard only.
   const INSIGNIA_STYLES = {
     // Default — plain gray, no decoration
-    Default:   { animClass:'', nameStyle:{ color:'#374151', fontWeight:600 } },
+    Default:   { animClass:'', wave:false, nameStyle:{ color:'#374151', fontWeight:600 } },
     // Copper — warm orange, no gradient, no animation
-    Copper:    { animClass:'', nameStyle:{ color:'#c2651a', fontWeight:700 } },
-    // Silver — cool metallic gray, slight gradient via textShadow
-    Silver:    { animClass:'', nameStyle:{ background:'linear-gradient(135deg,#9ca3af,#d1d5db,#6b7280)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
-    // Gold — warm metallic gold, noticeable gradient
-    Gold:      { animClass:'', nameStyle:{ background:'linear-gradient(135deg,#d97706,#fbbf24,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
-    // Emerald — vivid bright emerald, gradient + shimmer
-    Emerald:   { animClass:'ins-emerald', nameStyle:{ background:'linear-gradient(135deg,#059669,#34d399,#065f46)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
-    // Amethyst — deep mysterious amethyst, gradient + shimmer
-    Amethyst:  { animClass:'ins-amethyst', nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a78bfa,#4c1d95)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
-    // Ruby — vivid bold ruby, gradient + heavy shimmer
-    Ruby:      { animClass:'ins-ruby', nameStyle:{ background:'linear-gradient(135deg,#be123c,#f43f5e,#881337)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'200% auto' } },
-    // Diamond — fluorescent diamond, heavy gradient + bling animation
-    Diamond:   { animClass:'ins-diamond', nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
-    // Obsidian — deep obsidian, heavy gradient + murky cloud animation
-    Obsidian:  { animClass:'ins-obsidian', nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
-    // Aether — luminous iridescent cosmic color-shifting, shifting gradient + float animation
-    Aether:    { animClass:'ins-aether', nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#fbbf24,#f43f5e,#a5f3fc,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'600% auto' } },
+    Copper:    { animClass:'', wave:false, nameStyle:{ color:'#c2651a', fontWeight:700 } },
+    // Silver — cool metallic gray, gradient (static)
+    Silver:    { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#9ca3af,#d1d5db,#6b7280)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+    // Gold — warm metallic gold, gradient (static)
+    Gold:      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#d97706,#fbbf24,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+    // Emerald — vivid bright emerald, shimmer only
+    Emerald:   { animClass:'ins-emerald', wave:false, nameStyle:{ background:'linear-gradient(135deg,#059669,#34d399,#065f46)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
+    // Amethyst — deep mysterious amethyst, shimmer only
+    Amethyst:  { animClass:'ins-amethyst', wave:false, nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a78bfa,#4c1d95)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
+    // Ruby — vivid bold ruby, heavy shimmer only
+    Ruby:      { animClass:'ins-ruby', wave:false, nameStyle:{ background:'linear-gradient(135deg,#be123c,#f43f5e,#881337)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'200% auto' } },
+    // Diamond — fluorescent diamond, bling animation only
+    Diamond:   { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
+    // Obsidian — deep obsidian, cloud shift + subtle jitter only
+    Obsidian:  { animClass:'ins-obsidian', wave:false, nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
+    // Aether — luminous iridescent cosmic, color-shift + per-letter wave float
+    Aether:    { animClass:'ins-aether', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#fbbf24,#f43f5e,#a5f3fc,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'600% auto' } },
   };
   const INSIGNIA_KEYFRAMES = `
     @keyframes ins-shimmer { 0%{background-position:0% center} 100%{background-position:200% center} }
     @keyframes ins-shimmer-heavy { 0%{background-position:0% center} 100%{background-position:200% center} }
     @keyframes ins-bling { 0%,100%{background-position:0% center;filter:brightness(1)} 25%{background-position:50% center;filter:brightness(1.3)} 50%{background-position:100% center;filter:brightness(1)} 75%{background-position:150% center;filter:brightness(1.4)} }
     @keyframes ins-cloud { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
-    @keyframes ins-float { 0%,100%{transform:translateY(0);opacity:1} 25%{transform:translateY(-1.5px);opacity:0.92} 50%{transform:translateY(0);opacity:1} 75%{transform:translateY(1px);opacity:0.88} }
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
+    @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
+    @keyframes ins-jitter { 0%,100%{transform:translateY(0) translateX(0)} 20%{transform:translateY(-3px) translateX(0.4px)} 40%{transform:translateY(0.5px) translateX(-0.4px)} 60%{transform:translateY(-1.5px) translateX(0.3px)} 80%{transform:translateY(0.8px) translateX(-0.2px)} }
     .ins-emerald  { animation: ins-shimmer 3s linear infinite }
     .ins-amethyst { animation: ins-shimmer 2.5s linear infinite }
     .ins-ruby     { animation: ins-shimmer-heavy 1.8s linear infinite }
     .ins-diamond  { animation: ins-bling 2s ease-in-out infinite }
-    .ins-obsidian { animation: ins-cloud 6s ease-in-out infinite }
-    .ins-aether   { animation: ins-color-shift 5s linear infinite, ins-float 3s ease-in-out infinite }
+    .ins-obsidian { animation: ins-cloud 6s ease-in-out infinite, ins-jitter 0.55s ease-in-out infinite }
+    .ins-aether   { animation: ins-color-shift 5s linear infinite }
   `;
 
 
-  // Render a name with the user's Insignia tier style applied — used in Feed and Leaderboard.
+  // Render a name with the user's Insignia tier style applied — used in Feed and Leaderboard only.
+  // Only Aether splits into per-letter spans for the staggered wave float effect.
   const renderInsigniaName = (name, insignia, opts = {}) => {
     const tier = insignia && INSIGNIA_STYLES[insignia] ? insignia : 'Default';
     const s = INSIGNIA_STYLES[tier];
     const { fontSize, fontWeight, ...rest } = opts;
+
     if (tier === 'Default') {
       return <span style={{ fontWeight: fontWeight || 600, fontSize: fontSize || 'inherit', ...rest }}>{name}</span>;
     }
+
+    // All tiers except Aether: single span, animation driven by CSS class.
+    if (!s.wave) {
+      return (
+        <span
+          className={s.animClass || ''}
+          style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block', ...rest }}
+        >{name}</span>
+      );
+    }
+
+    // Aether only: split into per-letter spans with staggered ins-wave delays.
+    // Inline animation includes both the color-shift and the wave so the inline
+    // style doesn't silently drop the background-position animation from the class.
+    const WAVE_DURATION = 1.6; // seconds per full wave cycle
+    const WAVE_STAGGER  = 0.1; // seconds delay between each successive letter
     return (
-      <span
-        className={s.animClass || ''}
-        style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block', ...rest }}
-      >{name}</span>
+      <span style={{ display:'inline-block', ...rest }}>
+        {name.split('').map((ch, i) => {
+          const delay = (i * WAVE_STAGGER).toFixed(2);
+          return ch === ' '
+            ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+            : <span
+                key={i}
+                style={{
+                  ...s.nameStyle,
+                  fontSize: fontSize || 'inherit',
+                  display: 'inline-block',
+                  animation: `ins-color-shift 5s linear ${delay}s infinite, ins-wave ${WAVE_DURATION}s ease-in-out ${delay}s infinite`,
+                }}
+              >{ch}</span>;
+        })}
+      </span>
     );
   };
 
@@ -4583,6 +4614,8 @@ const PlanAssist = () => {
       )}
 
       <nav className="bg-white border-b border-gray-200 px-6 py-4">
+        {/* Insignia keyframes injected here so gradient-text insignias always render correctly */}
+        <style>{INSIGNIA_KEYFRAMES}</style>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-lg flex items-center justify-center">
