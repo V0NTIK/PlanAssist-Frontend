@@ -1049,9 +1049,9 @@ const PlanAssist = () => {
       if (typeof dateString !== 'string') dateString = new Date(dateString).toISOString();
       const datePart = dateString.split('T')[0];
       if (t.deadline_time !== null && t.deadline_time !== undefined) {
-        // deadline_date is a date-only DB column (YYYY-MM-DD), deadline_time is a local time (HH:MM:SS).
-        // Construct WITHOUT 'Z' so the browser treats it as local time, not UTC.
-        dueDate = new Date(`${datePart}T${t.deadline_time}`);
+        // deadline_time is stored as a UTC time string (HH:MM:SS) derived from the Canvas ISO timestamp.
+        // Append 'Z' so the browser parses it as UTC; .toLocaleTimeString() then converts to local for display.
+        dueDate = new Date(`${datePart}T${t.deadline_time}Z`);
         hasSpecificTime = true;
       } else {
         dueDate = new Date(`${datePart}T23:59:00`);
@@ -5920,7 +5920,8 @@ const PlanAssist = () => {
           const now = new Date();
           const totalFocusMins = (focusTasks || []).reduce((s, t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
           const totalLoggedMins = (focusTasks || []).reduce((s, t) => s + Math.floor((t.accumulatedTime || 0) / 60), 0);
-          const urgentCount = eligibleTasks.filter(t => t.dueDate && (t.dueDate - now) / (1000*60*60*24) <= 1).length;
+          const tomorrowMidnightForUrgent = new Date(); tomorrowMidnightForUrgent.setHours(0,0,0,0); tomorrowMidnightForUrgent.setDate(tomorrowMidnightForUrgent.getDate()+1);
+          const urgentCount = eligibleTasks.filter(t => t.dueDate && t.dueDate < tomorrowMidnightForUrgent).length;
           const suggested = [...eligibleTasks]
             .sort((a, b) => {
               const aD = a.dueDate ? a.dueDate - now : Infinity;
@@ -5932,12 +5933,18 @@ const PlanAssist = () => {
 
           const getDueInfo = (task) => {
             if (!task.dueDate) return { label: 'No deadline', color: 'text-gray-400', urgency: 'none' };
-            const diff = (task.dueDate - now) / (1000*60*60*24);
-            if (diff <= 0) return { label: 'Overdue', color: 'text-red-600 font-semibold', urgency: 'overdue' };
-            if (diff < 1) return { label: 'Due today', color: 'text-orange-600 font-semibold', urgency: 'today' };
-            if (diff < 2) return { label: 'Due tomorrow', color: 'text-amber-600', urgency: 'soon' };
-            if (diff < 4) return { label: `Due ${task.dueDate.toLocaleDateString('en-US', { weekday: 'short' })}`, color: 'text-yellow-600', urgency: 'soon' };
-            return { label: task.dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), color: 'text-gray-500', urgency: 'normal' };
+            // Compare calendar dates in the user's local timezone to avoid
+            // floating-point hour diff misclassifying "due 1am tomorrow" as "due today".
+            const todayMidnight = new Date(); todayMidnight.setHours(0,0,0,0);
+            const tomorrowMidnight = new Date(todayMidnight); tomorrowMidnight.setDate(tomorrowMidnight.getDate()+1);
+            const dayAfterMidnight = new Date(tomorrowMidnight); dayAfterMidnight.setDate(dayAfterMidnight.getDate()+1);
+            const in4daysMidnight = new Date(todayMidnight); in4daysMidnight.setDate(in4daysMidnight.getDate()+4);
+            const due = task.dueDate;
+            if (due < todayMidnight) return { label: 'Overdue', color: 'text-red-600 font-semibold', urgency: 'overdue' };
+            if (due < tomorrowMidnight) return { label: 'Due today', color: 'text-orange-600 font-semibold', urgency: 'today' };
+            if (due < dayAfterMidnight) return { label: 'Due tomorrow', color: 'text-amber-600', urgency: 'soon' };
+            if (due < in4daysMidnight) return { label: `Due ${due.toLocaleDateString('en-US', { weekday: 'short' })}`, color: 'text-yellow-600', urgency: 'soon' };
+            return { label: due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), color: 'text-gray-500', urgency: 'normal' };
           };
 
           const getProgressPct = (task) => {
