@@ -4000,11 +4000,11 @@ const PlanAssist = () => {
             style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block' }}
           >{name}</span>
           {/* Star A — LTR, middle */}
-          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite' }} />
+          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite', animationFillMode:'backwards' }} />
           {/* Star B — RTL, slightly higher */}
-          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite' }} />
+          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite', animationFillMode:'backwards' }} />
           {/* Star C — LTR, slightly lower */}
-          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite' }} />
+          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite', animationFillMode:'backwards' }} />
         </span>
       );
     }
