@@ -3957,9 +3957,9 @@ const PlanAssist = () => {
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
     @keyframes ins-jitter { 0%,100%{transform:translate(0,0)} 25%{transform:translate(0.3px,-1.5px)} 50%{transform:translate(-0.3px,0.4px)} 75%{transform:translate(0.2px,-0.8px)} }
-    @keyframes ins-star-a { 0%{transform:translateX(-100%);opacity:0} 5%{opacity:1} 40%{transform:translateX(320%);opacity:0} 100%{transform:translateX(320%);opacity:0} }
-    @keyframes ins-star-b { 0%{transform:translateX(320%);opacity:0} 5%{opacity:1} 40%{transform:translateX(-100%);opacity:0} 100%{transform:translateX(-100%);opacity:0} }
-    @keyframes ins-star-c { 0%{transform:translateX(-100%);opacity:0} 5%{opacity:1} 35%{transform:translateX(320%);opacity:0} 100%{transform:translateX(320%);opacity:0} }
+    @keyframes ins-star-a { 0%{background-position:-30% center;opacity:0} 4%{opacity:1} 38%{background-position:130% center;opacity:0} 100%{background-position:130% center;opacity:0} }
+    @keyframes ins-star-b { 0%{background-position:130% center;opacity:0} 4%{opacity:1} 38%{background-position:-30% center;opacity:0} 100%{background-position:-30% center;opacity:0} }
+    @keyframes ins-star-c { 0%{background-position:-30% center;opacity:0} 4%{opacity:1} 33%{background-position:130% center;opacity:0} 100%{background-position:130% center;opacity:0} }
     .ins-emerald    { animation: ins-shimmer 3s linear infinite }
     .ins-amethyst   { animation: ins-shimmer 2.5s linear infinite }
     .ins-ruby       { animation: ins-shimmer-heavy 1.8s linear infinite }
@@ -3983,22 +3983,23 @@ const PlanAssist = () => {
     // All tiers except Antimatter: single span, animation driven by CSS class.
     // Diamond gets a shooting-star overlay on top of the standard single span.
     if (tier === 'Diamond') {
-      // Three star variants — different vertical positions (top), directions (a=LTR, b=RTL, c=LTR shifted),
-      // fired at staggered intervals so they appear to randomly streak across the name.
+      // Each star is a full-width span whose background is a narrow bright streak.
+      // Animating background-position slides the streak from exactly the left edge
+      // to exactly the right edge — no translateX percentage confusion.
       const starBase = {
-        position:'absolute', left:0, right:0,
-        height:'2px', width:'32%',
-        background:'linear-gradient(90deg,transparent,rgba(255,255,255,0.95),rgba(200,230,255,0.7),transparent)',
-        borderRadius:'1px',
+        position:'absolute', left:0, top:0, right:0,
+        height:'2px',
+        background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.95) 48%,rgba(200,230,255,0.8) 52%,transparent 65%,transparent 100%)',
+        backgroundSize:'200% 100%',
         pointerEvents:'none',
       };
       return (
-        <span style={{ position:'relative', display:'inline-block', ...rest }}>
+        <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
           <span
             className={s.animClass || ''}
             style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block' }}
           >{name}</span>
-          {/* Star A — LTR, middle-ish */}
+          {/* Star A — LTR, middle */}
           <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite' }} />
           {/* Star B — RTL, slightly higher */}
           <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite' }} />
