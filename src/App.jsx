@@ -3946,8 +3946,8 @@ const PlanAssist = () => {
     Diamond:   { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
     // Obsidian — deep obsidian, cloud shift + subtle jitter only
     Obsidian:  { animClass:'ins-obsidian', wave:false, nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
-    // Antimatter — cosmic distortion: rainbowing colors with occasional black/white flashes
-    Antimatter: { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#000000,#34d399,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#000000,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
+    // Antimatter — cosmic distortion: rainbowing colors with rare black/white flashes
+    Antimatter: { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#000000,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
   };
   const INSIGNIA_KEYFRAMES = `
     @keyframes ins-shimmer { 0%{background-position:0% center} 100%{background-position:200% center} }
@@ -3957,9 +3957,9 @@ const PlanAssist = () => {
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
     @keyframes ins-jitter { 0%,100%{transform:translate(0,0)} 25%{transform:translate(0.3px,-1.5px)} 50%{transform:translate(-0.3px,0.4px)} 75%{transform:translate(0.2px,-0.8px)} }
-    @keyframes ins-star-a { 0%{transform:translateX(-130%);opacity:0} 5%{opacity:1} 40%{transform:translateX(230%);opacity:0} 100%{transform:translateX(230%);opacity:0} }
-    @keyframes ins-star-b { 0%{transform:translateX(230%);opacity:0} 5%{opacity:1} 40%{transform:translateX(-130%);opacity:0} 100%{transform:translateX(-130%);opacity:0} }
-    @keyframes ins-star-c { 0%{transform:translateX(-130%);opacity:0} 5%{opacity:1} 35%{transform:translateX(230%);opacity:0} 100%{transform:translateX(230%);opacity:0} }
+    @keyframes ins-star-a { 0%{transform:translateX(-100%);opacity:0} 5%{opacity:1} 40%{transform:translateX(320%);opacity:0} 100%{transform:translateX(320%);opacity:0} }
+    @keyframes ins-star-b { 0%{transform:translateX(320%);opacity:0} 5%{opacity:1} 40%{transform:translateX(-100%);opacity:0} 100%{transform:translateX(-100%);opacity:0} }
+    @keyframes ins-star-c { 0%{transform:translateX(-100%);opacity:0} 5%{opacity:1} 35%{transform:translateX(320%);opacity:0} 100%{transform:translateX(320%);opacity:0} }
     .ins-emerald    { animation: ins-shimmer 3s linear infinite }
     .ins-amethyst   { animation: ins-shimmer 2.5s linear infinite }
     .ins-ruby       { animation: ins-shimmer-heavy 1.8s linear infinite }
