@@ -5229,7 +5229,8 @@ const PlanAssist = () => {
                     );
                   }
                   // No goals — show original Next Up
-                              if (activeTasks.length === 0) return null;
+                  const activeTasks = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && t.dueDate);
+                  if (activeTasks.length === 0) return null;
                   const nextTask = activeTasks.sort((a, b) => { if (!a.dueDate && !b.dueDate) return 0; if (!a.dueDate) return 1; if (!b.dueDate) return -1; return a.dueDate - b.dueDate; })[0];
                   const color = getClassColor(nextTask.class);
                   return (
