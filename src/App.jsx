@@ -1037,6 +1037,8 @@ const PlanAssist = () => {
       // Run full streak calculation (campus-tz conversion, auto-shield, etc.)
       // so the Hub streak card is accurate immediately on login/reload.
       loadStreakData({ silent: true });
+      // Load schedule lessons so the period zoom banner has data immediately.
+      loadScheduleLessons();
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -1441,7 +1443,7 @@ const PlanAssist = () => {
       loadStreakData();
     }
     if (tab === 'feedlabel') loadInsignia();
-    if (tab === 'gallery') { loadBadges(); checkNewUnlocks(computeStreak(
+    if (tab === 'gallery') { setGalleryLoading(true); loadBadges(); checkNewUnlocks(computeStreak(
       new Set([...streakCompletionDates, ...streakShieldDates]),
       getLocalDateStr(),
       streakCompletionDates,
@@ -2640,8 +2642,7 @@ const PlanAssist = () => {
       });
       setShowAddTask(false);
       setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
-      await loadTasks(); // refresh task list (new task appears in sidebar)
-      setNewTasksSidebarOpen(true); // open sidebar so user can prioritize the new task
+      await loadTasks(); // refresh task list
     } catch (err) {
       console.error('Failed to create task:', err);
       alert('Failed to create task: ' + err.message);
