@@ -583,6 +583,9 @@ const PlanAssist = () => {
   const [whiteNoiseAudio, setWhiteNoiseAudio] = useState(null);
   const [whiteNoiseType, setWhiteNoiseType] = useState('rain');
   const [whiteNoiseVolume, setWhiteNoiseVolume] = useState(0.5);
+  const [completionSoundEnabled, setCompletionSoundEnabled] = useState(
+    () => localStorage.getItem('planassist-completion-sound') !== 'false'
+  );
   const [isWhiteNoisePlaying, setIsWhiteNoisePlaying] = useState(false);
   
   // ── Count-up wall-clock timer for sessions ─────────────────────────────
@@ -1595,6 +1598,41 @@ const PlanAssist = () => {
     if (type === 'agenda') {
       setTimeout(() => setAgendaFinishAnim(true), 200);
     }
+    playCompletionSound();
+  };
+
+  // Play a short, pleasant two-tone chime using the Web Audio API.
+  // Synthesised entirely in-browser — no file dependency.
+  const playCompletionSound = () => {
+    if (!completionSoundEnabled) return;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const master = ctx.createGain();
+      master.gain.value = 0.35;
+      master.connect(ctx.destination);
+
+      // Two notes: a rising major third (E5 → G#5) for a cheerful "done" feel
+      const notes = [
+        { freq: 659.25, start: 0,    dur: 0.18 },  // E5
+        { freq: 830.61, start: 0.14, dur: 0.28 },  // G#5
+      ];
+      notes.forEach(({ freq, start, dur }) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type      = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0, ctx.currentTime + start);
+        gain.gain.linearRampToValueAtTime(0.9, ctx.currentTime + start + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+        osc.connect(gain);
+        gain.connect(master);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + dur + 0.05);
+      });
+
+      // Close context after the sound finishes
+      setTimeout(() => ctx.close(), 700);
+    } catch (e) { /* AudioContext unavailable — fail silently */ }
   };
 
   const fetchCanvasTasks = async ({ silent = false } = {}) => {
@@ -2197,6 +2235,10 @@ const PlanAssist = () => {
       setAgendaTotalElapsed(prev => prev + snappedElapsed);
       // Now advance — same as Save & Proceed but task is already saved
       const isLastRow = agendaCurrentRow >= rows.length - 1;
+      if (!isLastRow) {
+        // Mid-agenda task completion — fire confetti + sound immediately
+        triggerCompletionAnim('task');
+      }
       if (isLastRow) {
         const totalSecs = agendaTotalElapsed + snappedElapsed;
         await apiCall(`/agendas/${currentAgenda.id}/finish`, 'PATCH');
@@ -4671,7 +4713,18 @@ const PlanAssist = () => {
               <span className="font-medium">Tasks</span>
             </button>
             <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
-              <Play className="w-5 h-5" />
+              <span className="relative">
+                <Play className="w-5 h-5" />
+                {(() => {
+                  const tmrw = new Date(); tmrw.setHours(0,0,0,0); tmrw.setDate(tmrw.getDate()+1);
+                  const n = tasks.filter(t => !t.completed && !t.deleted && isCourseEnabled(t) && t.dueDate && t.dueDate < tmrw).length;
+                  return n > 0 ? (
+                    <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
+                      {n > 99 ? '99+' : n}
+                    </span>
+                  ) : null;
+                })()}
+              </span>
               <span className="font-medium">Focus</span>
             </button>
             <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
@@ -8323,6 +8376,28 @@ const PlanAssist = () => {
                                   <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
                                   <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
                                 </div>
+                              </div>
+                            </div>
+                          </div>
+                          {/* Sounds */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Sounds</h3>
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-gray-900 text-sm">Task completion sound</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">Plays a short chime when you mark a task complete in a Session or Agenda.</p>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const next = !completionSoundEnabled;
+                                    setCompletionSoundEnabled(next);
+                                    localStorage.setItem('planassist-completion-sound', String(next));
+                                  }}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${completionSoundEnabled ? 'bg-purple-600' : 'bg-gray-200'}`}
+                                >
+                                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${completionSoundEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </button>
                               </div>
                             </div>
                           </div>
