@@ -1928,6 +1928,19 @@ const PlanAssist = () => {
         timeSpent: Math.round(sessionElapsed / 60),
         canvasCompleted
       });
+      // Fire insignia unlock check and streak refresh while the loading state is still active.
+      // Both run in parallel so they don't slow down the UI.
+      await Promise.allSettled([
+        apiCall('/insignia/check-unlock', 'POST', {}).then(unlockData => {
+          if (unlockData?.newlyUnlocked?.length > 0) {
+            const newest = unlockData.newlyUnlocked[unlockData.newlyUnlocked.length - 1];
+            setInsigniaNewUnlock(newest);
+            setTimeout(() => setInsigniaNewUnlock(null), 6000);
+            loadInsignia();
+          }
+        }),
+        loadStreakData({ silent: true }),
+      ]);
       setIsTimerRunning(false);
       setSessionTasks(prev => prev.filter(t => t.id !== currentSessionTask.id));
       setTasks(prev => prev.map(t =>
@@ -2233,6 +2246,18 @@ const PlanAssist = () => {
         timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60),
         canvasCompleted
       });
+      // Fire insignia unlock check and streak refresh in parallel while still loading.
+      await Promise.allSettled([
+        apiCall('/insignia/check-unlock', 'POST', {}).then(unlockData => {
+          if (unlockData?.newlyUnlocked?.length > 0) {
+            const newest = unlockData.newlyUnlocked[unlockData.newlyUnlocked.length - 1];
+            setInsigniaNewUnlock(newest);
+            setTimeout(() => setInsigniaNewUnlock(null), 6000);
+            loadInsignia();
+          }
+        }),
+        loadStreakData({ silent: true }),
+      ]);
       setTasks(prev => prev.map(t => t.id === currentRow.taskId ? { ...t, completed: true, deleted: true } : t));
       setAgendaTotalElapsed(prev => prev + snappedElapsed);
       // Now advance — same as Save & Proceed but task is already saved
@@ -4322,8 +4347,11 @@ const PlanAssist = () => {
 
   const checkNewUnlocks = async (currentStreak) => {
     try {
-      // Check streak badges
-      await apiCall('/badges/check', 'POST', { currentStreak });
+      const curatedDates = new Set([...streakCompletionDates, ...streakShieldDates]);
+      const personalRecord = computePersonalRecord(curatedDates);
+      // Check streak badges — pass both current streak and personal record so past
+      // streak badges are never lost when the current streak is lower.
+      await apiCall('/badges/check', 'POST', { currentStreak, personalRecord });
       // Check insignia unlocks
       const unlockData = await apiCall('/insignia/check-unlock', 'POST', {});
       if (unlockData.newlyUnlocked?.length > 0) {
@@ -6927,7 +6955,7 @@ const PlanAssist = () => {
           const countdownStr = `${String(countdownMins).padStart(2,'0')}:${String(countdownSecs).padStart(2,'0')}`;
 
           return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 flex flex-col">
+            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 flex flex-col" data-planassist-theme={colorTheme}>
               {/* Top bar */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
                 <h2 className="text-lg font-bold text-gray-900">{currentAgenda.name}</h2>
@@ -9257,16 +9285,6 @@ const PlanAssist = () => {
                         <option value="banned">Banned</option>
                       </select>
                       <select
-                        value={adminFilter.grade}
-                        onChange={e => setAdminFilter(f => ({ ...f, grade: e.target.value }))}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
-                      >
-                        <option value="all">All Grades</option>
-                        {[...new Set(adminUsers.map(u => u.grade).filter(Boolean))].sort().map(g => (
-                          <option key={g} value={String(g)}>Grade {g}</option>
-                        ))}
-                      </select>
-                      <select
                         value={adminSort}
                         onChange={e => setAdminSort(e.target.value)}
                         className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
@@ -9297,11 +9315,10 @@ const PlanAssist = () => {
                           if (adminFilter.status === 'banned') return u.is_banned;
                           return true;
                         })
-                        .filter(u => adminFilter.grade === 'all' || String(u.grade) === adminFilter.grade)
                         .filter(u => {
                           return true;
                         });
-                      const hasFilters = adminFilter.status !== 'all' || adminFilter.grade !== 'all' || adminSearch;
+                      const hasFilters = adminFilter.status !== 'all' || adminSearch;
                       return (
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-400">{filtered.length} of {adminUsers.length} users</span>
@@ -9352,7 +9369,6 @@ const PlanAssist = () => {
                           if (adminFilter.status === 'banned') return u.is_banned;
                           return true;
                         })
-                        .filter(u => adminFilter.grade === 'all' || String(u.grade) === adminFilter.grade)
                         .filter(u => {
                           return true;
                         })
