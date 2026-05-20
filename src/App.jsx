@@ -233,7 +233,7 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
 };
 
 // ── GoalsPanel — standalone component to avoid Rules of Hooks violations ─────
-const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall }) => {
+const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall, classColors }) => {
   const goalCourses = courses.filter(c => c.grading_period_id != null && c.enabled !== false);
 
   const [localGoals, setLocalGoals] = useState(() => {
@@ -309,7 +309,10 @@ const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall }) =>
         <>
           <div className="flex flex-wrap gap-4 justify-center mb-8">
             {goalCourses.map(course => {
-              const color = course.color || '#7c3aed';
+              // Resolve color: prefer classColors (keyed by course name) stored in localStorage,
+              // then fall back to a deterministic default. course.color doesn't exist on the
+              // courses API response — colors live in classColors (localStorage/accountSetup).
+              const color = (classColors && classColors[course.name]) || course.color || '#7c3aed';
               const courseIdStr = String(course.course_id);
               const val = localGoals[courseIdStr] ?? '';
               const num = parseFloat(val);
@@ -793,7 +796,18 @@ const PlanAssist = () => {
     const options = { method, headers };
     if (body) options.body = JSON.stringify(body);
     const response = await fetch(`${API_URL}${endpoint}`, options);
-    if (response.status === 401 || response.status === 403) {
+    // Auth endpoints (/auth/login, /auth/register) handle their own error responses —
+    // never treat their 401/403 as a session expiry, and always surface the real error message.
+    const isAuthEndpoint = endpoint.startsWith('/auth/');
+    if ((response.status === 401 || response.status === 403) && !isAuthEndpoint) {
+      // For 403 ACCOUNT_BLOCKED specifically, surface the real error before redirecting
+      if (response.status === 403) {
+        const errBody = await response.json().catch(() => ({}));
+        if (errBody.error === 'ACCOUNT_BLOCKED') {
+          setSessionExpired(true);
+          throw new Error('ACCOUNT_BLOCKED');
+        }
+      }
       // JWT expired or invalid — session is dead. Show re-auth prompt.
       setSessionExpired(true);
       throw new Error('Session expired');
@@ -1098,14 +1112,17 @@ const PlanAssist = () => {
   const handleLogin = async (e) => {
     e.preventDefault();
     setAuthError('');
+    setSessionExpired(false); // Clear any prior stale expiry state before the attempt
     setAuthLoading(true);
-    if (!email.endsWith('@na.oneschoolglobal.com')) {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedPassword = password; // passwords are not trimmed (spaces can be intentional)
+    if (!trimmedEmail.endsWith('@na.oneschoolglobal.com')) {
       setAuthError('Email must be in format: first.last##@na.oneschoolglobal.com');
       setAuthLoading(false);
       return;
     }
     try {
-      const data = await apiCall('/auth/login', 'POST', { email, password });
+      const data = await apiCall('/auth/login', 'POST', { email: trimmedEmail, password: trimmedPassword });
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setToken(data.token);
@@ -1129,7 +1146,12 @@ const PlanAssist = () => {
         // and stored in accountSetup state — but since React state may not have updated yet,
         // re-fetch account/setup directly to read last_sync and canvasApiToken reliably).
         try {
-          const setupCheck = await apiCall('/account/setup', 'GET');
+          // Use raw fetch with the just-received token — avoids apiCall's 401/403 sessionExpired
+          // intercept which could incorrectly abort the login if the server is cold-starting.
+          const setupResp = await fetch(`${API_URL}/account/setup`, {
+            headers: { 'Authorization': `Bearer ${data.token}`, 'Content-Type': 'application/json' }
+          });
+          const setupCheck = setupResp.ok ? await setupResp.json() : null;
           if (setupCheck?.canvasApiToken) {
             const lastSync = setupCheck.lastSync ? new Date(setupCheck.lastSync) : null;
             const now = new Date();
@@ -1165,14 +1187,16 @@ const PlanAssist = () => {
   const handleRegister = async (e) => {
     e.preventDefault();
     setAuthError('');
+    setSessionExpired(false);
     setAuthLoading(true);
-    if (!email.endsWith('@na.oneschoolglobal.com')) {
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail.endsWith('@na.oneschoolglobal.com')) {
       setAuthError('Email must be in format: first.last##@na.oneschoolglobal.com');
       setAuthLoading(false);
       return;
     }
     try {
-      const data = await apiCall('/auth/register', 'POST', { email, password });
+      const data = await apiCall('/auth/register', 'POST', { email: trimmedEmail, password });
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
       setToken(data.token);
@@ -1443,12 +1467,37 @@ const PlanAssist = () => {
       loadStreakData();
     }
     if (tab === 'feedlabel') loadInsignia();
-    if (tab === 'gallery') { setGalleryLoading(true); loadBadges(); checkNewUnlocks(computeStreak(
-      new Set([...streakCompletionDates, ...streakShieldDates]),
-      getLocalDateStr(),
-      streakCompletionDates,
-      streakShieldDates
-    ).streak); }
+    if (tab === 'gallery') {
+      setGalleryLoading(true);
+      loadBadges();
+      // Load streak data first (if not already loaded) so computeStreak has the full date sets,
+      // ensuring past streak badges are correctly evaluated against the personal record.
+      const runGalleryUnlockCheck = async () => {
+        let completionDates = streakCompletionDates;
+        let shieldDates = streakShieldDates;
+        if (completionDates.size === 0) {
+          // Streak data not yet loaded — fetch it silently before checking badges
+          try {
+            const data = await apiCall('/streak/data', 'GET');
+            const offsetHours = getCampusOffsetHours(data.campus);
+            completionDates = new Set(
+              (data.completedAt || []).map(ts => toCampusDate(ts, offsetHours)).filter(d => !isWeekendStr(d))
+            );
+            shieldDates = new Set(
+              (data.consumedAt || []).map(ts => toCampusDate(ts, offsetHours)).filter(d => !isWeekendStr(d))
+            );
+            setStreakCompletionDates(completionDates);
+            setStreakShieldDates(shieldDates);
+          } catch (err) {
+            console.warn('[GALLERY] Could not load streak data for badge check:', err.message);
+          }
+        }
+        const curatedDates = new Set([...completionDates, ...shieldDates]);
+        const { streak: currentStreak } = computeStreak(curatedDates, getLocalDateStr(), completionDates, shieldDates);
+        checkNewUnlocks(currentStreak);
+      };
+      runGalleryUnlockCheck();
+    }
     if (tab === 'help') loadHelpContent();
   };
 
@@ -8835,6 +8884,7 @@ const PlanAssist = () => {
                     setUserGoals={setUserGoals}
                     loadGoals={loadGoals}
                     apiCall={apiCall}
+                    classColors={accountSetup.classColors}
                   />
                   </div>
                 )}
