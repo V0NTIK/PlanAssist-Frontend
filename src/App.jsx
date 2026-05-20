@@ -4229,25 +4229,49 @@ const PlanAssist = () => {
   const computeStreak = (curatedDates, todayStr, completionDatesSet, shieldDatesSet) => {
     const dateSet = curatedDates instanceof Set ? curatedDates : new Set(curatedDates);
 
-    // Weekend short-circuit — streak is always safe, count stays as-is
-    if (isWeekendStr(todayStr)) {
-      // Count backwards from last weekday to find current run length
-      const lastWD = prevWeekdayStr(todayStr);  // most recent weekday before today
-      // Walk back from lastWD to count the run
+    // Pure string-based date helpers — avoids any browser-local timezone ambiguity.
+    // All date strings are campus-tz YYYY-MM-DD; arithmetic is done on plain Date
+    // objects created from year/month/day parts (no UTC conversion).
+    const addDays = (dateStr, n) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + n);
+      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    };
+    const dayOfWeek = (dateStr) => {
+      const [y, m, d] = dateStr.split('-').map(Number);
+      return new Date(y, m - 1, d).getDay(); // 0=Sun,6=Sat
+    };
+    const isWknd = (dateStr) => { const dow = dayOfWeek(dateStr); return dow === 0 || dow === 6; };
+
+    // Step back one calendar day at a time, skipping weekends, until we hit a weekday.
+    const prevWeekday = (dateStr) => {
+      let s = addDays(dateStr, -1);
+      while (isWknd(s)) s = addDays(s, -1);
+      return s;
+    };
+
+    // Count consecutive weekday streak backwards from anchorStr (inclusive).
+    const countBack = (anchorStr) => {
       let count = 0;
-      let d = parseLocalDate(lastWD);
+      let s = anchorStr;
       while (true) {
-        const ds = fmtLocal(d);
-        if (isWeekendStr(ds)) { d.setDate(d.getDate() - 1); continue; }
-        if (!dateSet.has(ds)) break;
+        if (isWknd(s)) { s = addDays(s, -1); continue; } // skip weekends
+        if (!dateSet.has(s)) break;
         count++;
-        d.setDate(d.getDate() - 1);
+        s = addDays(s, -1);
       }
-      return { streak: count, state: 'weekend' };
+      return count;
+    };
+
+    // Weekend short-circuit — streak is always safe, count from last weekday.
+    if (isWknd(todayStr)) {
+      const lastWD = prevWeekday(todayStr);
+      return { streak: dateSet.has(lastWD) ? countBack(lastWD) : 0, state: 'weekend' };
     }
 
     const todayIn = dateSet.has(todayStr);
-    const prevWD  = prevWeekdayStr(todayStr);
+    const prevWD  = prevWeekday(todayStr);
     const prevIn  = dateSet.has(prevWD);
 
     // Determine state
@@ -4263,37 +4287,36 @@ const PlanAssist = () => {
       state = 'broken';
     }
 
-    // Count the streak — walk backwards from the anchor weekday, skipping weekends.
     const anchorStr = todayIn ? todayStr : (prevIn ? prevWD : null);
     if (!anchorStr) return { streak: 0, state };
 
-    let count = 0;
-    let d = parseLocalDate(anchorStr);
-    while (true) {
-      const ds = fmtLocal(d);
-      if (isWeekendStr(ds)) { d.setDate(d.getDate() - 1); continue; } // skip weekends transparently
-      if (!dateSet.has(ds)) break;
-      count++;
-      d.setDate(d.getDate() - 1);
-    }
-    return { streak: count, state };
+    return { streak: countBack(anchorStr), state };
   };
 
   // Compute personal record — longest chain of consecutive WEEKDAYS in curatedDates.
   // Fri→Mon (gap of 3 calendar days) counts as consecutive.
+  // Uses pure date-part arithmetic — no browser-local Date conversion.
   const computePersonalRecord = (curatedDates) => {
+    const isWkndStr = (s) => {
+      const [y, m, d] = s.split('-').map(Number);
+      const dow = new Date(y, m - 1, d).getDay();
+      return dow === 0 || dow === 6;
+    };
     const sorted = [...(curatedDates instanceof Set ? curatedDates : new Set(curatedDates))]
-      .filter(d => !isWeekendStr(d))
-      .sort();
+      .filter(d => !isWkndStr(d))
+      .sort(); // lexicographic = chronological for YYYY-MM-DD
     if (sorted.length === 0) return 0;
     let max = 1, cur = 1;
     for (let i = 1; i < sorted.length; i++) {
-      const prev = parseLocalDate(sorted[i - 1]);
-      const curr = parseLocalDate(sorted[i]);
+      const [py, pm, pd] = sorted[i-1].split('-').map(Number);
+      const [cy, cm, cd] = sorted[i].split('-').map(Number);
+      const prev = new Date(py, pm - 1, pd);
+      const curr = new Date(cy, cm - 1, cd);
       const diff = Math.round((curr - prev) / 86400000);
-      // 1 day gap = consecutive weekdays (Mon–Fri)
-      // 3 day gap = Fri→Mon over a weekend
-      const consecutive = diff === 1 || (diff === 3 && prev.getDay() === 5 && curr.getDay() === 1);
+      // 1 day apart = consecutive weekdays (Mon–Thu or similar)
+      // 3 days apart = Fri→Mon over a weekend
+      const prevDow = prev.getDay();
+      const consecutive = diff === 1 || (diff === 3 && prevDow === 5 && curr.getDay() === 1);
       if (consecutive) { cur++; if (cur > max) max = cur; }
       else cur = 1;
     }
