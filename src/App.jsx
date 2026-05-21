@@ -635,15 +635,20 @@ const PlanAssist = () => {
   // ── Session heartbeat — fires every 30s while a session screen is active ──
   // Keyed on currentSessionTask (not isTimerRunning) so a paused timer still
   // counts as an active session for admin visibility purposes.
-  // Writes session_heartbeat = NOW() on the active task; admin Users tab checks
-  // heartbeat > NOW() - 60s to confirm the session is genuinely live.
+  // Uses raw fetch (not apiCall) so a Render cold-start 401 never triggers the
+  // sessionExpired modal and kicks the student out of their session.
   useEffect(() => {
     if (!currentSessionTask) return;
-    // Fire immediately when session starts, then every 30 seconds
-    apiCall('/sessions/heartbeat', 'POST').catch(() => {});
-    const hb = setInterval(() => {
-      apiCall('/sessions/heartbeat', 'POST').catch(() => {});
-    }, 30000);
+    const sendHeartbeat = () => {
+      const t = tokenRef.current || token;
+      if (!t) return;
+      fetch(`${API_URL}/sessions/heartbeat`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' }
+      }).catch(() => {}); // fire-and-forget; never throws into React
+    };
+    sendHeartbeat(); // immediate on session start
+    const hb = setInterval(sendHeartbeat, 30000);
     return () => clearInterval(hb);
   }, [currentSessionTask]);
 
@@ -4617,8 +4622,10 @@ const PlanAssist = () => {
         loadLeaderboard();
       }, 2000);
       
-      // Refresh feed, leaderboard, and hub stats every 2 minutes
+      // Refresh feed, leaderboard, and hub stats every 2 minutes — but never during an
+      // active session or agenda, since a cold-start 401 would pop the sessionExpired modal.
       const interval = setInterval(() => {
+        if (['session-active', 'agenda-active'].includes(currentPage)) return;
         loadCompletionFeed();
         loadLeaderboard();
         loadCompletionHistory();
