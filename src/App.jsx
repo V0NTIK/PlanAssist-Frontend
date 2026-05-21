@@ -533,6 +533,10 @@ const PlanAssist = () => {
   const [agendaRunning, setAgendaRunning] = useState(false);
   const agendaTimerRef = React.useRef(null);    // { intervalRef, wallRef, baseElapsed, baseCountdown }
   const [agendaProceedLoading, setAgendaProceedLoading] = useState(false);
+  const [agendaExitLoading, setAgendaExitLoading] = useState(false);   // Save & Exit spinner
+  const [agendaCreating, setAgendaCreating] = useState(false);          // Build Agenda save button
+  const [agendaSavingEdit, setAgendaSavingEdit] = useState(false);      // Edit Agenda save button
+  const [agendaDeletingId, setAgendaDeletingId] = useState(null);       // id of agenda currently being deleted
   const [agendaTotalElapsed, setAgendaTotalElapsed] = useState(0); // accumulated across all rows
   const [agendaFinishedSummary, setAgendaFinishedSummary] = useState(null); // { name, totalSecs }
   // Build / edit agenda
@@ -1086,11 +1090,12 @@ const PlanAssist = () => {
 
       // Session state stored on tasks (session_active, accumulated_time)
 
-      // Run full streak calculation (campus-tz conversion, auto-shield, etc.)
-      // so the Hub streak card is accurate immediately on login/reload.
-      loadStreakData({ silent: true });
-      // Load schedule lessons so the period zoom banner has data immediately.
-      loadScheduleLessons();
+      // Run full streak calculation and schedule lessons in parallel — awaited so that
+      // Hub stats are accurate before the login flow navigates to the Hub page.
+      await Promise.allSettled([
+        loadStreakData({ silent: true }),
+        loadScheduleLessons(),
+      ]);
     } catch (error) {
       console.error('Error loading user data:', error);
     }
@@ -1208,7 +1213,18 @@ const PlanAssist = () => {
           console.warn('[LOGIN SYNC] Sync check failed:', err.message);
         }
 
-        // Only navigate to Hub after sync is fully done
+        // Await all Hub data in parallel — feed, leaderboard, history, streak, insignia —
+        // so the Hub page renders fully populated on first show. authLoading stays true
+        // throughout, keeping the login button in its loading state until everything is ready.
+        await Promise.allSettled([
+          loadCompletionFeed(),
+          loadLeaderboard(),
+          loadCompletionHistory(),
+          loadInsignia(),
+          loadBadges(),
+        ]);
+
+        // Only navigate to Hub after everything is fully loaded
         setCurrentPage('hub');
       }
     } catch (error) {
@@ -2149,6 +2165,8 @@ const PlanAssist = () => {
 
   const createAgenda = async () => {
     if (!buildAgendaName.trim() || buildAgendaRows.length === 0) return;
+    if (agendaCreating) return;
+    setAgendaCreating(true);
     try {
       await apiCall('/agendas', 'POST', {
         name: buildAgendaName.trim(),
@@ -2160,15 +2178,22 @@ const PlanAssist = () => {
       await loadAgendas();
     } catch (err) {
       alert('Failed to create agenda: ' + err.message);
+    } finally {
+      setAgendaCreating(false);
     }
   };
 
   const deleteAgenda = async (agendaId) => {
+    if (agendaDeletingId) return; // already deleting something
+    if (!window.confirm('Delete this agenda? This cannot be undone.')) return;
+    setAgendaDeletingId(agendaId);
     try {
       await apiCall(`/agendas/${agendaId}`, 'DELETE');
       setAgendas(prev => prev.filter(a => a.id !== agendaId));
     } catch (err) {
-      console.error('Failed to delete agenda:', err);
+      alert('Failed to delete agenda: ' + err.message);
+    } finally {
+      setAgendaDeletingId(null);
     }
   };
 
@@ -2232,6 +2257,8 @@ const PlanAssist = () => {
   };
 
   const agendaSaveAndExit = async () => {
+    if (agendaExitLoading) return;
+    setAgendaExitLoading(true);
     const { snappedElapsed, snappedCountdown } = agendaStopTimer();
     const row = (currentAgenda.rows || [])[agendaCurrentRow];
     // Clear session_active for current row's task
@@ -2246,6 +2273,9 @@ const PlanAssist = () => {
       });
     } catch (err) {
       console.error('Save-exit failed:', err);
+      // Navigate away regardless — don't strand the user on the session screen
+    } finally {
+      setAgendaExitLoading(false);
     }
     agendaTimerRef.current = null;
     setCurrentAgenda(null);
@@ -2281,6 +2311,7 @@ const PlanAssist = () => {
         const nextTaskAccumSecs = ((nextRowData?.task?.accumulated_time) || 0) * 60;
         setAgendaCurrentRow(nextRow);
         setAgendaElapsed(nextTaskAccumSecs);
+        setAgendaBaseElapsed(nextTaskAccumSecs); // ← reset base so next row's time delta is correct
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
         // Update session_active to the next row's task
@@ -2303,7 +2334,8 @@ const PlanAssist = () => {
   };
 
   const saveEditAgenda = async () => {
-    if (!editingAgenda) return;
+    if (!editingAgenda || agendaSavingEdit) return;
+    setAgendaSavingEdit(true);
     try {
       await apiCall(`/agendas/${editingAgenda.id}/rows`, 'PATCH', { rows: editAgendaRows });
       setEditingAgenda(null);
@@ -2311,6 +2343,8 @@ const PlanAssist = () => {
       await loadAgendas();
     } catch (err) {
       alert('Failed to save edits: ' + err.message);
+    } finally {
+      setAgendaSavingEdit(false);
     }
   };
 
@@ -2711,6 +2745,7 @@ const PlanAssist = () => {
     setCheckingTask(taskId);
     try {
       await apiCall(`/tasks/${taskId}/complete`, 'PATCH');
+      // Server sets completed=true and deleted=true — reflect both in local state
       setTasks(prev => prev.map(t => t.id === taskId
         ? { ...t, deleted: true, completed: true }
         : t
@@ -4652,11 +4687,14 @@ const PlanAssist = () => {
     calculateHubStats();
   }, [completionHistory, streakCompletionDates, streakShieldDates]);
 
-  // Scroll to top when navigating to Hub; reload courses when navigating to Marks
+  // Scroll to top when navigating to Hub; reload all Hub data when landing on Hub page
   useEffect(() => {
     if (currentPage === 'hub') {
       window.scrollTo({ top: 0, behavior: 'smooth' });
+      // Refresh all Hub elements in parallel — stats, feed, leaderboard, streak, insignia
       loadCompletionHistory();
+      loadCompletionFeed();
+      loadLeaderboard();
       loadStreakData({ silent: true });
       loadInsignia();
       loadBadges();
@@ -6732,8 +6770,8 @@ const PlanAssist = () => {
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
                         <div className="flex items-center gap-2">
-                          <button onClick={loadAgendas} className="p-2 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors" title="Refresh agendas">
-                            <RefreshCw className="w-4 h-4" />
+                          <button onClick={loadAgendas} disabled={agendasLoading} className="p-2 rounded-lg text-gray-400 hover:text-purple-600 hover:bg-purple-50 transition-colors disabled:opacity-50" title="Refresh agendas">
+                            <RefreshCw className={`w-4 h-4 ${agendasLoading ? 'animate-spin' : ''}`} />
                           </button>
                           <button
                             onClick={() => { setShowBuildAgenda(true); setBuildAgendaName(''); setBuildAgendaRows([]); }}
@@ -6867,9 +6905,11 @@ const PlanAssist = () => {
                                 <button onClick={() => setShowBuildAgenda(false)}
                                   className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
                                 <button onClick={createAgenda}
-                                  disabled={!buildAgendaName.trim() || buildAgendaRows.length === 0 || !allTasksSelected}
-                                  className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                                  Create Agenda
+                                  disabled={!buildAgendaName.trim() || buildAgendaRows.length === 0 || !allTasksSelected || agendaCreating}
+                                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                  {agendaCreating
+                                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
+                                    : 'Create Agenda'}
                                 </button>
                               </div>
                             </div>
@@ -6990,10 +7030,14 @@ const PlanAssist = () => {
                                 )}
                               </div>
                               <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
-                                <button onClick={() => setEditingAgenda(null)}
-                                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
-                                <button onClick={saveEditAgenda}
-                                  className="flex-1 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors">Save Changes</button>
+                                <button onClick={() => setEditingAgenda(null)} disabled={agendaSavingEdit}
+                                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                                <button onClick={saveEditAgenda} disabled={agendaSavingEdit}
+                                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-60 transition-colors">
+                                  {agendaSavingEdit
+                                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                                    : 'Save Changes'}
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -7034,16 +7078,18 @@ const PlanAssist = () => {
                                       const lockedCount = (agenda.current_row || 0) + 1;
                                       const editableRows = rows.slice(lockedCount).map((r, i) => ({ ...r, rowIndex: lockedCount + i }));
                                       setEditAgendaRows(editableRows);
-                                    }} className="p-2 text-gray-300 hover:text-purple-500 transition-colors" title="Edit agenda">
+                                    }} disabled={!!agendaDeletingId} className="p-2 text-gray-300 hover:text-purple-500 transition-colors disabled:opacity-40" title="Edit agenda">
                                       <Edit2 className="w-4 h-4" />
                                     </button>
-                                    <button onClick={() => openAgenda(agenda)}
-                                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors">
+                                    <button onClick={() => openAgenda(agenda)} disabled={!!agendaDeletingId}
+                                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors disabled:opacity-40">
                                       <Play className="w-3.5 h-3.5" /> Open
                                     </button>
-                                    <button onClick={() => deleteAgenda(agenda.id)}
-                                      className="p-2 text-gray-300 hover:text-red-400 transition-colors" title="Delete agenda">
-                                      <Trash2 className="w-4 h-4" />
+                                    <button onClick={() => deleteAgenda(agenda.id)} disabled={agendaDeletingId === agenda.id}
+                                      className="p-2 text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40" title="Delete agenda">
+                                      {agendaDeletingId === agenda.id
+                                        ? <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+                                        : <Trash2 className="w-4 h-4" />}
                                     </button>
                                   </div>
                                 </div>
@@ -7111,9 +7157,12 @@ const PlanAssist = () => {
                       Save &amp; Proceed
                     </button>
                   )}
-                  <button onClick={agendaSaveAndExit}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 text-sm transition-colors">
-                    <X className="w-4 h-4" /> Save &amp; Exit
+                  <button onClick={agendaSaveAndExit} disabled={agendaExitLoading}
+                    className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 text-sm transition-colors disabled:opacity-60">
+                    {agendaExitLoading
+                      ? <div className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
+                      : <X className="w-4 h-4" />}
+                    Save &amp; Exit
                   </button>
                 </div>
               </div>
