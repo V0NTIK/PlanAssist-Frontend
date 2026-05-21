@@ -1504,7 +1504,7 @@ const PlanAssist = () => {
               (data.completedAt || []).map(ts => toCampusDate(ts, offsetHours)).filter(d => !isWeekendStr(d))
             );
             shieldDates = new Set(
-              (data.shieldDates || []).filter(d => !isWeekendStr(d))
+              (data.consumedAt || []).map(ts => toCampusDate(ts, offsetHours)).filter(d => !isWeekendStr(d))
             );
             setStreakCampus(campus);
             setStreakCompletionDates(completionDates);
@@ -4338,8 +4338,8 @@ const PlanAssist = () => {
         campus,
         shieldsAvailable,
         shieldMode,
-        completedAt,  // UTC ISO strings from tasks_completed
-        shieldDates,  // plain YYYY-MM-DD strings from streak_shield_log (already campus dates)
+        completedAt,  // UTC ISO timestamps from tasks_completed.completed_at
+        consumedAt,   // UTC ISO timestamps from streak_shield_log.consumed_at
       } = data;
 
       const offsetHours = getCampusOffsetHours(campus);
@@ -4352,11 +4352,13 @@ const PlanAssist = () => {
           .filter(d => !isWeekendStr(d))
       );
 
-      // ── Step 2: Shield dates are already YYYY-MM-DD campus-tz dates ──────
-      // The server returns them as plain date strings (no UTC conversion needed).
-      // Strip weekends here too, for safety.
+      // ── Step 2: Convert shield consumed_at timestamps UTC → campus-tz date strings ──
+      // Per spec: the campus-tz date of consumed_at is the day the shield covers.
+      // Same conversion as completedAt — no special handling needed.
       const shieldDateSet = new Set(
-        (shieldDates || []).filter(d => !isWeekendStr(d))
+        (consumedAt || [])
+          .map(ts => toCampusDate(ts, offsetHours))
+          .filter(d => !isWeekendStr(d))
       );
 
       // ── Step 3: Build curated dates = weekday-only union of both sets ─────
@@ -9036,13 +9038,12 @@ const PlanAssist = () => {
                           const d = new Date(todayD);
                           d.setDate(d.getDate() + offset);
                           const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-                          const dow = d.getDay(); // 0=Sun,6=Sat
+                          const dow = d.getDay();
                           const isWknd = dow === 0 || dow === 6;
                           const isFuture = ds > campusToday;
                           const isToday = ds === campusToday;
                           const inCompletion = streakCompletionDates.has(ds);
                           const inShield = streakShieldDates.has(ds);
-                          // Classify
                           let kind;
                           if (isWknd)            kind = 'weekend';
                           else if (isFuture)     kind = 'future';
@@ -9052,11 +9053,11 @@ const PlanAssist = () => {
                           days.push({ ds, d, isToday, isWknd, kind });
                         }
                         const kindStyle = {
-                          completed: { ring: 'ring-2 ring-green-400', bg: 'bg-green-400', text: 'text-white', icon: '✓' },
-                          shielded:  { ring: 'ring-2 ring-yellow-400', bg: 'bg-yellow-400', text: 'text-white', icon: '🛡' },
-                          missed:    { ring: 'ring-2 ring-red-300', bg: 'bg-red-100', text: 'text-red-400', icon: '✕' },
-                          future:    { ring: '', bg: 'bg-gray-100', text: 'text-gray-400', icon: '' },
-                          weekend:   { ring: '', bg: 'bg-blue-50', text: 'text-blue-300', icon: '–' },
+                          completed: { ring: 'ring-2 ring-green-400', bg: 'bg-green-400', text: 'text-white' },
+                          shielded:  { ring: 'ring-2 ring-yellow-400', bg: 'bg-yellow-400', text: 'text-white' },
+                          missed:    { ring: 'ring-2 ring-red-300', bg: 'bg-red-100', text: 'text-red-400' },
+                          future:    { ring: '', bg: 'bg-gray-100', text: 'text-gray-400' },
+                          weekend:   { ring: '', bg: 'bg-blue-50', text: 'text-blue-300' },
                         };
                         const dayLabels = ['Su','Mo','Tu','We','Th','Fr','Sa'];
                         return (
@@ -9107,13 +9108,11 @@ const PlanAssist = () => {
                             <p className="font-semibold text-gray-900 text-sm">Streak Shield</p>
                             <p className="text-xs text-gray-500 mt-0.5">Protect your streak on missed days</p>
                           </div>
-                          {/* Use Shield button — only shown in manual mode */}
                           {streakShieldMode === 'manual' && (
                           <button
                             disabled={!canUseShield}
                             onClick={async () => {
                               try {
-                                // Send campus-tz today — shield must land on the correct campus date
                                 const r = await apiCall('/streak/shields/use', 'POST', { date: campusToday });
                                 if (r.alreadyShielded) {
                                   setStreakShieldToast('🛡️ This day is already shielded.');
