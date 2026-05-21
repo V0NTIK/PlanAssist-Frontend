@@ -632,19 +632,20 @@ const PlanAssist = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isTimerRunning]);
 
-  // ── Session heartbeat — fires every 30s while the timer is running ─────────
-  // Writes session_heartbeat = NOW() on the active task so the admin Users tab
-  // can detect genuinely live sessions (heartbeat within last 60s) rather than
-  // relying on session_active alone, which can persist after a crash or tab close.
+  // ── Session heartbeat — fires every 30s while a session screen is active ──
+  // Keyed on currentSessionTask (not isTimerRunning) so a paused timer still
+  // counts as an active session for admin visibility purposes.
+  // Writes session_heartbeat = NOW() on the active task; admin Users tab checks
+  // heartbeat > NOW() - 60s to confirm the session is genuinely live.
   useEffect(() => {
-    if (!isTimerRunning) return;
-    // Fire immediately on start, then every 30 seconds
+    if (!currentSessionTask) return;
+    // Fire immediately when session starts, then every 30 seconds
     apiCall('/sessions/heartbeat', 'POST').catch(() => {});
     const hb = setInterval(() => {
       apiCall('/sessions/heartbeat', 'POST').catch(() => {});
     }, 30000);
     return () => clearInterval(hb);
-  }, [isTimerRunning]);
+  }, [currentSessionTask]);
 
   // Pomodoro timer state
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60); // 25 minutes in seconds
