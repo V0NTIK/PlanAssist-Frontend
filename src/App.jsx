@@ -632,6 +632,20 @@ const PlanAssist = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isTimerRunning]);
 
+  // ── Session heartbeat — fires every 30s while the timer is running ─────────
+  // Writes session_heartbeat = NOW() on the active task so the admin Users tab
+  // can detect genuinely live sessions (heartbeat within last 60s) rather than
+  // relying on session_active alone, which can persist after a crash or tab close.
+  useEffect(() => {
+    if (!isTimerRunning) return;
+    // Fire immediately on start, then every 30 seconds
+    apiCall('/sessions/heartbeat', 'POST').catch(() => {});
+    const hb = setInterval(() => {
+      apiCall('/sessions/heartbeat', 'POST').catch(() => {});
+    }, 30000);
+    return () => clearInterval(hb);
+  }, [isTimerRunning]);
+
   // Pomodoro timer state
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60); // 25 minutes in seconds
   const [pomodoroMode, setPomodoroMode] = useState('work'); // 'work', 'shortBreak', 'longBreak'
@@ -1480,7 +1494,7 @@ const PlanAssist = () => {
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
-    if (tab === 'goals') runCourseSync(true, false); // Course Sync with session_active clear + spinner
+    if (tab === 'goals') runCourseSync(false); // Course Sync with spinner
     if (tab === 'streak') {
       loadStreakData();
     }
@@ -1803,11 +1817,10 @@ const PlanAssist = () => {
   };
 
   // ── COURSE SYNC ───────────────────────────────────────────────────────────
-  // clearSessionActive=true for Marks/Goals triggers; false for silent 60-min interval
-  const runCourseSync = async (clearSessionActive = false, silent = false) => {
+  const runCourseSync = async (silent = false) => {
     if (!silent) setCourseSyncLoading(true);
     try {
-      await apiCall('/canvas/course-sync', 'POST', { clearSessionActive });
+      await apiCall('/canvas/course-sync', 'POST', {});
       await loadCourses();
     } catch (err) {
       console.error('[Course Sync] Failed:', err.message);
@@ -4615,7 +4628,7 @@ const PlanAssist = () => {
       const courseSyncInterval = setInterval(() => {
         if (!document.hidden) {
           console.log('[Course Sync] 60-min silent interval triggered');
-          runCourseSync(false, true); // no session_active clear, silent (no spinner)
+          runCourseSync(true); // silent (no spinner)
         }
       }, 60 * 60 * 1000);
       
@@ -4641,7 +4654,7 @@ const PlanAssist = () => {
       loadBadges();
     }
     if (currentPage === 'marks') {
-      runCourseSync(true, false); // Course Sync with session_active clear + spinner
+      runCourseSync(false); // Course Sync with spinner
     }
     if (currentPage === 'sessions') {
       loadSessionTasks();
