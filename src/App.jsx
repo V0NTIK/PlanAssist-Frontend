@@ -97,28 +97,43 @@ function getCampusPeriodsDST(campus) {
   return CAMPUS_PERIODS_DST[campus] || CAMPUS_PERIODS_DST['Ashland'];
 }
 
-// Returns true if the user's local clock is currently observing DST.
-// Compares the UTC offset in January (always standard time) with the current
-// UTC offset; if the current offset is smaller (less negative / more positive)
-// than January's, the clock has sprung forward → DST is active.
 // ── DST detection ─────────────────────────────────────────────────────────────
-// Uses the browser's local DST state as a proxy for North American DST.
-// All OSG campuses that observe DST follow the US/Canada schedule
-// (2nd Sunday March → 1st Sunday November), so the browser's local DST
-// state is always correct regardless of which campus the student attends —
-// DST starts and ends on the same calendar date across all NA time zones.
-// Campuses that never observe DST (Barbados, Jamaica, Maple Creek, Oxbow,
-// Regina, St. Vincent, Trinidad) have dst === standard in CAMPUS_OFFSETS,
-// so the DST flag has no effect on them anyway.
-function isLocalDST() {
-  const now = new Date();
-  const jan = new Date(now.getFullYear(), 0, 1);  // 1 Jan — always standard time
-  return now.getTimezoneOffset() < jan.getTimezoneOffset();
+// Detects whether North American DST is currently active using the UTC date
+// directly, making it independent of the browser's local timezone. This is
+// critical for users whose device is set to a non-DST or non-NA timezone —
+// the browser's getTimezoneOffset() would give the wrong answer for them.
+//
+// NA DST schedule: starts 2nd Sunday in March at 02:00 local, ends 1st Sunday
+// in November at 02:00 local. We compare UTC-based dates to fixed UTC boundaries
+// because all NA DST-observing campuses spring forward/fall back on the same
+// calendar date. We use noon UTC on DST transition dates for safe comparison
+// (transition is at 07:00–09:00 UTC depending on campus, so noon is always past it).
+function isNADST(date = new Date()) {
+  const year = date.getUTCFullYear();
+
+  // 2nd Sunday in March: find first Sunday, then add 7 days
+  const march1 = new Date(Date.UTC(year, 2, 1)); // March 1 UTC
+  const march1Day = march1.getUTCDay(); // 0=Sun
+  const firstSunMarch = march1Day === 0 ? 1 : 8 - march1Day;
+  const secondSunMarch = firstSunMarch + 7;
+  // DST starts at noon UTC on 2nd Sunday in March (safely after all NA spring-forward moments)
+  const dstStart = new Date(Date.UTC(year, 2, secondSunMarch, 12, 0, 0));
+
+  // 1st Sunday in November
+  const nov1 = new Date(Date.UTC(year, 10, 1)); // November 1 UTC
+  const nov1Day = nov1.getUTCDay();
+  const firstSunNov = nov1Day === 0 ? 1 : 8 - nov1Day;
+  // DST ends at noon UTC on 1st Sunday in November (safely after all NA fall-back moments)
+  const dstEnd = new Date(Date.UTC(year, 10, firstSunNov, 12, 0, 0));
+
+  return date >= dstStart && date < dstEnd;
 }
 
-// Returns the correct period range string for a campus, accounting for DST.
+// Returns the correct period range string for a campus, accounting for NA DST.
+// Uses UTC-based DST detection so it works correctly regardless of the user's
+// device timezone setting.
 function getEffectivePeriods(campus) {
-  return isLocalDST()
+  return isNADST()
     ? (CAMPUS_PERIODS_DST[campus] || CAMPUS_PERIODS_DST['Ashland'])
     : (CAMPUS_PERIODS[campus]     || CAMPUS_PERIODS['Ashland']);
 }
@@ -169,7 +184,7 @@ const CAMPUS_OFFSETS = {
 // Returns the campus UTC offset in hours, accounting for current DST state.
 function getCampusOffsetHours(campus) {
   const entry = CAMPUS_OFFSETS[campus] || CAMPUS_OFFSETS['Ashland'];
-  return isLocalDST() ? entry.dst : entry.standard;
+  return isNADST() ? entry.dst : entry.standard;
 }
 
 // Converts a UTC ISO timestamp string to a YYYY-MM-DD date string in the
@@ -427,6 +442,7 @@ const PlanAssist = () => {
     grade: '',
     canvasApiToken: '',
     campus: 'Ashland',
+    tzPeriods: null,  // populated from server; null means fall back to getEffectivePeriods(campus)
     schedule: {},
     classColors: {},
     calendarShowHomeroom: true,
@@ -641,6 +657,11 @@ const PlanAssist = () => {
   // counts as an active session for admin visibility purposes.
   // Uses raw fetch (not apiCall) so a Render cold-start 401 never triggers the
   // sessionExpired modal and kicks the student out of their session.
+  //
+  // Tab-hidden behaviour: setInterval continues firing in hidden tabs but some
+  // browsers throttle it to ~1-minute intervals for power saving. To ensure the
+  // admin panel always sees a fresh heartbeat when the user returns to the tab,
+  // we also send an immediate heartbeat on every visibilitychange → visible event.
   useEffect(() => {
     if (!currentSessionTask) return;
     const sendHeartbeat = () => {
@@ -653,7 +674,14 @@ const PlanAssist = () => {
     };
     sendHeartbeat(); // immediate on session start
     const hb = setInterval(sendHeartbeat, 30000);
-    return () => clearInterval(hb);
+    // Send a heartbeat immediately whenever the tab comes back into focus,
+    // in case the interval was throttled while the tab was hidden.
+    const onVisible = () => { if (!document.hidden) sendHeartbeat(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(hb);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [currentSessionTask]);
 
   // Pomodoro timer state
@@ -739,14 +767,16 @@ const PlanAssist = () => {
     streak: 0
   });
 
-  // Calculate selected periods from campus (DST-aware)
+  // Calculate selected periods from campus (DST-aware).
+  // Prefers tzPeriods from the server (computed at request time, UTC-based DST)
+  // and falls back to client-side getEffectivePeriods if not yet loaded.
   const selectedPeriods = React.useMemo(() => {
-    const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
+    const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
     const [start, end] = range.split('-').map(Number);
     const periods = [];
     for (let i = start; i <= end; i++) periods.push(i);
     return periods;
-  }, [accountSetup.campus]);
+  }, [accountSetup.campus, accountSetup.tzPeriods]);
 
   // Extract class name from task class field or title
   const extractClassName = (task) => {
@@ -941,6 +971,20 @@ const PlanAssist = () => {
       if (savedColors) {
         setAccountSetup(prev => ({ ...prev, classColors: JSON.parse(savedColors) }));
       }
+      // Seed campus + tzPeriods from localStorage so period UI is correct immediately,
+      // before loadUserData completes. Without this, campus defaults to 'Ashland' (2-6)
+      // and west coast users (periods 4-8) see the wrong periods during the loading window.
+      const savedCampus = localStorage.getItem('campus');
+      const savedTzPeriods = localStorage.getItem('tzPeriods');
+      if (savedCampus) {
+        setAccountSetup(prev => ({
+          ...prev,
+          campus: savedCampus,
+          // Recompute tzPeriods at runtime using UTC-based DST in case DST state has
+          // changed since the value was cached (e.g. user loads app near a DST boundary).
+          tzPeriods: getEffectivePeriods(savedCampus),
+        }));
+      }
       // Ping the health endpoint first — if server is cold this waits for it to wake
       // before firing all the real data requests, avoiding a flood of 502 errors
       const warmUp = async () => {
@@ -1001,6 +1045,9 @@ const PlanAssist = () => {
           grade: setupData.grade || '',
           canvasApiToken: setupData.canvasApiToken || '',
           campus: setupData.campus || 'Ashland',
+          // tzPeriods is computed server-side at request time using UTC-based NA DST detection,
+          // so it's always correct regardless of the user's browser timezone.
+          tzPeriods: setupData.tzPeriods || getEffectivePeriods(setupData.campus || 'Ashland'),
         calendarShowHomeroom: setupData.calendarShowHomeroom ?? true,
         calendarShowCompleted: setupData.calendarShowCompleted ?? true,
         calendarShowPrevWeek: setupData.calendarShowPrevWeek ?? false,
@@ -1012,6 +1059,10 @@ const PlanAssist = () => {
           scheduleEnhanced: setupData.schedule_enhanced || false,
           classColors: savedColors ? JSON.parse(savedColors) : {}
         });
+        // Cache campus + tzPeriods so the next page load can show correct periods
+        // immediately, before the API response arrives.
+        localStorage.setItem('campus', setupData.campus || 'Ashland');
+        localStorage.setItem('tzPeriods', setupData.tzPeriods || getEffectivePeriods(setupData.campus || 'Ashland'));
         setScheduleEnhanced(setupData.schedule_enhanced || false);
         // Sync name + isAdmin from DB (in case admin changed it)
         if (setupData.name) {
@@ -1271,6 +1322,8 @@ const PlanAssist = () => {
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
+    localStorage.removeItem('campus');
+    localStorage.removeItem('tzPeriods');
     setToken(null);
     tokenRef.current = null;
     setUser(null);
@@ -1298,6 +1351,9 @@ const PlanAssist = () => {
         calendarShowWeekends: accountSetup.calendarShowWeekends
       });
       localStorage.setItem('classColors', JSON.stringify(accountSetup.classColors));
+      // Keep campus + tzPeriods cache in sync with the saved value
+      localStorage.setItem('campus', accountSetup.campus || 'Ashland');
+      localStorage.setItem('tzPeriods', accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland'));
       
       // Update user state with the new grade so leaderboard can load
       const updatedUser = { ...user, grade: accountSetup.grade };
@@ -1351,6 +1407,11 @@ const PlanAssist = () => {
         const updatedUser = { ...user, grade: patch.grade };
         setUser(updatedUser);
         localStorage.setItem('user', JSON.stringify(updatedUser));
+      }
+      if (patch.campus !== undefined) {
+        const newTzPeriods = getEffectivePeriods(merged.campus || 'Ashland');
+        localStorage.setItem('campus', merged.campus || 'Ashland');
+        localStorage.setItem('tzPeriods', newTzPeriods);
       }
     } catch (err) { console.error('autoSaveSetting failed:', err.message); }
   };
@@ -2639,9 +2700,11 @@ const PlanAssist = () => {
   };
 
   const loadAdminDiagnostics = async () => {
+    setAdminDiagnostics(null); // clear stale data so loading state is visible
     setAdminLoading(true);
     try {
-      const data = await apiCall('/admin/diagnostics', 'GET');
+      const tzOffset = -new Date().getTimezoneOffset(); // minutes east of UTC (positive = east)
+      const data = await apiCall(`/admin/diagnostics?tzOffset=${tzOffset}`, 'GET');
       setAdminDiagnostics(data);
     } catch (err) { console.error(err); }
     finally { setAdminLoading(false); }
@@ -3408,8 +3471,8 @@ const PlanAssist = () => {
     const check = () => {
       const now = new Date();
       const nowUTCMins = now.getUTCHours() * 60 + now.getUTCMinutes();
-      // Use DST-aware period range based on the user's local clock
-      const periodRange = getEffectivePeriods(accountSetup.campus);
+      // Use server-authoritative tzPeriods (UTC-based DST) for period range
+      const periodRange = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus);
       const [rangeStart, rangeEnd] = periodRange.split('-').map(Number);
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
         const period = parseInt(p);
@@ -4740,8 +4803,10 @@ const PlanAssist = () => {
 
   useEffect(() => {
     if (accountSetup.campus) {
-      const range = getCampusPeriods(accountSetup.campus);
-      const [start, end] = range.split('-').map(Number);
+      // Recompute tzPeriods using the UTC-based NA DST function whenever campus changes in the UI.
+      // This keeps the unsaved in-UI state correct even before the server responds.
+      const newTzPeriods = getEffectivePeriods(accountSetup.campus);
+      const [start, end] = newTzPeriods.split('-').map(Number);
       const newSchedule = {};
       const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
       days.forEach(day => {
@@ -4750,8 +4815,14 @@ const PlanAssist = () => {
           newSchedule[day][period] = accountSetup.schedule[day]?.[String(period)] || 'Study';
         }
       });
-      if (JSON.stringify(newSchedule) !== JSON.stringify(accountSetup.schedule)) {
-        setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
+      const scheduleChanged = JSON.stringify(newSchedule) !== JSON.stringify(accountSetup.schedule);
+      const periodsChanged = newTzPeriods !== accountSetup.tzPeriods;
+      if (scheduleChanged || periodsChanged) {
+        setAccountSetup(prev => ({
+          ...prev,
+          tzPeriods: newTzPeriods,
+          ...(scheduleChanged ? { schedule: newSchedule } : {})
+        }));
       }
     }
   }, [accountSetup.campus]);
@@ -7640,7 +7711,7 @@ const PlanAssist = () => {
           );
 
           // Build period list based on the viewed day's schedule
-          const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
+          const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
           const [pStart, pEnd] = range.split('-').map(Number);
           const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
@@ -9421,7 +9492,7 @@ const PlanAssist = () => {
                   onClick={() => {
                     setAdminSection(id);
                     if (id === 'users' && adminUsers.length === 0) loadAdminUsers();
-                    if (id === 'diagnostics' && !adminDiagnostics) loadAdminDiagnostics();
+                    if (id === 'diagnostics') loadAdminDiagnostics();
                     if (id === 'audit') loadAdminAuditLog();
                     if (id === 'announcements') loadAdminAnnouncements();
                     if (id === 'feedback') loadAdminFeedback();
@@ -9924,7 +9995,7 @@ const PlanAssist = () => {
                       {/* Activity Heatmap — time-of-day across all days */}
                       {d.activityHeatmap && (
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-bold text-gray-900 mb-3">Activity Heatmap — Time of Day (all days combined)</h4>
+                          <h4 className="font-bold text-gray-900 mb-3">Activity Heatmap — Time of Day (your local time, all days combined)</h4>
                           <div className="flex items-end gap-1 h-20">
                             {d.activityHeatmap.map((bucket) => {
                               const max = Math.max(...d.activityHeatmap.map(b => b.count), 1);
@@ -10098,7 +10169,7 @@ const PlanAssist = () => {
       {/* ── Enhance Schedule Dialog ─────────────────────────────────────────── */}
       {showEnhanceDialog && (() => {
         const allDays = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-        const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
+        const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
         const [start, end] = range.split('-').map(Number);
         const enhancePeriods = Array.from({ length: end - start + 1 }, (_, i) => start + i);
 
@@ -10290,7 +10361,7 @@ const PlanAssist = () => {
             : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
             : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
           const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-          const range = getEffectivePeriods(accountSetup.campus || 'Ashland');
+          const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
           const [pStart, pEnd] = range.split('-').map(Number);
           const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
           const canSave = tutorialDate && tutorialPeriod;
