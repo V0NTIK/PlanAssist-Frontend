@@ -653,17 +653,18 @@ const PlanAssist = () => {
   }, [isTimerRunning]);
 
   // ── Session heartbeat — fires every 30s while a session screen is active ──
-  // Keyed on currentSessionTask (not isTimerRunning) so a paused timer still
-  // counts as an active session for admin visibility purposes.
+  // Two parallel effects: one keyed on currentSessionTask (regular sessions),
+  // one keyed on currentAgenda (agenda sessions). The heartbeat endpoint writes
+  // NOW() to any task with session_active=true for the user, so it works for both.
   // Uses raw fetch (not apiCall) so a Render cold-start 401 never triggers the
   // sessionExpired modal and kicks the student out of their session.
   //
   // Tab-hidden behaviour: setInterval continues firing in hidden tabs but some
-  // browsers throttle it to ~1-minute intervals for power saving. To ensure the
-  // admin panel always sees a fresh heartbeat when the user returns to the tab,
-  // we also send an immediate heartbeat on every visibilitychange → visible event.
-  useEffect(() => {
-    if (!currentSessionTask) return;
+  // browsers throttle it to ~1-minute intervals for power saving. We also send
+  // an immediate heartbeat on every visibilitychange → visible event to guarantee
+  // a fresh timestamp the moment the user returns to the tab.
+  const _makeHeartbeatEffect = (active) => {
+    if (!active) return;
     const sendHeartbeat = () => {
       const t = tokenRef.current || token;
       if (!t) return;
@@ -672,17 +673,19 @@ const PlanAssist = () => {
         headers: { 'Authorization': `Bearer ${t}`, 'Content-Type': 'application/json' }
       }).catch(() => {}); // fire-and-forget; never throws into React
     };
-    sendHeartbeat(); // immediate on session start
+    sendHeartbeat(); // immediate on session/agenda start
     const hb = setInterval(sendHeartbeat, 30000);
-    // Send a heartbeat immediately whenever the tab comes back into focus,
-    // in case the interval was throttled while the tab was hidden.
     const onVisible = () => { if (!document.hidden) sendHeartbeat(); };
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       clearInterval(hb);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [currentSessionTask]);
+  };
+  // Regular session heartbeat
+  useEffect(() => _makeHeartbeatEffect(currentSessionTask), [currentSessionTask]);
+  // Agenda session heartbeat — currentAgenda is set for the lifetime of an active agenda
+  useEffect(() => _makeHeartbeatEffect(currentAgenda), [currentAgenda]);
 
   // Pomodoro timer state
   const [pomodoroTime, setPomodoroTime] = useState(25 * 60); // 25 minutes in seconds
@@ -3622,6 +3625,7 @@ const PlanAssist = () => {
         [data-planassist-theme="system"] .pa-sync-overlay { background: rgba(255,255,255,0.82); }
         [data-planassist-theme="system"] .pa-sync-card { background: #ffffff; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
         [data-planassist-theme="system"] .pa-sync-text { color: #7c3aed; }
+        [data-planassist-theme="system"] .pa-agenda-card-bottom { background: #ffffff; }
       `,
       warm: `
         :root { color-scheme: light; }
@@ -3635,6 +3639,7 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] .pa-sync-overlay { background: rgba(255,240,245,0.88); }
         [data-planassist-theme="warm"] .pa-sync-card { background: #fff5f8; box-shadow: 0 8px 32px rgba(194,24,91,0.15); }
         [data-planassist-theme="warm"] .pa-sync-text { color: #c2185b; }
+        [data-planassist-theme="warm"] .pa-agenda-card-bottom { background: #fff5f8; }
         [data-planassist-theme="warm"] .pa-sync-card .border-purple-600 { border-color: #e91e8c !important; }
         /* ── Page background: white ──────────────────────────── */
         [data-planassist-theme="warm"] { background: #ffffff !important; }
@@ -3791,6 +3796,7 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] .pa-sync-overlay { background: rgba(10,15,10,0.82); }
         [data-planassist-theme="cool"] .pa-sync-card { background: #192218; box-shadow: 0 8px 32px rgba(0,0,0,0.50); }
         [data-planassist-theme="cool"] .pa-sync-text { color: #66bb6a; }
+        [data-planassist-theme="cool"] .pa-agenda-card-bottom { background: #192218; }
         [data-planassist-theme="cool"] .pa-sync-card .border-purple-600 { border-color: #43a047 !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="cool"] { background: #0a0f0a !important; color: #e8f5e9; }
@@ -3980,6 +3986,7 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] .pa-sync-overlay { background: rgba(13,13,20,0.82); }
         [data-planassist-theme="dark"] .pa-sync-card { background: #13131f; box-shadow: 0 8px 32px rgba(0,0,0,0.60); }
         [data-planassist-theme="dark"] .pa-sync-text { color: #b39ddb; }
+        [data-planassist-theme="dark"] .pa-agenda-card-bottom { background: #1e1e30; }
         [data-planassist-theme="dark"] .pa-sync-card .border-purple-600 { border-color: #7c4dff !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="dark"] { background: #0d0d14 !important; color: #e8eaf6; }
@@ -7196,7 +7203,17 @@ const PlanAssist = () => {
           const isLastRow = agendaCurrentRow >= rows.length - 1;
           const rowTask = currentRow?.task || (currentRow?.taskId ? tasks.find(t => t.id === currentRow.taskId) : null);
           const classColor = rowTask ? getClassColor(rowTask.class) : '#a855f7';
-          const dueDate = rowTask ? tasks.find(t => t.id === rowTask.id)?.dueDate : null;
+          // dueDate: prefer hydrated Date from tasks[], fall back to constructing from
+          // raw server fields (deadline_date / deadline_time) on the embedded row task.
+          const dueDate = rowTask
+            ? (rowTask.dueDate instanceof Date
+                ? rowTask.dueDate
+                : rowTask.deadline_date
+                  ? (rowTask.deadline_time
+                      ? new Date(`${String(rowTask.deadline_date).split('T')[0]}T${rowTask.deadline_time}Z`)
+                      : new Date(`${String(rowTask.deadline_date).split('T')[0]}T12:00:00`))
+                  : (tasks.find(t => t.id === rowTask.id)?.dueDate || null))
+            : null;
           const countdownMins = Math.floor((agendaCountdown || 0) / 60);
           const countdownSecs = (agendaCountdown || 0) % 60;
           const countdownStr = `${String(countdownMins).padStart(2,'0')}:${String(countdownSecs).padStart(2,'0')}`;
@@ -7334,7 +7351,7 @@ const PlanAssist = () => {
                           </button>
                         </div>
                         {/* Session card bottom */}
-                        <div className="bg-white p-4 space-y-2">
+                        <div className="pa-agenda-card-bottom p-4 space-y-2">
                           <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
                             <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Est. {rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—'} min</span>
                             {dueDate && (
@@ -10503,12 +10520,20 @@ const PlanAssist = () => {
                 <h2 className="text-xl font-bold">{cleanTaskTitle(workspaceTask)}</h2>
                 <p className="text-sm text-purple-100">
                   <span className="mr-3">{extractClassName(workspaceTask)}</span>
-                  <span>Due: {workspaceTask.dueDate
-                    ? workspaceTask.dueDate.toLocaleDateString()
-                    : workspaceTask.deadlineDateRaw
-                      ? new Date(workspaceTask.deadlineDateRaw + 'T12:00:00').toLocaleDateString()
-                      : '—'
-                  }</span>
+                  <span>Due: {(() => {
+                    // workspaceTask may be a hydrated task (dueDate/deadlineDateRaw)
+                    // or a raw agenda row task (deadline_date/deadline_time, snake_case).
+                    if (workspaceTask.dueDate instanceof Date) return workspaceTask.dueDate.toLocaleDateString();
+                    if (workspaceTask.deadlineDateRaw) return new Date(workspaceTask.deadlineDateRaw + 'T12:00:00').toLocaleDateString();
+                    if (workspaceTask.deadline_date) {
+                      const base = String(workspaceTask.deadline_date).split('T')[0];
+                      const d = workspaceTask.deadline_time
+                        ? new Date(`${base}T${workspaceTask.deadline_time}Z`)
+                        : new Date(`${base}T12:00:00`);
+                      return d.toLocaleDateString();
+                    }
+                    return '—';
+                  })()}</span>
                 </p>
               </div>
               <button
