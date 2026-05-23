@@ -3626,6 +3626,7 @@ const PlanAssist = () => {
         [data-planassist-theme="system"] .pa-sync-card { background: #ffffff; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
         [data-planassist-theme="system"] .pa-sync-text { color: #7c3aed; }
         [data-planassist-theme="system"] .pa-agenda-card-bottom { background: #ffffff; }
+        [data-planassist-theme="system"] .pa-agenda-bg { background: linear-gradient(135deg, #f9fafb, #f3e8ff); }
       `,
       warm: `
         :root { color-scheme: light; }
@@ -3640,6 +3641,7 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] .pa-sync-card { background: #fff5f8; box-shadow: 0 8px 32px rgba(194,24,91,0.15); }
         [data-planassist-theme="warm"] .pa-sync-text { color: #c2185b; }
         [data-planassist-theme="warm"] .pa-agenda-card-bottom { background: #fff5f8; }
+        [data-planassist-theme="warm"] .pa-agenda-bg { background: linear-gradient(135deg, #fff0f5, #fce4ec); }
         [data-planassist-theme="warm"] .pa-sync-card .border-purple-600 { border-color: #e91e8c !important; }
         /* ── Page background: white ──────────────────────────── */
         [data-planassist-theme="warm"] { background: #ffffff !important; }
@@ -3797,6 +3799,7 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] .pa-sync-card { background: #192218; box-shadow: 0 8px 32px rgba(0,0,0,0.50); }
         [data-planassist-theme="cool"] .pa-sync-text { color: #66bb6a; }
         [data-planassist-theme="cool"] .pa-agenda-card-bottom { background: #192218; }
+        [data-planassist-theme="cool"] .pa-agenda-bg { background: linear-gradient(135deg, #0a0f0a, #111811); }
         [data-planassist-theme="cool"] .pa-sync-card .border-purple-600 { border-color: #43a047 !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="cool"] { background: #0a0f0a !important; color: #e8f5e9; }
@@ -3987,6 +3990,7 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] .pa-sync-card { background: #13131f; box-shadow: 0 8px 32px rgba(0,0,0,0.60); }
         [data-planassist-theme="dark"] .pa-sync-text { color: #b39ddb; }
         [data-planassist-theme="dark"] .pa-agenda-card-bottom { background: #1e1e30; }
+        [data-planassist-theme="dark"] .pa-agenda-bg { background: linear-gradient(135deg, #0d0d14, #13131f); }
         [data-planassist-theme="dark"] .pa-sync-card .border-purple-600 { border-color: #7c4dff !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="dark"] { background: #0d0d14 !important; color: #e8eaf6; }
@@ -7219,7 +7223,7 @@ const PlanAssist = () => {
           const countdownStr = `${String(countdownMins).padStart(2,'0')}:${String(countdownSecs).padStart(2,'0')}`;
 
           return (
-            <div className="min-h-screen bg-gradient-to-br from-gray-50 to-purple-50 flex flex-col" data-planassist-theme={colorTheme}>
+            <div className="min-h-screen pa-agenda-bg flex flex-col" data-planassist-theme={colorTheme}>
               {/* Top bar */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
                 <h2 className="text-lg font-bold text-gray-900">{currentAgenda.name}</h2>
