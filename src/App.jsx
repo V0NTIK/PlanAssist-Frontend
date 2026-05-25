@@ -463,6 +463,8 @@ const PlanAssist = () => {
   const [showSessionComplete, setShowSessionComplete] = useState(false);
   const pipWindowRef = React.useRef(null);        // holds the documentPictureInPicture window
   const [pipActive, setPipActive] = useState(false);  // true while PiP window is open
+  const [pipPopupMode, setPipPopupMode] = useState(null); // 'micro' | 'macro' | 'alt'
+  const [pipPopupSelectorOpen, setPipPopupSelectorOpen] = useState(false);
   const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
   const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
 
@@ -2058,7 +2060,7 @@ const PlanAssist = () => {
       setIsTimerRunning(true);
       setCurrentPage('session-active');
       pipSessionActiveRef.current = true;
-      launchSessionPiP(task, earlyPipRequest);
+      launchSessionPiP(task, earlyPipRequest, pipPopupMode);
     } catch (err) {
       // If the API call failed, close the early PiP window if it already opened
       if (earlyPipRequest) earlyPipRequest.then(w => { try { w.close(); } catch(e){} }).catch(()=>{});
@@ -2284,14 +2286,18 @@ const PlanAssist = () => {
     window.__pa_agendaCountdownSnap    = agendaCountdown;
   }); // intentionally no deps — must run after EVERY render
 
-  const launchSessionPiP = (task, pipPromise) => {
+  const launchSessionPiP = (task, pipPromise, mode) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     pipIntentionalCloseRef.current = true; if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
 
     window.__pa_pipTask = task;
+    const pipMode = mode || pipPopupMode || 'macro';
 
-    // Use the pre-requested window (from inside the click handler) or open a fresh one
-    const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: 380, height: 430 });
+    const isMicro = pipMode === 'micro';
+    const w = isMicro ? 220 : 340;
+    const h = isMicro ? 110 : 300;
+
+    const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
     winPromise.then((pipWin) => {
       pipWindowRef.current = pipWin;
@@ -2302,51 +2308,60 @@ const PlanAssist = () => {
       style.textContent = buildPipStyles(t);
       pipWin.document.head.appendChild(style);
 
-      const classLabel = task.class ? task.class.replace(/[\[\]]/g,'') : 'No Class';
-      const classColor = getClassColor(task.class);
-      const titleText  = cleanTaskTitle(task);
-      const estMins    = task.userEstimate || task.estimatedTime || '—';
-      const dueDateStr = task.deadlineDateRaw
-        ? (task.dueDate || new Date(task.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US',{month:'short',day:'numeric'})
-        : null;
-      const prevMins = task.accumulatedTime > 0
-        ? (task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60))
-        : null;
+      const titleText = cleanTaskTitle(task);
       const initElapsed = task.accumulatedTime || 0;
       const initMins = Math.floor(initElapsed / 60);
       const initSecs = initElapsed % 60;
+      const initStr = `${initMins}:${String(initSecs).padStart(2,'0')}`;
 
-      pipWin.document.body.innerHTML = `
-        <div class="pip-card">
-          <div class="pip-top">
-            <div class="pip-class">
-              <span class="pip-class-dot" style="background:${classColor}"></span>
-              <span>${classLabel}</span>
-            </div>
-            <div class="pip-title">${titleText}</div>
-            <div class="pip-timer" id="pip-elapsed">${initMins}:${String(initSecs).padStart(2,'0')}</div>
-            <div class="pip-timer-label">Time on this task</div>
-            <div class="pip-btn-row">
-              <button class="pip-btn pip-btn-pause" id="pip-pause-btn" onclick="window.opener.__pa_pipPauseResume()">⏸ Pause Timer</button>
-              <button class="pip-btn pip-btn-exit" id="pip-exit-btn" onclick="window.opener.__pa_pipSaveExit()">✕ Save &amp; Exit</button>
-            </div>
-          </div>
-          <div class="pip-bottom">
-            <div class="pip-meta">
-              <span>🕐 Est. ${estMins} min</span>
-              ${dueDateStr ? `<span>📅 Due ${dueDateStr}</span>` : ''}
-              ${prevMins ? `<span class="pip-meta-prev">⏱ ${prevMins} min prev.</span>` : ''}
-            </div>
-            <button class="pip-btn-complete" id="pip-complete-btn" onclick="window.opener.__pa_pipMarkComplete()">✓ Mark Complete</button>
-            <button class="pip-btn-workspace" onclick="window.opener.__pa_pipOpenWorkspace()">📖 Open Workspace</button>
-          </div>
-        </div>
-      `;
+      if (isMicro) {
+        // Micro: just the timer
+        pipWin.document.body.innerHTML = `
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;font-family:system-ui,sans-serif;">
+            <div style="font-size:10px;color:${t.topSubtext};margin-bottom:4px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;">${titleText}</div>
+            <div id="pip-elapsed" style="font-size:44px;font-weight:800;color:white;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;">${initStr}</div>
+            <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
+          </div>`;
+      } else {
+        // Macro: timer + icon buttons
+        const classLabel = task.class ? task.class.replace(/[\[\]]/g,'') : 'No Class';
+        const classColor = getClassColor(task.class);
+        const estMins = task.userEstimate || task.estimatedTime || '—';
+        const dueDateStr = task.deadlineDateRaw
+          ? (task.dueDate || new Date(task.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US',{month:'short',day:'numeric'})
+          : null;
+        const prevMins = task.accumulatedTime > 0
+          ? (task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60)) : null;
 
-      // X/close = Save & Exit. Calls through window.__pa_pipSaveExit which the
-      // per-render effect keeps pointing at the latest pauseTaskSession closure.
+        pipWin.document.body.innerHTML = `
+          <div class="pip-card">
+            <div class="pip-top">
+              <div class="pip-class">
+                <span class="pip-class-dot" style="background:${classColor}"></span>
+                <span>${classLabel}</span>
+              </div>
+              <div class="pip-title">${titleText}</div>
+              <div class="pip-timer" id="pip-elapsed">${initStr}</div>
+              <div class="pip-timer-label">Time on this task</div>
+              <div class="pip-btn-row">
+                <button class="pip-btn pip-btn-pause" id="pip-pause-btn" title="Pause/Resume" onclick="window.opener.__pa_pipPauseResume()">⏸</button>
+                <button class="pip-btn pip-btn-complete" id="pip-complete-btn-top" title="Mark Complete" onclick="window.opener.__pa_pipMarkComplete()" style="background:rgba(34,197,94,0.3);color:white;padding:7px 12px;">✓</button>
+                <button class="pip-btn pip-btn-exit" id="pip-exit-btn" title="Save & Exit" onclick="window.opener.__pa_pipSaveExit()">✕</button>
+              </div>
+            </div>
+            <div class="pip-bottom">
+              <div class="pip-meta">
+                <span>🕐 Est. ${estMins} min</span>
+                ${dueDateStr ? `<span>📅 Due ${dueDateStr}</span>` : ''}
+                ${prevMins ? `<span class="pip-meta-prev">⏱ ${prevMins} min prev.</span>` : ''}
+              </div>
+              <button class="pip-btn-workspace" onclick="window.opener.__pa_pipOpenWorkspace()">📖 Open Workspace</button>
+            </div>
+          </div>`;
+      }
+
       pipWin.addEventListener('pagehide', () => {
-        if (pipIntentionalCloseRef.current) return; // we closed it programmatically
+        if (pipIntentionalCloseRef.current) return;
         pipWindowRef.current = null;
         setPipActive(false);
         if (pipSessionActiveRef.current) {
@@ -2356,18 +2371,21 @@ const PlanAssist = () => {
     }).catch(err => console.error('Session PiP launch failed:', err));
   };
 
-  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise, currentElapsed) => {
+  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise, currentElapsed, mode) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     pipIntentionalCloseRef.current = true; if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
 
     const initCountdown = initialCountdown ?? (currentRow?.timeMins || 25) * 60;
-    // currentElapsed: the actual seconds already elapsed on this row (for initial display)
     const initElapsed = currentElapsed ?? 0;
-
     window.__pa_pipAgendaTask = rowTask;
 
-    // Use pre-requested window (gesture-bound) or open a fresh one (Reopen Popup)
-    const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: 400, height: 470 });
+    const pipMode = mode || pipPopupMode || 'macro';
+    const isMicro = pipMode === 'micro';
+    const isAlt   = pipMode === 'alt';
+    const w = isMicro ? 220 : 360;
+    const h = isMicro ? 110 : isAlt ? 220 : 340;
+
+    const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
     winPromise.then((pipWin) => {
       pipWindowRef.current = pipWin;
@@ -2375,67 +2393,112 @@ const PlanAssist = () => {
 
       const t = getPipTheme(colorTheme);
       const style = pipWin.document.createElement('style');
-      style.textContent = buildPipStyles(t);
+      // Extend base styles with alt-mode ring
+      style.textContent = buildPipStyles(t) + `
+        .pip-alt-ring-wrap { position:relative; width:120px; height:120px; margin:0 auto 8px; }
+        .pip-alt-ring-bg { fill:none; stroke:rgba(255,255,255,0.2); stroke-width:10; }
+        .pip-alt-ring-fg { fill:none; stroke:white; stroke-width:10; stroke-linecap:round;
+          transform:rotate(-90deg); transform-origin:60px 60px; transition:stroke-dashoffset 1s linear; }
+        .pip-alt-ring-fg.flash { stroke:#fca5a5; animation:pa-pulse 1s infinite; }
+        .pip-alt-time { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; }
+        .pip-alt-cd { font-size:28px; font-weight:800; color:white; font-variant-numeric:tabular-nums; line-height:1; }
+        .pip-alt-label { font-size:9px; color:${t.topSubtext}; margin-top:2px; }
+      `;
       pipWin.document.head.appendChild(style);
 
-      const rows        = agenda.rows || [];
-      const isLast      = rowIdx >= rows.length - 1;
-      const classLabel  = rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class';
-      const classColor  = rowTask ? getClassColor(rowTask.class) : '#a855f7';
-      const titleText   = rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow?.taskId}`;
-      const actionText  = currentRow?.action || 'Work on Task';
-      const estMins     = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
+      const rows = agenda.rows || [];
+      const isLast = rowIdx >= rows.length - 1;
+      const titleText = rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow?.taskId}`;
+      const classColor = rowTask ? getClassColor(rowTask.class) : '#a855f7';
+      const classLabel = rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class';
       const rowCountStr = `Row ${rowIdx + 1} of ${rows.length}`;
-      const zoneMap     = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
-      const zoneLabel   = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
 
-      // Render both timers from actual current values
-      const cdMins = Math.floor(initCountdown / 60);
-      const cdSecs = initCountdown % 60;
-      const cdStr  = `${cdMins}:${String(cdSecs).padStart(2,'0')}`;
-      const elMins = Math.floor(initElapsed / 60);
-      const elSecs = initElapsed % 60;
-      const elStr  = `${elMins}:${String(elSecs).padStart(2,'0')}`;
+      const cdMins = Math.floor(initCountdown / 60); const cdSecs = initCountdown % 60;
+      const cdStr = `${cdMins}:${String(cdSecs).padStart(2,'0')}`;
+      const elMins = Math.floor(initElapsed / 60); const elSecs = initElapsed % 60;
+      const elStr = `${elMins}:${String(elSecs).padStart(2,'0')}`;
 
-      pipWin.document.body.innerHTML = `
-        <div class="pip-card">
-          <div class="pip-top">
-            <div class="pip-class">
-              <span class="pip-class-dot" style="background:${classColor}"></span>
-              <span>${classLabel}</span>
-            </div>
-            <div class="pip-title">${titleText}</div>
-            <div class="pip-action">${actionText}</div>
-            ${zoneLabel ? `<div class="pip-zone">${zoneLabel}</div>` : ''}
-            <div class="pip-timer-row">
-              <div style="text-align:center">
-                <div class="pip-elapsed" id="pip-agenda-elapsed">${elStr}</div>
-                <div class="pip-timer-sub">elapsed</div>
+      if (isMicro) {
+        pipWin.document.body.innerHTML = `
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;font-family:system-ui,sans-serif;">
+            <div style="font-size:10px;color:${t.topSubtext};margin-bottom:4px;text-align:center;">${titleText}</div>
+            <div id="pip-agenda-elapsed" style="font-size:44px;font-weight:800;color:white;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;">${elStr}</div>
+            <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
+          </div>`;
+      } else if (isAlt) {
+        // Alt: countdown ring + controls
+        const totalSecs = (currentRow?.timeMins || 25) * 60;
+        const circumference = 2 * Math.PI * 54; // r=54
+        const pct = Math.max(0, Math.min(1, initCountdown / totalSecs));
+        const dashoffset = circumference * (1 - pct);
+        pipWin.document.body.innerHTML = `
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif;gap:6px;">
+            <div style="font-size:10px;color:${t.topSubtext};text-align:center;margin-bottom:2px;">${classLabel} · ${rowCountStr}</div>
+            <div class="pip-alt-ring-wrap" id="pip-alt-ring-wrap">
+              <svg viewBox="0 0 120 120" width="120" height="120">
+                <circle class="pip-alt-ring-bg" cx="60" cy="60" r="54"/>
+                <circle class="pip-alt-ring-fg${initCountdown <= 0 ? ' flash' : ''}" id="pip-alt-ring-fg"
+                  cx="60" cy="60" r="54"
+                  stroke-dasharray="${circumference}"
+                  stroke-dashoffset="${dashoffset}"/>
+              </svg>
+              <div class="pip-alt-time">
+                <div class="pip-alt-cd" id="pip-agenda-countdown">${cdStr}</div>
+                <div class="pip-alt-label">remaining</div>
               </div>
-              <div style="text-align:center">
-                <div class="pip-countdown" id="pip-agenda-countdown">${cdStr}</div>
-                <div class="pip-timer-sub">remaining</div>
+            </div>
+            <div style="display:flex;gap:8px;justify-content:center;">
+              <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" title="Start/Pause" onclick="window.opener.__pa_pipAgendaPauseResume()">▶</button>
+              <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" title="${isLast ? 'Finish' : 'Proceed'}" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓' : '→'}</button>
+              <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" title="Save & Exit" onclick="window.opener.__pa_pipAgendaSaveExit()">✕</button>
+            </div>
+            <div id="pip-agenda-elapsed" style="display:none;">${elStr}</div>
+          </div>`;
+        // Store total for ring sync
+        pipWin.__pa_totalSecs = totalSecs;
+        pipWin.__pa_circumference = circumference;
+      } else {
+        // Macro
+        const actionText = currentRow?.action || 'Work on Task';
+        const zoneMap = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
+        const zoneLabel = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
+        const estMins = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
+        pipWin.document.body.innerHTML = `
+          <div class="pip-card">
+            <div class="pip-top">
+              <div class="pip-class"><span class="pip-class-dot" style="background:${classColor}"></span><span>${classLabel}</span></div>
+              <div class="pip-title">${titleText}</div>
+              <div class="pip-action">${actionText}</div>
+              ${zoneLabel ? `<div class="pip-zone">${zoneLabel}</div>` : ''}
+              <div class="pip-timer-row">
+                <div style="text-align:center">
+                  <div class="pip-elapsed" id="pip-agenda-elapsed">${elStr}</div>
+                  <div class="pip-timer-sub">elapsed</div>
+                </div>
+                <div style="text-align:center">
+                  <div class="pip-countdown" id="pip-agenda-countdown">${cdStr}</div>
+                  <div class="pip-timer-sub">remaining</div>
+                </div>
+              </div>
+              <div class="pip-btn-row">
+                <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start</button>
+                <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Proceed'}</button>
+                <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" onclick="window.opener.__pa_pipAgendaSaveExit()">✕</button>
               </div>
             </div>
-            <div class="pip-btn-row">
-              <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start Timer</button>
-              <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Proceed'}</button>
-              <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
+            <div class="pip-bottom">
+              <div class="pip-meta">
+                <span>🕐 Est. ${estMins} min</span>
+                <span style="color:${t.metaRowColor};font-weight:600">${rowCountStr}</span>
+              </div>
+              <button class="pip-btn-complete" id="pip-agenda-complete-btn" onclick="window.opener.__pa_pipAgendaMarkComplete()">✓ Mark Complete</button>
+              <button class="pip-btn-workspace" onclick="window.opener.__pa_pipAgendaOpenWorkspace()">📖 Open Workspace</button>
             </div>
-          </div>
-          <div class="pip-bottom">
-            <div class="pip-meta">
-              <span>🕐 Est. ${estMins} min</span>
-              <span style="color:${t.metaRowColor};font-weight:600">${rowCountStr}</span>
-            </div>
-            <button class="pip-btn-complete" id="pip-agenda-complete-btn" onclick="window.opener.__pa_pipAgendaMarkComplete()">✓ Mark Complete</button>
-            <button class="pip-btn-workspace" onclick="window.opener.__pa_pipAgendaOpenWorkspace()">📖 Open Workspace</button>
-          </div>
-        </div>
-      `;
+          </div>`;
+      }
 
       pipWin.addEventListener('pagehide', () => {
-        if (pipIntentionalCloseRef.current) return; // we closed it programmatically
+        if (pipIntentionalCloseRef.current) return;
         pipWindowRef.current = null;
         setPipActive(false);
         if (pipSessionActiveRef.current) {
@@ -2456,32 +2519,21 @@ const PlanAssist = () => {
     const secs = sessionElapsed % 60;
     elEl.textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
 
+    // Macro-only elements (absent in micro mode)
     const pauseBtn = pipWin.document.getElementById('pip-pause-btn');
     if (pauseBtn) {
-      pauseBtn.textContent = isTimerRunning ? '⏸ Pause Timer' : '▶ Resume Timer';
+      pauseBtn.textContent = isTimerRunning ? '⏸' : '▶';
       pauseBtn.disabled = savingSession || markingComplete;
     }
-
     const exitBtn = pipWin.document.getElementById('pip-exit-btn');
     if (exitBtn) {
-      if (savingSession) {
-        exitBtn.innerHTML = '<span class="pip-spinner"></span> Saving…';
-        exitBtn.disabled = true;
-      } else {
-        exitBtn.innerHTML = '✕ Save &amp; Exit';
-        exitBtn.disabled = markingComplete;
-      }
+      if (savingSession) { exitBtn.innerHTML = '<span class="pip-spinner"></span>'; exitBtn.disabled = true; }
+      else { exitBtn.innerHTML = '✕'; exitBtn.disabled = markingComplete; }
     }
-
-    const completeBtn = pipWin.document.getElementById('pip-complete-btn');
+    const completeBtn = pipWin.document.getElementById('pip-complete-btn-top');
     if (completeBtn) {
-      if (markingComplete) {
-        completeBtn.innerHTML = '<span class="pip-spinner pip-spinner-green"></span> Marking Complete…';
-        completeBtn.disabled = true;
-      } else {
-        completeBtn.innerHTML = '✓ Mark Complete';
-        completeBtn.disabled = savingSession;
-      }
+      if (markingComplete) { completeBtn.innerHTML = '<span class="pip-spinner pip-spinner-green"></span>'; completeBtn.disabled = true; }
+      else { completeBtn.innerHTML = '✓'; completeBtn.disabled = savingSession; }
     }
   }, [sessionElapsed, isTimerRunning, savingSession, markingComplete]);
 
@@ -2505,44 +2557,53 @@ const PlanAssist = () => {
       else cdEl.classList.remove('flash');
     }
 
+    // Alt mode: update the SVG ring
+    const ringFg = pipWin.document.getElementById('pip-alt-ring-fg');
+    if (ringFg && pipWin.__pa_totalSecs) {
+      const pct = Math.max(0, Math.min(1, (agendaCountdown || 0) / pipWin.__pa_totalSecs));
+      const offset = pipWin.__pa_circumference * (1 - pct);
+      ringFg.setAttribute('stroke-dashoffset', offset);
+      if (agendaCountdownFlash) ringFg.classList.add('flash');
+      else ringFg.classList.remove('flash');
+    }
+
     const pauseBtn = pipWin.document.getElementById('pip-agenda-pause-btn');
     if (pauseBtn) {
-      pauseBtn.textContent = agendaRunning ? '⏸ Pause Timer' : (agendaElapsed > 0 ? '▶ Resume Timer' : '▶ Start Timer');
+      const isMacro = !!pipWin.document.getElementById('pip-agenda-complete-btn');
+      pauseBtn.textContent = agendaRunning
+        ? (isMacro ? '⏸ Pause' : '⏸')
+        : (agendaElapsed > 0 ? (isMacro ? '▶ Resume' : '▶') : (isMacro ? '▶ Start' : '▶'));
       pauseBtn.disabled = agendaProceedLoading || agendaExitLoading;
     }
 
     const proceedBtn = pipWin.document.getElementById('pip-agenda-proceed-btn');
     if (proceedBtn) {
-      if (agendaProceedLoading) {
-        proceedBtn.innerHTML = '<span class="pip-spinner"></span>';
-        proceedBtn.disabled = true;
-      } else {
-        proceedBtn.disabled = agendaExitLoading;
-      }
+      if (agendaProceedLoading) { proceedBtn.innerHTML = '<span class="pip-spinner"></span>'; proceedBtn.disabled = true; }
+      else { proceedBtn.disabled = agendaExitLoading; }
     }
 
     const exitBtn = pipWin.document.getElementById('pip-agenda-exit-btn');
     if (exitBtn) {
-      if (agendaExitLoading) {
-        exitBtn.innerHTML = '<span class="pip-spinner"></span> Saving…';
-        exitBtn.disabled = true;
-      } else {
-        exitBtn.innerHTML = '✕ Exit';
-        exitBtn.disabled = agendaProceedLoading;
-      }
+      if (agendaExitLoading) { exitBtn.innerHTML = '<span class="pip-spinner"></span>'; exitBtn.disabled = true; }
+      else { exitBtn.innerHTML = '✕'; exitBtn.disabled = agendaProceedLoading; }
     }
 
     const completeBtn = pipWin.document.getElementById('pip-agenda-complete-btn');
     if (completeBtn) {
-      if (agendaProceedLoading) {
-        completeBtn.innerHTML = '<span class="pip-spinner pip-spinner-green"></span> Marking…';
-        completeBtn.disabled = true;
-      } else {
-        completeBtn.innerHTML = '✓ Mark Complete';
-        completeBtn.disabled = agendaExitLoading;
-      }
+      if (agendaProceedLoading) { completeBtn.innerHTML = '<span class="pip-spinner pip-spinner-green"></span> Marking…'; completeBtn.disabled = true; }
+      else { completeBtn.innerHTML = '✓ Mark Complete'; completeBtn.disabled = agendaExitLoading; }
     }
   }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, agendaProceedLoading, agendaExitLoading]);
+
+  // Close pip popup selector on outside click
+  useEffect(() => {
+    if (!pipPopupSelectorOpen) return;
+    const handler = (e) => {
+      if (!e.target.closest('[data-pip-selector]')) setPipPopupSelectorOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [pipPopupSelectorOpen]);
 
   const handleStartEditTime = (taskId, currentTime) => {
     setEditingTimeTaskId(taskId);
@@ -2742,7 +2803,7 @@ const PlanAssist = () => {
     setCurrentPage('agenda-active');
     pipSessionActiveRef.current = true;
     // Defer HTML injection one tick so state is committed; pass pre-requested promise
-    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown, earlyPipRequest, taskAccumSecs), 0);
+    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown, earlyPipRequest, taskAccumSecs, pipPopupMode), 0);
   };
 
   const agendaSaveAndExit = async () => {
@@ -2935,7 +2996,7 @@ const PlanAssist = () => {
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
         // Relaunch PiP for the new row, passing the pre-requested window promise
         const updatedAgenda = { ...currentAgenda, current_row: nextRow, rows };
-        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown, nextPipPromise, nextTaskAccumSecs), 0);
+        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown, nextPipPromise, nextTaskAccumSecs, pipPopupMode), 0);
       }
     } catch (err) {
       console.error('Mark complete failed:', err);
@@ -7225,144 +7286,118 @@ const PlanAssist = () => {
           );
         })()}
 
-        {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete || currentAgenda) && (
-          typeof window.documentPictureInPicture !== 'undefined' ? (
-            /* ── PiP overlay: session runs in the floating window ── */
-            showSessionComplete ? (
-              /* Completion screen still shows in-page after Mark Complete */
-              <div className="max-w-lg mx-auto p-6">
-                <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
-                  <Check className="w-16 h-16 mx-auto mb-4" />
-                  <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
-                  <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
-                </div>
-                <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
-                  <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
-                  <div className="text-gray-500">Total time spent</div>
-                </div>
-                <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
-                  className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                  Back to Focus
-                </button>
+        {currentPage === 'session-active' && (currentSessionTask || showSessionComplete) && (
+          showSessionComplete ? (
+            <div className="max-w-lg mx-auto p-6">
+              <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
+                <Check className="w-16 h-16 mx-auto mb-4" />
+                <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
+                <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
               </div>
-            ) : (
-              /* Blurred "session active" holding screen */
-              <div className="fixed inset-0 z-40 flex flex-col items-center justify-center" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', backgroundColor: 'rgba(0,0,0,0.45)' }}>
-                <div className="bg-white rounded-2xl shadow-2xl p-10 max-w-sm w-full mx-4 text-center">
-                  <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-5">
-                    <Timer className="w-8 h-8 text-white" />
-                  </div>
-                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
-                    {currentPage === 'agenda-active' ? 'Agenda in Progress' : 'Session in Progress'}
-                  </h2>
-                  <p className="text-gray-500 text-sm mb-1">
-                    {currentPage === 'agenda-active'
-                      ? `Running: ${currentAgenda?.name || 'Agenda'}`
-                      : `Working on: ${currentSessionTask ? cleanTaskTitle(currentSessionTask) : ''}`}
-                  </p>
-                  <p className="text-gray-400 text-xs mb-8">Your timer is running in the popup window.</p>
-                  <button
-                    onClick={() => {
-                      if (currentPage === 'session-active' && currentSessionTask) {
-                        launchSessionPiP(currentSessionTask);
-                      } else if (currentPage === 'agenda-active' && currentAgenda) {
-                        const rows = currentAgenda.rows || [];
-                        const row = rows[agendaCurrentRow];
-                        launchAgendaPiP(currentAgenda, agendaCurrentRow, row?.task || null, row || null, agendaCountdown, null, agendaElapsed);
-                      }
-                    }}
-                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors mb-3"
-                  >
-                    <Play className="w-4 h-4" /> Reopen Popup
-                  </button>
-                  <p className="text-gray-400 text-xs">Use Save &amp; Exit in the popup to leave the session.</p>
-                </div>
+              <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
+                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
+                <div className="text-gray-500">Total time spent</div>
               </div>
-            )
-          ) : (
-            /* ── Fallback: PiP not supported — original in-page render ── */
-            showSessionComplete ? (
-              <div className="max-w-lg mx-auto p-6">
-                <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
-                  <Check className="w-16 h-16 mx-auto mb-4" />
-                  <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
-                  <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
-                </div>
-                <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
-                  <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
-                  <div className="text-gray-500">Total time spent</div>
-                </div>
-                <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
-                  className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                  Back to Focus
-                </button>
-              </div>
-            ) : (
-              <div className="max-w-lg mx-auto p-6">
-                <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white rounded-xl p-8 mb-5">
-                  <div className="text-center mb-6">
-                    <div className="flex items-center justify-center gap-2 mb-3">
-                      <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(currentSessionTask.class) }} />
-                      <span className="text-purple-200 text-sm font-medium">
-                        {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g, '') : 'No Class'}
-                      </span>
+              <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
+                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                Back to Focus
+              </button>
+            </div>
+          ) : (() => {
+            const t = getPipTheme(colorTheme);
+            const pipSupported = typeof window.documentPictureInPicture !== 'undefined';
+            const sessionClassColor = getClassColor(currentSessionTask.class);
+            const sessionDueDateStr = currentSessionTask.deadlineDateRaw
+              ? (currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US',{month:'short',day:'numeric'})
+              : null;
+            return (
+              <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ backdropFilter:'blur(8px)', WebkitBackdropFilter:'blur(8px)', backgroundColor:'rgba(0,0,0,0.4)' }}>
+                <div className="w-full max-w-md mx-4">
+                  {/* In-session card */}
+                  <div className="rounded-2xl shadow-2xl overflow-hidden" data-planassist-theme={colorTheme}>
+                    {/* Top gradient section */}
+                    <div style={{ background:`linear-gradient(135deg,${t.grad1},${t.grad2})` }} className="text-white p-7 flex flex-col items-center">
+                      <div className="flex items-center gap-2 mb-2 self-start">
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: sessionClassColor }} />
+                        <span className="text-sm font-medium" style={{ color: t.topSubtext }}>
+                          {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g,'') : 'No Class'}
+                        </span>
+                      </div>
+                      {currentSessionTask.url
+                        ? <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer" className="text-xl font-bold text-center mb-1 hover:underline leading-tight">{cleanTaskTitle(currentSessionTask)}</a>
+                        : <p className="text-xl font-bold text-center mb-1 leading-tight">{cleanTaskTitle(currentSessionTask)}</p>}
+                      <div className="text-6xl font-bold tabular-nums mt-4 mb-1">{formatTime(sessionElapsed)}</div>
+                      <p className="text-sm mb-5" style={{ color: t.topSubtext }}>Time on this task</p>
+                      <div className="flex gap-2 w-full">
+                        <button onClick={() => {
+                            if (isTimerRunning) {
+                              const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+                              const snapped = timerBaseElapsedRef.current + wallElapsed;
+                              setSessionElapsed(snapped); timerBaseElapsedRef.current = snapped;
+                            }
+                            setIsTimerRunning(prev => !prev);
+                          }}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+                          style={{ background:'rgba(255,255,255,0.2)', color:'white' }}>
+                          {isTimerRunning ? <><Pause className="w-4 h-4"/> Pause</> : <><Play className="w-4 h-4"/> Resume</>}
+                        </button>
+                        <button onClick={pauseTaskSession} disabled={savingSession}
+                          className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg font-semibold text-sm disabled:opacity-50 transition-colors"
+                          style={{ background: t.exitBtn, color:'white' }}>
+                          {savingSession ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Saving…</> : <><X className="w-4 h-4"/>Save &amp; Exit</>}
+                        </button>
+                      </div>
                     </div>
-                    <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer"
-                      className="block text-xl font-bold mb-6 hover:underline">{cleanTaskTitle(currentSessionTask)}</a>
-                    <div className="text-7xl font-bold mb-1 tabular-nums">{formatTime(sessionElapsed)}</div>
-                    <p className="text-purple-200 text-sm">Time on this task</p>
+                    {/* Bottom section */}
+                    <div className="pa-agenda-card-bottom p-4 space-y-2" data-planassist-theme={colorTheme}>
+                      <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap mb-2">
+                        <span className="flex items-center gap-1"><Clock className="w-3 h-3"/>Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime || '—'} min</span>
+                        {sessionDueDateStr && <span className="flex items-center gap-1"><Calendar className="w-3 h-3"/>Due {sessionDueDateStr}</span>}
+                        {currentSessionTask.accumulatedTime > 0 && <span className="flex items-center gap-1 font-medium" style={{ color: t.metaRowColor }}><Timer className="w-3 h-3"/>{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime/60)} min prev.</span>}
+                      </div>
+                      <button onClick={completeTaskSession} disabled={markingComplete}
+                        className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm disabled:opacity-50">
+                        {markingComplete ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/>Marking…</> : <><Check className="w-4 h-4"/>Mark Complete</>}
+                      </button>
+                      <div className="flex gap-2">
+                        <button onClick={() => openWorkspace(currentSessionTask,'session')}
+                          className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg font-medium text-sm transition-colors"
+                          style={{ background: t.workspaceBg, color: t.workspaceText }}>
+                          <BookOpen className="w-3.5 h-3.5"/> Open Workspace
+                        </button>
+                        {/* Popup button — only shown when PiP is supported */}
+                        {pipSupported && (
+                          <div className="relative">
+                            <button onClick={() => setPipPopupSelectorOpen(o => !o)}
+                              className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium text-sm transition-colors"
+                              style={{ background: t.workspaceBg, color: t.workspaceText }}
+                              title="Open persistent popup">
+                              <Play className="w-3.5 h-3.5"/> Popup
+                            </button>
+                            {pipPopupSelectorOpen && (
+                              <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-44">
+                                <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup size</p>
+                                {[['micro','⬡ Micro','Timer only'],['macro','⬢ Macro','Timer + controls']].map(([m, label, desc]) => (
+                                  <button key={m} onClick={() => {
+                                    setPipPopupMode(m);
+                                    setPipPopupSelectorOpen(false);
+                                    launchSessionPiP(currentSessionTask, null, m);
+                                  }} className={`w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50 ${pipPopupMode === m ? 'bg-purple-50' : ''}`}>
+                                    <p className="text-sm font-semibold text-gray-800">{label}</p>
+                                    <p className="text-xs text-gray-400">{desc}</p>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex gap-3 justify-center">
-                    <button
-                      onClick={() => {
-                        if (isTimerRunning) {
-                          const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
-                          const snapped = timerBaseElapsedRef.current + wallElapsed;
-                          setSessionElapsed(snapped);
-                          timerBaseElapsedRef.current = snapped;
-                        }
-                        setIsTimerRunning(prev => !prev);
-                      }}
-                      className="bg-white bg-opacity-20 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-opacity-30 flex items-center gap-2"
-                    >
-                      {isTimerRunning ? <><Pause className="w-4 h-4" /> Pause Timer</> : <><Play className="w-4 h-4" /> Resume Timer</>}
-                    </button>
-                    <button onClick={pauseTaskSession} disabled={savingSession}
-                      className="bg-purple-800 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
-                      {savingSession
-                        ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                        : <><X className="w-4 h-4" /> Save & Exit</>}
-                    </button>
-                  </div>
-                </div>
-                <div className="bg-white rounded-xl shadow-md p-6">
-                  <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
-                    <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
-                    {currentSessionTask.deadlineDateRaw && (
-                      <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
-                        Due {(currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
-                    )}
-                    {currentSessionTask.accumulatedTime > 0 && (
-                      <span className="flex items-center gap-1 text-blue-600 font-medium">
-                        <Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
-                      </span>
-                    )}
-                  </div>
-                  <button onClick={completeTaskSession} disabled={markingComplete}
-                    className="w-full bg-green-500 text-white py-3.5 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 mb-3">
-                    {markingComplete
-                      ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
-                      : <><Check className="w-5 h-5" /> Mark Complete</>}
-                  </button>
-                  <button onClick={() => openWorkspace(currentSessionTask, 'session')}
-                    className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
-                    <BookOpen className="w-4 h-4" /> Open Workspace
-                  </button>
                 </div>
               </div>
-            )
-          )
+            );
+          })()
         )}
 
                 {currentPage === 'agendas' && (() => {
@@ -7721,12 +7756,6 @@ const PlanAssist = () => {
                 })()}
 
         {currentPage === 'agenda-active' && currentAgenda && (() => {
-          // When PiP is supported the agenda session runs in the floating window;
-          // the main tab shows only the blurred overlay (already rendered above inside
-          // the session-active/agenda-active block). Return null here to avoid
-          // double-rendering the full agenda UI under the overlay.
-          if (typeof window.documentPictureInPicture !== 'undefined') return null;
-
           const rows = currentAgenda.rows || [];
           const currentRow = rows[agendaCurrentRow];
           const isLastRow = agendaCurrentRow >= rows.length - 1;
@@ -7895,10 +7924,40 @@ const PlanAssist = () => {
                             {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
                             Mark Complete
                           </button>
+                          <div className="flex gap-2">
                           <button onClick={() => openWorkspace(rowTask, 'agenda')}
-                            className="w-full flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
+                            className="flex-1 flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
                             <BookOpen className="w-3.5 h-3.5" /> Open Workspace
                           </button>
+                          {typeof window.documentPictureInPicture !== 'undefined' && (() => {
+                            const pipTh = getPipTheme(colorTheme);
+                            return (
+                              <div className="relative">
+                                <button onClick={() => setPipPopupSelectorOpen(o => !o)}
+                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium text-sm transition-colors"
+                                  style={{ background: pipTh.workspaceBg, color: pipTh.workspaceText }}
+                                  title="Open persistent popup">
+                                  <Play className="w-3.5 h-3.5"/> Popup
+                                </button>
+                                {pipPopupSelectorOpen && (
+                                  <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-52">
+                                    <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup</p>
+                                    {[['micro','⬡ Micro','Task timer only'],['macro','⬢ Macro','Task timer + controls'],['alt','◎ Alternate','Row countdown ring']].map(([m, label, desc]) => (
+                                      <button key={m} onClick={() => {
+                                        setPipPopupMode(m);
+                                        setPipPopupSelectorOpen(false);
+                                        launchAgendaPiP(currentAgenda, agendaCurrentRow, rowTask, currentRow, agendaCountdown, null, agendaElapsed, m);
+                                      }} className={`w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50 ${pipPopupMode === m ? 'bg-purple-50' : ''}`}>
+                                        <p className="text-sm font-semibold text-gray-800">{label}</p>
+                                        <p className="text-xs text-gray-400">{desc}</p>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          </div>
                         </div>
                       </div>
                     ) : (
