@@ -2343,14 +2343,14 @@ const PlanAssist = () => {
         </div>
       `;
 
-      // X/close = Save & Exit. Uses a ref (not a global) so the check is always
-      // in sync with current state regardless of render timing.
+      // X/close = Save & Exit. Calls through window.__pa_pipSaveExit which the
+      // per-render effect keeps pointing at the latest pauseTaskSession closure.
       pipWin.addEventListener('pagehide', () => {
         if (pipIntentionalCloseRef.current) return; // we closed it programmatically
         pipWindowRef.current = null;
         setPipActive(false);
         if (pipSessionActiveRef.current) {
-          pauseTaskSession();
+          window.__pa_pipSaveExit();
         }
       });
     }).catch(err => console.error('Session PiP launch failed:', err));
@@ -2439,7 +2439,7 @@ const PlanAssist = () => {
         pipWindowRef.current = null;
         setPipActive(false);
         if (pipSessionActiveRef.current) {
-          agendaSaveAndExit();
+          window.__pa_pipAgendaSaveExit();
         }
       });
     }).catch(err => console.error('Agenda PiP launch failed:', err));
