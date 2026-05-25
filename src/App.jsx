@@ -2143,13 +2143,90 @@ const PlanAssist = () => {
 
   // ── Document Picture-in-Picture helpers ───────────────────────────────────
   // Builds the PiP window HTML for a regular Session.
+  // ── Per-theme colors for the PiP window ─────────────────────────────────
+  // theme IDs: 'system' (System), 'warm' (Blossom), 'cool' (Grove), 'dark' (Dark)
+  const getPipTheme = (theme) => {
+    switch (theme) {
+      case 'warm': return {
+        grad1: '#e91e8c', grad2: '#1e88e5',
+        cardBg: '#fff5f8', topSubtext: '#f8bbd0',
+        exitBtn: '#c2185b', exitHover: '#880e4f',
+        workspaceBg: '#fce4ec', workspaceText: '#c2185b',
+        metaRowColor: '#c2185b', bodyBg: 'linear-gradient(135deg,#e91e8c,#1e88e5)',
+        isDark: false,
+      };
+      case 'cool': return {
+        grad1: '#2e7d32', grad2: '#1565c0',
+        cardBg: '#192218', topSubtext: '#a5d6a7',
+        exitBtn: '#1b5e20', exitHover: '#145214',
+        workspaceBg: '#1a2a1a', workspaceText: '#81c784',
+        metaRowColor: '#81c784', bodyBg: 'linear-gradient(135deg,#2e7d32,#1565c0)',
+        isDark: true,
+      };
+      case 'dark': return {
+        grad1: '#7c4dff', grad2: '#2979ff',
+        cardBg: '#1e1e30', topSubtext: '#b39ddb',
+        exitBtn: '#4527a0', exitHover: '#311b92',
+        workspaceBg: '#2d2b55', workspaceText: '#b39ddb',
+        metaRowColor: '#b39ddb', bodyBg: 'linear-gradient(135deg,#7c4dff,#2979ff)',
+        isDark: true,
+      };
+      default: return { // system
+        grad1: '#7c3aed', grad2: '#2563eb',
+        cardBg: '#ffffff', topSubtext: '#c4b5fd',
+        exitBtn: '#5b21b6', exitHover: '#4c1d95',
+        workspaceBg: '#f3e8ff', workspaceText: '#7c3aed',
+        metaRowColor: '#3b82f6', bodyBg: 'linear-gradient(135deg,#7c3aed,#2563eb)',
+        isDark: false,
+      };
+    }
+  };
+
+  const buildPipStyles = (t) => `
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+    body { background: ${t.bodyBg}; min-height: 100vh; padding: 16px; }
+    .pip-card { background: ${t.cardBg}; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,${t.isDark ? '0.5' : '0.2'}); }
+    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 16px; text-align: center; }
+    .pip-class { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .pip-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; line-height: 1.3; }
+    .pip-action { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 8px; }
+    .pip-timer { font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+    .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; margin-top: 2px; margin-bottom: 12px; }
+    .pip-timer-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 4px; }
+    .pip-elapsed { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .pip-countdown { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${t.topSubtext}; }
+    .pip-countdown.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
+    @keyframes pa-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    .pip-timer-sub { font-size: 10px; color: ${t.topSubtext}; margin-bottom: 10px; }
+    .pip-zone { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-bottom: 10px; background: rgba(255,255,255,0.2); color: white; }
+    .pip-btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+    .pip-btn { padding: 7px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
+    .pip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
+    .pip-btn-pause:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+    .pip-btn-proceed { background: #22c55e; color: white; }
+    .pip-btn-proceed:hover:not(:disabled) { background: #16a34a; }
+    .pip-btn-exit { background: ${t.exitBtn}; color: white; }
+    .pip-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
+    .pip-bottom { padding: 14px; }
+    .pip-meta { display: flex; gap: 12px; font-size: 11px; color: ${t.isDark ? '#9ca3af' : '#6b7280'}; margin-bottom: 10px; flex-wrap: wrap; }
+    .pip-meta-prev { color: ${t.metaRowColor}; font-weight: 600; }
+    .pip-btn-complete { width: 100%; padding: 10px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity 0.15s; }
+    .pip-btn-complete:hover:not(:disabled) { background: #16a34a; }
+    .pip-btn-complete:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pip-btn-workspace { width: 100%; padding: 8px; background: ${t.workspaceBg}; color: ${t.workspaceText}; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .pip-btn-workspace:hover { opacity: 0.85; }
+    .pip-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: pa-spin 0.6s linear infinite; display: inline-block; flex-shrink: 0; }
+    .pip-spinner-green { border-color: rgba(255,255,255,0.4); border-top-color: white; }
+    @keyframes pa-spin { to { transform: rotate(360deg); } }
+  `;
+
   const launchSessionPiP = (task) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
-    // Close any existing PiP first
     if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
 
-    // Wire callbacks so PiP buttons can reach React state
-    window.__pa_pipPauseResume  = () => {
+    window.__pa_pipPauseResume = () => {
       if (window.__pa_isTimerRunning) {
         const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
         const snapped = timerBaseElapsedRef.current + wallElapsed;
@@ -2158,50 +2235,19 @@ const PlanAssist = () => {
       }
       setIsTimerRunning(prev => !prev);
     };
-    window.__pa_pipSaveExit     = () => pauseTaskSession();
-    window.__pa_pipMarkComplete = () => completeTaskSession();
+    window.__pa_pipSaveExit      = () => pauseTaskSession();
+    window.__pa_pipMarkComplete  = () => completeTaskSession();
     window.__pa_pipOpenWorkspace = () => openWorkspace(window.__pa_pipTask, 'session');
-    window.__pa_pipTask         = task;
-    window.__pa_isTimerRunning  = true; // will be kept in sync
+    window.__pa_pipTask          = task;
+    window.__pa_isTimerRunning   = true;
 
-    window.documentPictureInPicture.requestWindow({ width: 380, height: 420 }).then((pipWin) => {
+    window.documentPictureInPicture.requestWindow({ width: 380, height: 430 }).then((pipWin) => {
       pipWindowRef.current = pipWin;
       setPipActive(true);
 
-      // Copy stylesheets into PiP window
-      for (const ss of document.querySelectorAll('link[rel=stylesheet]')) {
-        const link = pipWin.document.createElement('link');
-        link.rel = 'stylesheet'; link.href = ss.href;
-        pipWin.document.head.appendChild(link);
-      }
-
-      // Inline base styles for PiP
+      const t = getPipTheme(colorTheme);
       const style = pipWin.document.createElement('style');
-      style.textContent = `
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-        body { background: linear-gradient(135deg, #7c3aed, #2563eb); min-height: 100vh; padding: 16px; }
-        .pip-card { background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-        .pip-top { background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; padding: 16px; text-align: center; }
-        .pip-class { font-size: 11px; color: #c4b5fd; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .pip-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; line-height: 1.3; }
-        .pip-timer { font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
-        .pip-timer-label { font-size: 11px; color: #c4b5fd; margin-top: 2px; margin-bottom: 12px; }
-        .pip-btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
-        .pip-btn { padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; gap: 5px; }
-        .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
-        .pip-btn-pause:hover { background: rgba(255,255,255,0.3); }
-        .pip-btn-exit { background: #5b21b6; color: white; }
-        .pip-btn-exit:hover { background: #4c1d95; }
-        .pip-bottom { padding: 14px; }
-        .pip-meta { display: flex; gap: 12px; font-size: 11px; color: #6b7280; margin-bottom: 10px; flex-wrap: wrap; }
-        .pip-meta-item { display: flex; align-items: center; gap: 3px; }
-        .pip-meta-prev { color: #3b82f6; font-weight: 600; }
-        .pip-btn-complete { width: 100%; padding: 10px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; margin-bottom: 6px; }
-        .pip-btn-complete:hover { background: #16a34a; }
-        .pip-btn-workspace { width: 100%; padding: 8px; background: #f3e8ff; color: #7c3aed; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
-        .pip-btn-workspace:hover { background: #ede9fe; }
-      `;
+      style.textContent = buildPipStyles(t);
       pipWin.document.head.appendChild(style);
 
       const classLabel = task.class ? task.class.replace(/[\[\]]/g,'') : 'No Class';
@@ -2211,9 +2257,12 @@ const PlanAssist = () => {
       const dueDateStr = task.deadlineDateRaw
         ? (task.dueDate || new Date(task.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US',{month:'short',day:'numeric'})
         : null;
-      const prevMins   = task.accumulatedTime > 0
+      const prevMins = task.accumulatedTime > 0
         ? (task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60))
         : null;
+      const initElapsed = task.accumulatedTime || 0;
+      const initMins = Math.floor(initElapsed / 60);
+      const initSecs = initElapsed % 60;
 
       pipWin.document.body.innerHTML = `
         <div class="pip-card">
@@ -2223,44 +2272,41 @@ const PlanAssist = () => {
               <span>${classLabel}</span>
             </div>
             <div class="pip-title">${titleText}</div>
-            <div class="pip-timer" id="pip-elapsed">0:00</div>
+            <div class="pip-timer" id="pip-elapsed">${initMins}:${String(initSecs).padStart(2,'0')}</div>
             <div class="pip-timer-label">Time on this task</div>
             <div class="pip-btn-row">
               <button class="pip-btn pip-btn-pause" id="pip-pause-btn" onclick="window.opener.__pa_pipPauseResume()">⏸ Pause Timer</button>
-              <button class="pip-btn pip-btn-exit" onclick="window.opener.__pa_pipSaveExit()">✕ Save &amp; Exit</button>
+              <button class="pip-btn pip-btn-exit" id="pip-exit-btn" onclick="window.opener.__pa_pipSaveExit()">✕ Save &amp; Exit</button>
             </div>
           </div>
           <div class="pip-bottom">
             <div class="pip-meta">
-              <span class="pip-meta-item">🕐 Est. ${estMins} min</span>
-              ${dueDateStr ? `<span class="pip-meta-item">📅 Due ${dueDateStr}</span>` : ''}
-              ${prevMins ? `<span class="pip-meta-item pip-meta-prev">⏱ ${prevMins} min prev.</span>` : ''}
+              <span>🕐 Est. ${estMins} min</span>
+              ${dueDateStr ? `<span>📅 Due ${dueDateStr}</span>` : ''}
+              ${prevMins ? `<span class="pip-meta-prev">⏱ ${prevMins} min prev.</span>` : ''}
             </div>
-            <button class="pip-btn-complete" onclick="window.opener.__pa_pipMarkComplete()">✓ Mark Complete</button>
+            <button class="pip-btn-complete" id="pip-complete-btn" onclick="window.opener.__pa_pipMarkComplete()">✓ Mark Complete</button>
             <button class="pip-btn-workspace" onclick="window.opener.__pa_pipOpenWorkspace()">📖 Open Workspace</button>
           </div>
         </div>
       `;
 
-      // When the PiP window is closed by the user (X button), treat as Save & Exit
+      // Issue 2: X/close button = Save & Exit; guard against double-call
       pipWin.addEventListener('pagehide', () => {
         pipWindowRef.current = null;
         setPipActive(false);
-        // Only trigger Save & Exit if session is still active (not already completed/exited)
         if (window.__pa_pipSessionStillActive) {
           pauseTaskSession();
         }
       });
-    }).catch(err => {
-      console.error('PiP launch failed:', err);
-      // Fall back to normal session page
-    });
+    }).catch(err => console.error('Session PiP launch failed:', err));
   };
 
-  // Builds the PiP window HTML for an Agenda session.
-  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow) => {
+  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+
+    const initCountdown = initialCountdown ?? (currentRow?.timeMins || 25) * 60;
 
     window.__pa_pipAgendaPauseResume = () => {
       if (window.__pa_agendaRunning) {
@@ -2269,70 +2315,39 @@ const PlanAssist = () => {
         agendaStartTimer(window.__pa_agendaElapsedSnap, window.__pa_agendaCountdownSnap);
       }
     };
-    window.__pa_pipAgendaSaveExit    = () => agendaSaveAndExit();
-    window.__pa_pipAgendaProceed     = () => agendaSaveAndProceed();
-    window.__pa_pipAgendaMarkComplete= () => agendaMarkComplete();
+    window.__pa_pipAgendaSaveExit     = () => agendaSaveAndExit();
+    window.__pa_pipAgendaProceed      = () => agendaSaveAndProceed();
+    window.__pa_pipAgendaMarkComplete = () => agendaMarkComplete();
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
-    window.__pa_pipAgendaTask        = rowTask;
-    window.__pa_agendaRunning        = false;
-    window.__pa_agendaElapsedSnap    = 0;
-    window.__pa_agendaCountdownSnap  = (currentRow?.timeMins || 25) * 60;
-    window.__pa_pipAgendaIsLast      = rowIdx >= (agenda.rows || []).length - 1;
+    window.__pa_pipAgendaTask         = rowTask;
+    window.__pa_agendaRunning         = false;
+    window.__pa_agendaElapsedSnap     = 0;
+    window.__pa_agendaCountdownSnap   = initCountdown;
 
-    window.documentPictureInPicture.requestWindow({ width: 400, height: 460 }).then((pipWin) => {
+    window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }).then((pipWin) => {
       pipWindowRef.current = pipWin;
       setPipActive(true);
 
-      for (const ss of document.querySelectorAll('link[rel=stylesheet]')) {
-        const link = pipWin.document.createElement('link');
-        link.rel = 'stylesheet'; link.href = ss.href;
-        pipWin.document.head.appendChild(link);
-      }
-
+      const t = getPipTheme(colorTheme);
       const style = pipWin.document.createElement('style');
-      style.textContent = `
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-        body { background: linear-gradient(135deg, #7c3aed, #2563eb); min-height: 100vh; padding: 16px; }
-        .pip-card { background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-        .pip-top { background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; padding: 16px; text-align: center; }
-        .pip-class { font-size: 11px; color: #c4b5fd; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-        .pip-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; line-height: 1.3; }
-        .pip-action { font-size: 11px; color: #c4b5fd; margin-bottom: 8px; }
-        .pip-timer-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 4px; }
-        .pip-elapsed { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; }
-        .pip-countdown { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: #c4b5fd; }
-        .pip-countdown.flash { color: #fca5a5; animation: pulse 1s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-        .pip-timer-label { font-size: 10px; color: #c4b5fd; margin-bottom: 10px; }
-        .pip-zone { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-bottom: 10px; background: rgba(255,255,255,0.2); color: white; }
-        .pip-btn-row { display: flex; gap: 8px; justify-content: center; }
-        .pip-btn { padding: 7px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; gap: 4px; }
-        .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
-        .pip-btn-pause:hover { background: rgba(255,255,255,0.3); }
-        .pip-btn-proceed { background: #22c55e; color: white; }
-        .pip-btn-proceed:hover { background: #16a34a; }
-        .pip-btn-exit { background: #5b21b6; color: white; }
-        .pip-btn-exit:hover { background: #4c1d95; }
-        .pip-bottom { padding: 12px; }
-        .pip-meta { display: flex; gap: 10px; font-size: 11px; color: #6b7280; margin-bottom: 10px; flex-wrap: wrap; }
-        .pip-btn-complete { width: 100%; padding: 9px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; margin-bottom: 6px; }
-        .pip-btn-complete:hover { background: #16a34a; }
-        .pip-btn-workspace { width: 100%; padding: 7px; background: #f3e8ff; color: #7c3aed; border: none; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; }
-        .pip-btn-workspace:hover { background: #ede9fe; }
-      `;
+      style.textContent = buildPipStyles(t);
       pipWin.document.head.appendChild(style);
 
-      const rows       = agenda.rows || [];
-      const isLast     = rowIdx >= rows.length - 1;
-      const classLabel = rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class';
-      const classColor = rowTask ? getClassColor(rowTask.class) : '#a855f7';
-      const titleText  = rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow?.taskId}`;
-      const actionText = currentRow?.action || 'Work on Task';
-      const estMins    = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
+      const rows        = agenda.rows || [];
+      const isLast      = rowIdx >= rows.length - 1;
+      const classLabel  = rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class';
+      const classColor  = rowTask ? getClassColor(rowTask.class) : '#a855f7';
+      const titleText   = rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow?.taskId}`;
+      const actionText  = currentRow?.action || 'Work on Task';
+      const estMins     = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
       const rowCountStr = `Row ${rowIdx + 1} of ${rows.length}`;
-      const zoneMap    = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
-      const zoneLabel  = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
+      const zoneMap     = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
+      const zoneLabel   = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
+
+      // Render initial countdown from the actual saved value
+      const cdMins = Math.floor(initCountdown / 60);
+      const cdSecs = initCountdown % 60;
+      const cdStr  = `${cdMins}:${String(cdSecs).padStart(2,'0')}`;
 
       pipWin.document.body.innerHTML = `
         <div class="pip-card">
@@ -2345,34 +2360,33 @@ const PlanAssist = () => {
             <div class="pip-action">${actionText}</div>
             ${zoneLabel ? `<div class="pip-zone">${zoneLabel}</div>` : ''}
             <div class="pip-timer-row">
-              <div>
+              <div style="text-align:center">
                 <div class="pip-elapsed" id="pip-agenda-elapsed">0:00</div>
-                <div class="pip-timer-label">elapsed</div>
+                <div class="pip-timer-sub">elapsed</div>
               </div>
-              <div>
-                <div class="pip-countdown" id="pip-agenda-countdown">--:--</div>
-                <div class="pip-timer-label">remaining</div>
+              <div style="text-align:center">
+                <div class="pip-countdown" id="pip-agenda-countdown">${cdStr}</div>
+                <div class="pip-timer-sub">remaining</div>
               </div>
             </div>
             <div class="pip-btn-row">
               <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start Timer</button>
-              ${isLast
-                ? `<button class="pip-btn pip-btn-proceed" onclick="window.opener.__pa_pipAgendaProceed()">✓ Finish</button>`
-                : `<button class="pip-btn pip-btn-proceed" onclick="window.opener.__pa_pipAgendaProceed()">→ Proceed</button>`}
-              <button class="pip-btn pip-btn-exit" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
+              <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Proceed'}</button>
+              <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
             </div>
           </div>
           <div class="pip-bottom">
             <div class="pip-meta">
               <span>🕐 Est. ${estMins} min</span>
-              <span class="pip-meta-item" style="color:#7c3aed;font-weight:600">${rowCountStr}</span>
+              <span style="color:${t.metaRowColor};font-weight:600">${rowCountStr}</span>
             </div>
-            <button class="pip-btn-complete" onclick="window.opener.__pa_pipAgendaMarkComplete()">✓ Mark Complete</button>
+            <button class="pip-btn-complete" id="pip-agenda-complete-btn" onclick="window.opener.__pa_pipAgendaMarkComplete()">✓ Mark Complete</button>
             <button class="pip-btn-workspace" onclick="window.opener.__pa_pipAgendaOpenWorkspace()">📖 Open Workspace</button>
           </div>
         </div>
       `;
 
+      // Issue 2: X/close = Save & Exit
       pipWin.addEventListener('pagehide', () => {
         pipWindowRef.current = null;
         setPipActive(false);
@@ -2380,39 +2394,69 @@ const PlanAssist = () => {
           agendaSaveAndExit();
         }
       });
-    }).catch(err => {
-      console.error('Agenda PiP launch failed:', err);
-    });
+    }).catch(err => console.error('Agenda PiP launch failed:', err));
   };
 
-  // Sync Session PiP display on every timer tick
+  // ── Sync Session PiP on every timer / loading-state tick ─────────────────
   useEffect(() => {
     const pipWin = pipWindowRef.current;
     if (!pipWin || pipWin.closed) return;
-    // Only sync if it's a session PiP (has pip-elapsed element)
     const elEl = pipWin.document.getElementById('pip-elapsed');
-    if (!elEl) return;
+    if (!elEl) return; // not a session PiP
+
+    // Timer display
     const mins = Math.floor(sessionElapsed / 60);
     const secs = sessionElapsed % 60;
     elEl.textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
-    // Sync pause/resume button label
+
+    // Pause/Resume button
     const pauseBtn = pipWin.document.getElementById('pip-pause-btn');
     if (pauseBtn) {
       pauseBtn.textContent = isTimerRunning ? '⏸ Pause Timer' : '▶ Resume Timer';
+      pauseBtn.disabled = savingSession || markingComplete;
     }
+
+    // Save & Exit button — loading state (issue 1)
+    const exitBtn = pipWin.document.getElementById('pip-exit-btn');
+    if (exitBtn) {
+      if (savingSession) {
+        exitBtn.innerHTML = '<span class="pip-spinner"></span> Saving…';
+        exitBtn.disabled = true;
+      } else {
+        exitBtn.innerHTML = '✕ Save &amp; Exit';
+        exitBtn.disabled = markingComplete;
+      }
+    }
+
+    // Mark Complete button — loading state (issue 1)
+    const completeBtn = pipWin.document.getElementById('pip-complete-btn');
+    if (completeBtn) {
+      if (markingComplete) {
+        completeBtn.innerHTML = '<span class="pip-spinner pip-spinner-green"></span> Marking Complete…';
+        completeBtn.disabled = true;
+      } else {
+        completeBtn.innerHTML = '✓ Mark Complete';
+        completeBtn.disabled = savingSession;
+      }
+    }
+
     window.__pa_isTimerRunning = isTimerRunning;
     window.__pa_pipSessionStillActive = !!currentSessionTask;
-  }, [sessionElapsed, isTimerRunning, currentSessionTask]);
+  }, [sessionElapsed, isTimerRunning, currentSessionTask, savingSession, markingComplete]);
 
-  // Sync Agenda PiP display on every agenda timer tick
+  // ── Sync Agenda PiP on every timer / loading-state tick ──────────────────
   useEffect(() => {
     const pipWin = pipWindowRef.current;
     if (!pipWin || pipWin.closed) return;
     const elEl = pipWin.document.getElementById('pip-agenda-elapsed');
-    if (!elEl) return;
+    if (!elEl) return; // not an agenda PiP
+
+    // Elapsed timer
     const eMins = Math.floor(agendaElapsed / 60);
     const eSecs = agendaElapsed % 60;
     elEl.textContent = `${eMins}:${eSecs.toString().padStart(2,'0')}`;
+
+    // Countdown timer
     const cdEl = pipWin.document.getElementById('pip-agenda-countdown');
     if (cdEl && agendaCountdown != null) {
       const cMins = Math.floor(agendaCountdown / 60);
@@ -2421,15 +2465,55 @@ const PlanAssist = () => {
       if (agendaCountdownFlash) cdEl.classList.add('flash');
       else cdEl.classList.remove('flash');
     }
+
+    // Pause/Resume button
     const pauseBtn = pipWin.document.getElementById('pip-agenda-pause-btn');
     if (pauseBtn) {
       pauseBtn.textContent = agendaRunning ? '⏸ Pause Timer' : (agendaElapsed > 0 ? '▶ Resume Timer' : '▶ Start Timer');
+      pauseBtn.disabled = agendaProceedLoading || agendaExitLoading;
     }
-    window.__pa_agendaRunning        = agendaRunning;
-    window.__pa_agendaElapsedSnap    = agendaElapsed;
-    window.__pa_agendaCountdownSnap  = agendaCountdown;
+
+    // Proceed/Finish button — loading state (issue 1)
+    const proceedBtn = pipWin.document.getElementById('pip-agenda-proceed-btn');
+    if (proceedBtn) {
+      if (agendaProceedLoading) {
+        proceedBtn.innerHTML = '<span class="pip-spinner"></span>';
+        proceedBtn.disabled = true;
+      } else {
+        // label was set on build; just re-enable
+        proceedBtn.disabled = agendaExitLoading;
+      }
+    }
+
+    // Exit button — loading state (issue 1)
+    const exitBtn = pipWin.document.getElementById('pip-agenda-exit-btn');
+    if (exitBtn) {
+      if (agendaExitLoading) {
+        exitBtn.innerHTML = '<span class="pip-spinner"></span> Saving…';
+        exitBtn.disabled = true;
+      } else {
+        exitBtn.innerHTML = '✕ Exit';
+        exitBtn.disabled = agendaProceedLoading;
+      }
+    }
+
+    // Mark Complete button — loading state (issue 1)
+    const completeBtn = pipWin.document.getElementById('pip-agenda-complete-btn');
+    if (completeBtn) {
+      if (agendaProceedLoading) {
+        completeBtn.innerHTML = '<span class="pip-spinner pip-spinner-green"></span> Marking…';
+        completeBtn.disabled = true;
+      } else {
+        completeBtn.innerHTML = '✓ Mark Complete';
+        completeBtn.disabled = agendaExitLoading;
+      }
+    }
+
+    window.__pa_agendaRunning       = agendaRunning;
+    window.__pa_agendaElapsedSnap   = agendaElapsed;
+    window.__pa_agendaCountdownSnap = agendaCountdown;
     window.__pa_pipAgendaSessionStillActive = !!currentAgenda;
-  }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, currentAgenda]);
+  }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, currentAgenda, agendaProceedLoading, agendaExitLoading]);
 
   const handleStartEditTime = (taskId, currentTime) => {
     setEditingTimeTaskId(taskId);
@@ -2620,7 +2704,7 @@ const PlanAssist = () => {
     setCurrentPage('agenda-active');
     window.__pa_pipAgendaSessionStillActive = true;
     // Defer PiP launch one tick so currentAgenda state is set
-    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null), 0);
+    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown), 0);
   };
 
   const agendaSaveAndExit = async () => {
@@ -2699,7 +2783,8 @@ const PlanAssist = () => {
           { ...currentAgenda, current_row: nextRow, rows },
           nextRow,
           nextTask,
-          nextRowData || null
+          nextRowData || null,
+          nextCountdown
         ), 0);
       }
     } catch (err) {
@@ -2806,7 +2891,7 @@ const PlanAssist = () => {
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
         // Relaunch PiP for the new row
         const updatedAgenda = { ...currentAgenda, current_row: nextRow, rows };
-        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null), 0);
+        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown), 0);
       }
     } catch (err) {
       console.error('Mark complete failed:', err);
@@ -7096,7 +7181,7 @@ const PlanAssist = () => {
           );
         })()}
 
-        {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete) && (
+        {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete || currentAgenda) && (
           typeof window.documentPictureInPicture !== 'undefined' ? (
             /* ── PiP overlay: session runs in the floating window ── */
             showSessionComplete ? (
@@ -7139,7 +7224,7 @@ const PlanAssist = () => {
                       } else if (currentPage === 'agenda-active' && currentAgenda) {
                         const rows = currentAgenda.rows || [];
                         const row = rows[agendaCurrentRow];
-                        launchAgendaPiP(currentAgenda, agendaCurrentRow, row?.task || null, row || null);
+                        launchAgendaPiP(currentAgenda, agendaCurrentRow, row?.task || null, row || null, agendaCountdown);
                       }
                     }}
                     className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors mb-3"
