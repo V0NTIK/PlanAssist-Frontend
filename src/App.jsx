@@ -461,6 +461,8 @@ const PlanAssist = () => {
   const timerStartWallRef = React.useRef(null);
   const timerBaseElapsedRef = React.useRef(0); // seconds accumulated before current run
   const [showSessionComplete, setShowSessionComplete] = useState(false);
+  const pipWindowRef = React.useRef(null);   // holds the documentPictureInPicture window
+  const [pipActive, setPipActive] = useState(false);  // true while PiP window is open
 
   // ── Itinerary & Enhance Schedule state ───────────────────────────────────
   const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
@@ -2039,6 +2041,8 @@ const PlanAssist = () => {
       setCurrentSessionTask(task);
       setIsTimerRunning(true);
       setCurrentPage('session-active');
+      window.__pa_pipSessionStillActive = true;
+      launchSessionPiP(task);
     } catch (err) {
       console.error('Failed to start session:', err);
       alert('Failed to start session: ' + err.message);
@@ -2071,6 +2075,9 @@ const PlanAssist = () => {
           ? { ...t, accumulatedTime: newAccumMins }
           : t
       ));
+      window.__pa_pipSessionStillActive = false;
+      if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+      setPipActive(false);
       setCurrentSessionTask(null);
       setCurrentPage('sessions');
     } catch (err) {
@@ -2117,6 +2124,9 @@ const PlanAssist = () => {
           ? { ...t, completed: true, deleted: true }
           : t
       ));
+      window.__pa_pipSessionStillActive = false;
+      if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+      setPipActive(false);
       triggerCompletionAnim('task');
       startBreakTimer(sessionElapsed); // sessionElapsed is in seconds
       setShowSessionComplete({ task: currentSessionTask, timeSpent: sessionElapsed }); // seconds
@@ -2130,6 +2140,296 @@ const PlanAssist = () => {
     }
   };
 
+
+  // ── Document Picture-in-Picture helpers ───────────────────────────────────
+  // Builds the PiP window HTML for a regular Session.
+  const launchSessionPiP = (task) => {
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+    // Close any existing PiP first
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+
+    // Wire callbacks so PiP buttons can reach React state
+    window.__pa_pipPauseResume  = () => {
+      if (window.__pa_isTimerRunning) {
+        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+        const snapped = timerBaseElapsedRef.current + wallElapsed;
+        setSessionElapsed(snapped);
+        timerBaseElapsedRef.current = snapped;
+      }
+      setIsTimerRunning(prev => !prev);
+    };
+    window.__pa_pipSaveExit     = () => pauseTaskSession();
+    window.__pa_pipMarkComplete = () => completeTaskSession();
+    window.__pa_pipOpenWorkspace = () => openWorkspace(window.__pa_pipTask, 'session');
+    window.__pa_pipTask         = task;
+    window.__pa_isTimerRunning  = true; // will be kept in sync
+
+    window.documentPictureInPicture.requestWindow({ width: 380, height: 420 }).then((pipWin) => {
+      pipWindowRef.current = pipWin;
+      setPipActive(true);
+
+      // Copy stylesheets into PiP window
+      for (const ss of document.querySelectorAll('link[rel=stylesheet]')) {
+        const link = pipWin.document.createElement('link');
+        link.rel = 'stylesheet'; link.href = ss.href;
+        pipWin.document.head.appendChild(link);
+      }
+
+      // Inline base styles for PiP
+      const style = pipWin.document.createElement('style');
+      style.textContent = `
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+        body { background: linear-gradient(135deg, #7c3aed, #2563eb); min-height: 100vh; padding: 16px; }
+        .pip-card { background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+        .pip-top { background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; padding: 16px; text-align: center; }
+        .pip-class { font-size: 11px; color: #c4b5fd; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .pip-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; line-height: 1.3; }
+        .pip-timer { font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
+        .pip-timer-label { font-size: 11px; color: #c4b5fd; margin-top: 2px; margin-bottom: 12px; }
+        .pip-btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
+        .pip-btn { padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+        .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
+        .pip-btn-pause:hover { background: rgba(255,255,255,0.3); }
+        .pip-btn-exit { background: #5b21b6; color: white; }
+        .pip-btn-exit:hover { background: #4c1d95; }
+        .pip-bottom { padding: 14px; }
+        .pip-meta { display: flex; gap: 12px; font-size: 11px; color: #6b7280; margin-bottom: 10px; flex-wrap: wrap; }
+        .pip-meta-item { display: flex; align-items: center; gap: 3px; }
+        .pip-meta-prev { color: #3b82f6; font-weight: 600; }
+        .pip-btn-complete { width: 100%; padding: 10px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; margin-bottom: 6px; }
+        .pip-btn-complete:hover { background: #16a34a; }
+        .pip-btn-workspace { width: 100%; padding: 8px; background: #f3e8ff; color: #7c3aed; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .pip-btn-workspace:hover { background: #ede9fe; }
+      `;
+      pipWin.document.head.appendChild(style);
+
+      const classLabel = task.class ? task.class.replace(/[\[\]]/g,'') : 'No Class';
+      const classColor = getClassColor(task.class);
+      const titleText  = cleanTaskTitle(task);
+      const estMins    = task.userEstimate || task.estimatedTime || '—';
+      const dueDateStr = task.deadlineDateRaw
+        ? (task.dueDate || new Date(task.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US',{month:'short',day:'numeric'})
+        : null;
+      const prevMins   = task.accumulatedTime > 0
+        ? (task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60))
+        : null;
+
+      pipWin.document.body.innerHTML = `
+        <div class="pip-card">
+          <div class="pip-top">
+            <div class="pip-class">
+              <span class="pip-class-dot" style="background:${classColor}"></span>
+              <span>${classLabel}</span>
+            </div>
+            <div class="pip-title">${titleText}</div>
+            <div class="pip-timer" id="pip-elapsed">0:00</div>
+            <div class="pip-timer-label">Time on this task</div>
+            <div class="pip-btn-row">
+              <button class="pip-btn pip-btn-pause" id="pip-pause-btn" onclick="window.opener.__pa_pipPauseResume()">⏸ Pause Timer</button>
+              <button class="pip-btn pip-btn-exit" onclick="window.opener.__pa_pipSaveExit()">✕ Save &amp; Exit</button>
+            </div>
+          </div>
+          <div class="pip-bottom">
+            <div class="pip-meta">
+              <span class="pip-meta-item">🕐 Est. ${estMins} min</span>
+              ${dueDateStr ? `<span class="pip-meta-item">📅 Due ${dueDateStr}</span>` : ''}
+              ${prevMins ? `<span class="pip-meta-item pip-meta-prev">⏱ ${prevMins} min prev.</span>` : ''}
+            </div>
+            <button class="pip-btn-complete" onclick="window.opener.__pa_pipMarkComplete()">✓ Mark Complete</button>
+            <button class="pip-btn-workspace" onclick="window.opener.__pa_pipOpenWorkspace()">📖 Open Workspace</button>
+          </div>
+        </div>
+      `;
+
+      // When the PiP window is closed by the user (X button), treat as Save & Exit
+      pipWin.addEventListener('pagehide', () => {
+        pipWindowRef.current = null;
+        setPipActive(false);
+        // Only trigger Save & Exit if session is still active (not already completed/exited)
+        if (window.__pa_pipSessionStillActive) {
+          pauseTaskSession();
+        }
+      });
+    }).catch(err => {
+      console.error('PiP launch failed:', err);
+      // Fall back to normal session page
+    });
+  };
+
+  // Builds the PiP window HTML for an Agenda session.
+  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow) => {
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+
+    window.__pa_pipAgendaPauseResume = () => {
+      if (window.__pa_agendaRunning) {
+        agendaStopTimer();
+      } else {
+        agendaStartTimer(window.__pa_agendaElapsedSnap, window.__pa_agendaCountdownSnap);
+      }
+    };
+    window.__pa_pipAgendaSaveExit    = () => agendaSaveAndExit();
+    window.__pa_pipAgendaProceed     = () => agendaSaveAndProceed();
+    window.__pa_pipAgendaMarkComplete= () => agendaMarkComplete();
+    window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
+    window.__pa_pipAgendaTask        = rowTask;
+    window.__pa_agendaRunning        = false;
+    window.__pa_agendaElapsedSnap    = 0;
+    window.__pa_agendaCountdownSnap  = (currentRow?.timeMins || 25) * 60;
+    window.__pa_pipAgendaIsLast      = rowIdx >= (agenda.rows || []).length - 1;
+
+    window.documentPictureInPicture.requestWindow({ width: 400, height: 460 }).then((pipWin) => {
+      pipWindowRef.current = pipWin;
+      setPipActive(true);
+
+      for (const ss of document.querySelectorAll('link[rel=stylesheet]')) {
+        const link = pipWin.document.createElement('link');
+        link.rel = 'stylesheet'; link.href = ss.href;
+        pipWin.document.head.appendChild(link);
+      }
+
+      const style = pipWin.document.createElement('style');
+      style.textContent = `
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+        body { background: linear-gradient(135deg, #7c3aed, #2563eb); min-height: 100vh; padding: 16px; }
+        .pip-card { background: white; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
+        .pip-top { background: linear-gradient(135deg, #7c3aed, #2563eb); color: white; padding: 16px; text-align: center; }
+        .pip-class { font-size: 11px; color: #c4b5fd; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+        .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .pip-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; line-height: 1.3; }
+        .pip-action { font-size: 11px; color: #c4b5fd; margin-bottom: 8px; }
+        .pip-timer-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 4px; }
+        .pip-elapsed { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; }
+        .pip-countdown { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: #c4b5fd; }
+        .pip-countdown.flash { color: #fca5a5; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        .pip-timer-label { font-size: 10px; color: #c4b5fd; margin-bottom: 10px; }
+        .pip-zone { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-bottom: 10px; background: rgba(255,255,255,0.2); color: white; }
+        .pip-btn-row { display: flex; gap: 8px; justify-content: center; }
+        .pip-btn { padding: 7px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: flex; align-items: center; gap: 4px; }
+        .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
+        .pip-btn-pause:hover { background: rgba(255,255,255,0.3); }
+        .pip-btn-proceed { background: #22c55e; color: white; }
+        .pip-btn-proceed:hover { background: #16a34a; }
+        .pip-btn-exit { background: #5b21b6; color: white; }
+        .pip-btn-exit:hover { background: #4c1d95; }
+        .pip-bottom { padding: 12px; }
+        .pip-meta { display: flex; gap: 10px; font-size: 11px; color: #6b7280; margin-bottom: 10px; flex-wrap: wrap; }
+        .pip-btn-complete { width: 100%; padding: 9px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 700; cursor: pointer; margin-bottom: 6px; }
+        .pip-btn-complete:hover { background: #16a34a; }
+        .pip-btn-workspace { width: 100%; padding: 7px; background: #f3e8ff; color: #7c3aed; border: none; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; }
+        .pip-btn-workspace:hover { background: #ede9fe; }
+      `;
+      pipWin.document.head.appendChild(style);
+
+      const rows       = agenda.rows || [];
+      const isLast     = rowIdx >= rows.length - 1;
+      const classLabel = rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class';
+      const classColor = rowTask ? getClassColor(rowTask.class) : '#a855f7';
+      const titleText  = rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow?.taskId}`;
+      const actionText = currentRow?.action || 'Work on Task';
+      const estMins    = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
+      const rowCountStr = `Row ${rowIdx + 1} of ${rows.length}`;
+      const zoneMap    = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
+      const zoneLabel  = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
+
+      pipWin.document.body.innerHTML = `
+        <div class="pip-card">
+          <div class="pip-top">
+            <div class="pip-class">
+              <span class="pip-class-dot" style="background:${classColor}"></span>
+              <span>${classLabel}</span>
+            </div>
+            <div class="pip-title">${titleText}</div>
+            <div class="pip-action">${actionText}</div>
+            ${zoneLabel ? `<div class="pip-zone">${zoneLabel}</div>` : ''}
+            <div class="pip-timer-row">
+              <div>
+                <div class="pip-elapsed" id="pip-agenda-elapsed">0:00</div>
+                <div class="pip-timer-label">elapsed</div>
+              </div>
+              <div>
+                <div class="pip-countdown" id="pip-agenda-countdown">--:--</div>
+                <div class="pip-timer-label">remaining</div>
+              </div>
+            </div>
+            <div class="pip-btn-row">
+              <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start Timer</button>
+              ${isLast
+                ? `<button class="pip-btn pip-btn-proceed" onclick="window.opener.__pa_pipAgendaProceed()">✓ Finish</button>`
+                : `<button class="pip-btn pip-btn-proceed" onclick="window.opener.__pa_pipAgendaProceed()">→ Proceed</button>`}
+              <button class="pip-btn pip-btn-exit" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
+            </div>
+          </div>
+          <div class="pip-bottom">
+            <div class="pip-meta">
+              <span>🕐 Est. ${estMins} min</span>
+              <span class="pip-meta-item" style="color:#7c3aed;font-weight:600">${rowCountStr}</span>
+            </div>
+            <button class="pip-btn-complete" onclick="window.opener.__pa_pipAgendaMarkComplete()">✓ Mark Complete</button>
+            <button class="pip-btn-workspace" onclick="window.opener.__pa_pipAgendaOpenWorkspace()">📖 Open Workspace</button>
+          </div>
+        </div>
+      `;
+
+      pipWin.addEventListener('pagehide', () => {
+        pipWindowRef.current = null;
+        setPipActive(false);
+        if (window.__pa_pipAgendaSessionStillActive) {
+          agendaSaveAndExit();
+        }
+      });
+    }).catch(err => {
+      console.error('Agenda PiP launch failed:', err);
+    });
+  };
+
+  // Sync Session PiP display on every timer tick
+  useEffect(() => {
+    const pipWin = pipWindowRef.current;
+    if (!pipWin || pipWin.closed) return;
+    // Only sync if it's a session PiP (has pip-elapsed element)
+    const elEl = pipWin.document.getElementById('pip-elapsed');
+    if (!elEl) return;
+    const mins = Math.floor(sessionElapsed / 60);
+    const secs = sessionElapsed % 60;
+    elEl.textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
+    // Sync pause/resume button label
+    const pauseBtn = pipWin.document.getElementById('pip-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.textContent = isTimerRunning ? '⏸ Pause Timer' : '▶ Resume Timer';
+    }
+    window.__pa_isTimerRunning = isTimerRunning;
+    window.__pa_pipSessionStillActive = !!currentSessionTask;
+  }, [sessionElapsed, isTimerRunning, currentSessionTask]);
+
+  // Sync Agenda PiP display on every agenda timer tick
+  useEffect(() => {
+    const pipWin = pipWindowRef.current;
+    if (!pipWin || pipWin.closed) return;
+    const elEl = pipWin.document.getElementById('pip-agenda-elapsed');
+    if (!elEl) return;
+    const eMins = Math.floor(agendaElapsed / 60);
+    const eSecs = agendaElapsed % 60;
+    elEl.textContent = `${eMins}:${eSecs.toString().padStart(2,'0')}`;
+    const cdEl = pipWin.document.getElementById('pip-agenda-countdown');
+    if (cdEl && agendaCountdown != null) {
+      const cMins = Math.floor(agendaCountdown / 60);
+      const cSecs = agendaCountdown % 60;
+      cdEl.textContent = `${cMins}:${cSecs.toString().padStart(2,'0')}`;
+      if (agendaCountdownFlash) cdEl.classList.add('flash');
+      else cdEl.classList.remove('flash');
+    }
+    const pauseBtn = pipWin.document.getElementById('pip-agenda-pause-btn');
+    if (pauseBtn) {
+      pauseBtn.textContent = agendaRunning ? '⏸ Pause Timer' : (agendaElapsed > 0 ? '▶ Resume Timer' : '▶ Start Timer');
+    }
+    window.__pa_agendaRunning        = agendaRunning;
+    window.__pa_agendaElapsedSnap    = agendaElapsed;
+    window.__pa_agendaCountdownSnap  = agendaCountdown;
+    window.__pa_pipAgendaSessionStillActive = !!currentAgenda;
+  }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, currentAgenda]);
 
   const handleStartEditTime = (taskId, currentTime) => {
     setEditingTimeTaskId(taskId);
@@ -2318,6 +2618,9 @@ const PlanAssist = () => {
       apiCall(`/sessions/agenda-start/${rowData.taskId}`, 'POST').catch(() => {});
     }
     setCurrentPage('agenda-active');
+    window.__pa_pipAgendaSessionStillActive = true;
+    // Defer PiP launch one tick so currentAgenda state is set
+    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null), 0);
   };
 
   const agendaSaveAndExit = async () => {
@@ -2342,6 +2645,9 @@ const PlanAssist = () => {
       setAgendaExitLoading(false);
     }
     agendaTimerRef.current = null;
+    window.__pa_pipAgendaSessionStillActive = false;
+    if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+    setPipActive(false);
     setCurrentAgenda(null);
     setCurrentPage('agendas');
     loadAgendas();
@@ -2365,6 +2671,9 @@ const PlanAssist = () => {
         if (row?.taskId) {
           apiCall(`/sessions/agenda-end/${row.taskId}`, 'POST').catch(() => {});
         }
+        window.__pa_pipAgendaSessionStillActive = false;
+        if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+        setPipActive(false);
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
         loadAgendas();
@@ -2384,6 +2693,14 @@ const PlanAssist = () => {
         }
         // Update local agenda current_row
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
+        // Relaunch PiP for the new row
+        const nextTask = nextRowData?.task || null;
+        setTimeout(() => launchAgendaPiP(
+          { ...currentAgenda, current_row: nextRow, rows },
+          nextRow,
+          nextTask,
+          nextRowData || null
+        ), 0);
       }
     } catch (err) {
       console.error('Proceed failed:', err);
@@ -2461,6 +2778,9 @@ const PlanAssist = () => {
         if (currentRow?.taskId) {
           apiCall(`/sessions/agenda-end/${currentRow.taskId}`, 'POST').catch(() => {});
         }
+        window.__pa_pipAgendaSessionStillActive = false;
+        if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+        setPipActive(false);
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
         loadAgendas();
@@ -2484,6 +2804,9 @@ const PlanAssist = () => {
           apiCall(`/sessions/agenda-start/${nextRowData.taskId}`, 'POST').catch(() => {});
         }
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
+        // Relaunch PiP for the new row
+        const updatedAgenda = { ...currentAgenda, current_row: nextRow, rows };
+        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null), 0);
       }
     } catch (err) {
       console.error('Mark complete failed:', err);
@@ -4979,19 +5302,25 @@ const PlanAssist = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('hub')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : ['session-active','agenda-active'].includes(currentPage) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            {(() => {
+              // Nav buttons are locked only when a session/agenda is active AND PiP is NOT
+              // available (fallback in-page render). With PiP active the user can navigate freely.
+              const pipSupported = typeof window.documentPictureInPicture !== 'undefined';
+              const navLocked = ['session-active','agenda-active'].includes(currentPage) && !pipSupported;
+              return (<>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('hub')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
               <span className="font-medium">Hub</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('calendar')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('calendar')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'calendar' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Calendar className="w-5 h-5" />
               <span className="font-medium">Calendar</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('tasks')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('tasks')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('sessions')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('sessions')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <span className="relative">
                 <Play className="w-5 h-5" />
                 {(() => {
@@ -5006,19 +5335,19 @@ const PlanAssist = () => {
               </span>
               <span className="font-medium">Focus</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('agendas')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('agendas')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'agendas' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <LayoutList className="w-5 h-5" />
               <span className="font-medium">Agendas</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('itinerary')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('itinerary')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'itinerary' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <ClipboardList className="w-5 h-5" />
               <span className="font-medium">Itinerary</span>
             </button>
-            <button onClick={() => !isLoadingTasks && !['session-active','agenda-active'].includes(currentPage) && setCurrentPage('marks')} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage) ) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('marks')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'marks' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <BarChart3 className="w-5 h-5" />
               <span className="font-medium">Marks</span>
             </button>
-            <button onClick={() => !isLoadingTasks && handleAccountPageOpen()} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : (['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+            <button onClick={() => !isLoadingTasks && !navLocked && handleAccountPageOpen()} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <UserCircle className="w-5 h-5" />
             </button>
             {user?.isAdmin && (
@@ -5035,9 +5364,11 @@ const PlanAssist = () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={['session-active','agenda-active'].includes(currentPage) || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${(['session-active','agenda-active'].includes(currentPage)) ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
+              </>);
+            })()}
           </div>
         </div>
       </nav>
@@ -6766,86 +7097,142 @@ const PlanAssist = () => {
         })()}
 
         {['session-active','agenda-active'].includes(currentPage) && (currentSessionTask || showSessionComplete) && (
-          showSessionComplete ? (
-            <div className="max-w-lg mx-auto p-6">
-              <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
-                <Check className="w-16 h-16 mx-auto mb-4" />
-                <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
-                <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
-              </div>
-              <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
-                <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
-                <div className="text-gray-500">Total time spent</div>
-              </div>
-              <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
-                className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
-                Back to Focus
-              </button>
-            </div>
-          ) : (
-            <div className="max-w-lg mx-auto p-6">
-              <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white rounded-xl p-8 mb-5">
-                <div className="text-center mb-6">
-                  <div className="flex items-center justify-center gap-2 mb-3">
-                    <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(currentSessionTask.class) }} />
-                    <span className="text-purple-200 text-sm font-medium">
-                      {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g, '') : 'No Class'}
-                    </span>
-                  </div>
-                  <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer"
-                    className="block text-xl font-bold mb-6 hover:underline">{cleanTaskTitle(currentSessionTask)}</a>
-                  <div className="text-7xl font-bold mb-1 tabular-nums">{formatTime(sessionElapsed)}</div>
-                  <p className="text-purple-200 text-sm">Time on this task</p>
+          typeof window.documentPictureInPicture !== 'undefined' ? (
+            /* ── PiP overlay: session runs in the floating window ── */
+            showSessionComplete ? (
+              /* Completion screen still shows in-page after Mark Complete */
+              <div className="max-w-lg mx-auto p-6">
+                <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
+                  <Check className="w-16 h-16 mx-auto mb-4" />
+                  <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
+                  <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
                 </div>
-                <div className="flex gap-3 justify-center">
+                <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
+                  <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
+                  <div className="text-gray-500">Total time spent</div>
+                </div>
+                <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
+                  className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                  Back to Focus
+                </button>
+              </div>
+            ) : (
+              /* Blurred "session active" holding screen */
+              <div className="fixed inset-0 z-40 flex flex-col items-center justify-center" style={{ backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', backgroundColor: 'rgba(0,0,0,0.45)' }}>
+                <div className="bg-white rounded-2xl shadow-2xl p-10 max-w-sm w-full mx-4 text-center">
+                  <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-500 rounded-full flex items-center justify-center mx-auto mb-5">
+                    <Timer className="w-8 h-8 text-white" />
+                  </div>
+                  <h2 className="text-2xl font-bold text-gray-900 mb-2">
+                    {currentPage === 'agenda-active' ? 'Agenda in Progress' : 'Session in Progress'}
+                  </h2>
+                  <p className="text-gray-500 text-sm mb-1">
+                    {currentPage === 'agenda-active'
+                      ? `Running: ${currentAgenda?.name || 'Agenda'}`
+                      : `Working on: ${currentSessionTask ? cleanTaskTitle(currentSessionTask) : ''}`}
+                  </p>
+                  <p className="text-gray-400 text-xs mb-8">Your timer is running in the popup window.</p>
                   <button
                     onClick={() => {
-                      if (isTimerRunning) {
-                        const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
-                        const snapped = timerBaseElapsedRef.current + wallElapsed;
-                        setSessionElapsed(snapped);
-                        timerBaseElapsedRef.current = snapped;
+                      if (currentPage === 'session-active' && currentSessionTask) {
+                        launchSessionPiP(currentSessionTask);
+                      } else if (currentPage === 'agenda-active' && currentAgenda) {
+                        const rows = currentAgenda.rows || [];
+                        const row = rows[agendaCurrentRow];
+                        launchAgendaPiP(currentAgenda, agendaCurrentRow, row?.task || null, row || null);
                       }
-                      setIsTimerRunning(prev => !prev);
                     }}
-                    className="bg-white bg-opacity-20 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-opacity-30 flex items-center gap-2"
+                    className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors mb-3"
                   >
-                    {isTimerRunning ? <><Pause className="w-4 h-4" /> Pause Timer</> : <><Play className="w-4 h-4" /> Resume Timer</>}
+                    <Play className="w-4 h-4" /> Reopen Popup
                   </button>
-                  <button onClick={pauseTaskSession} disabled={savingSession}
-                    className="bg-purple-800 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
-                    {savingSession
-                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                      : <><X className="w-4 h-4" /> Save & Exit</>}
+                  <p className="text-gray-400 text-xs">Use Save &amp; Exit in the popup to leave the session.</p>
+                </div>
+              </div>
+            )
+          ) : (
+            /* ── Fallback: PiP not supported — original in-page render ── */
+            showSessionComplete ? (
+              <div className="max-w-lg mx-auto p-6">
+                <div className="bg-gradient-to-br from-green-500 to-blue-600 text-white rounded-xl p-8 text-center mb-6">
+                  <Check className="w-16 h-16 mx-auto mb-4" />
+                  <h2 className="text-3xl font-bold mb-2">Task Complete!</h2>
+                  <p className="text-green-100 text-lg">{cleanTaskTitle(showSessionComplete.task)}</p>
+                </div>
+                <div className="bg-white rounded-xl shadow-md p-6 mb-6 text-center">
+                  <div className="text-5xl font-bold text-purple-600 mb-2">{formatTime(showSessionComplete.timeSpent)}</div>
+                  <div className="text-gray-500">Total time spent</div>
+                </div>
+                <button onClick={() => { setShowSessionComplete(false); setCurrentSessionTask(null); setCurrentPage('sessions'); loadUserData(token); }}
+                  className="w-full bg-gradient-to-r from-yellow-400 to-purple-600 text-white py-3 rounded-lg font-semibold hover:from-yellow-500 hover:to-purple-700">
+                  Back to Focus
+                </button>
+              </div>
+            ) : (
+              <div className="max-w-lg mx-auto p-6">
+                <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white rounded-xl p-8 mb-5">
+                  <div className="text-center mb-6">
+                    <div className="flex items-center justify-center gap-2 mb-3">
+                      <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: getClassColor(currentSessionTask.class) }} />
+                      <span className="text-purple-200 text-sm font-medium">
+                        {currentSessionTask.class ? currentSessionTask.class.replace(/[\[\]]/g, '') : 'No Class'}
+                      </span>
+                    </div>
+                    <a href={currentSessionTask.url} target="_blank" rel="noopener noreferrer"
+                      className="block text-xl font-bold mb-6 hover:underline">{cleanTaskTitle(currentSessionTask)}</a>
+                    <div className="text-7xl font-bold mb-1 tabular-nums">{formatTime(sessionElapsed)}</div>
+                    <p className="text-purple-200 text-sm">Time on this task</p>
+                  </div>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={() => {
+                        if (isTimerRunning) {
+                          const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+                          const snapped = timerBaseElapsedRef.current + wallElapsed;
+                          setSessionElapsed(snapped);
+                          timerBaseElapsedRef.current = snapped;
+                        }
+                        setIsTimerRunning(prev => !prev);
+                      }}
+                      className="bg-white bg-opacity-20 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-opacity-30 flex items-center gap-2"
+                    >
+                      {isTimerRunning ? <><Pause className="w-4 h-4" /> Pause Timer</> : <><Play className="w-4 h-4" /> Resume Timer</>}
+                    </button>
+                    <button onClick={pauseTaskSession} disabled={savingSession}
+                      className="bg-purple-800 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-purple-900 flex items-center gap-2 disabled:opacity-50">
+                      {savingSession
+                        ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                        : <><X className="w-4 h-4" /> Save & Exit</>}
+                    </button>
+                  </div>
+                </div>
+                <div className="bg-white rounded-xl shadow-md p-6">
+                  <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
+                    <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
+                    {currentSessionTask.deadlineDateRaw && (
+                      <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
+                        Due {(currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      </span>
+                    )}
+                    {currentSessionTask.accumulatedTime > 0 && (
+                      <span className="flex items-center gap-1 text-blue-600 font-medium">
+                        <Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
+                      </span>
+                    )}
+                  </div>
+                  <button onClick={completeTaskSession} disabled={markingComplete}
+                    className="w-full bg-green-500 text-white py-3.5 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 mb-3">
+                    {markingComplete
+                      ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
+                      : <><Check className="w-5 h-5" /> Mark Complete</>}
+                  </button>
+                  <button onClick={() => openWorkspace(currentSessionTask, 'session')}
+                    className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
+                    <BookOpen className="w-4 h-4" /> Open Workspace
                   </button>
                 </div>
               </div>
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <div className="flex items-center gap-4 text-sm text-gray-500 mb-5 flex-wrap">
-                  <span className="flex items-center gap-1"><Clock className="w-4 h-4" />Est. {currentSessionTask.userEstimate || currentSessionTask.estimatedTime} min</span>
-                  {currentSessionTask.deadlineDateRaw && (
-                    <span className="flex items-center gap-1"><Calendar className="w-4 h-4" />
-                      Due {(currentSessionTask.dueDate || new Date(currentSessionTask.deadlineDateRaw + 'T12:00:00')).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    </span>
-                  )}
-                  {currentSessionTask.accumulatedTime > 0 && (
-                    <span className="flex items-center gap-1 text-blue-600 font-medium">
-                      <Timer className="w-4 h-4" />{currentSessionTask.accumulatedTime < 60 ? '< 1' : Math.floor(currentSessionTask.accumulatedTime / 60)} min previously
-                    </span>
-                  )}
-                </div>
-                <button onClick={completeTaskSession} disabled={markingComplete}
-                  className="w-full bg-green-500 text-white py-3.5 rounded-lg font-semibold hover:bg-green-600 flex items-center justify-center gap-2 disabled:opacity-50 mb-3">
-                  {markingComplete
-                    ? <><div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Marking Complete...</>
-                    : <><Check className="w-5 h-5" /> Mark Complete</>}
-                </button>
-                <button onClick={() => openWorkspace(currentSessionTask, 'session')}
-                  className="w-full bg-purple-50 text-purple-700 py-3 rounded-lg font-semibold hover:bg-purple-100 flex items-center justify-center gap-2">
-                  <BookOpen className="w-4 h-4" /> Open Workspace
-                </button>
-              </div>
-            </div>
+            )
           )
         )}
 
@@ -7205,6 +7592,12 @@ const PlanAssist = () => {
                 })()}
 
         {currentPage === 'agenda-active' && currentAgenda && (() => {
+          // When PiP is supported the agenda session runs in the floating window;
+          // the main tab shows only the blurred overlay (already rendered above inside
+          // the session-active/agenda-active block). Return null here to avoid
+          // double-rendering the full agenda UI under the overlay.
+          if (typeof window.documentPictureInPicture !== 'undefined') return null;
+
           const rows = currentAgenda.rows || [];
           const currentRow = rows[agendaCurrentRow];
           const isLastRow = agendaCurrentRow >= rows.length - 1;
