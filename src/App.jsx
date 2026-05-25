@@ -2206,25 +2206,28 @@ const PlanAssist = () => {
   };
 
   const buildPipStyles = (t) => `
-    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
-    body { background: ${t.bodyBg}; min-height: 100vh; padding: 16px; }
-    .pip-card { background: ${t.cardBg}; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,${t.isDark ? '0.5' : '0.2'}); }
-    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 16px; text-align: center; }
-    .pip-class { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); display: flex; flex-direction: column; }
+    /* Card */
+    .pip-card { background: ${t.cardBg}; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,${t.isDark ? '0.55' : '0.22'}); }
+    /* Top */
+    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 13px 14px 11px; }
+    .pip-class { font-size: 12px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 3px; display: flex; align-items: center; gap: 5px; }
     .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .pip-title { font-size: 14px; font-weight: 700; margin-bottom: 6px; line-height: 1.3; }
-    .pip-action { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 8px; }
-    .pip-timer { font-size: 48px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; }
-    .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; margin-top: 2px; margin-bottom: 12px; }
-    .pip-timer-row { display: flex; align-items: center; justify-content: center; gap: 16px; margin-bottom: 4px; }
-    .pip-elapsed { font-size: 36px; font-weight: 800; font-variant-numeric: tabular-nums; }
-    .pip-countdown { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${t.topSubtext}; }
+    .pip-title { font-size: 14px; font-weight: 700; line-height: 1.3; margin-bottom: 2px; }
+    .pip-action { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 5px; font-style: italic; }
+    .pip-timer { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1.5px; line-height: 1; margin: 7px 0 2px; }
+    .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 9px; }
+    .pip-timer-row { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin: 5px 0 7px; }
+    .pip-elapsed { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+    .pip-countdown { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${t.topSubtext}; line-height: 1; }
     .pip-countdown.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
-    @keyframes pa-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-    .pip-timer-sub { font-size: 10px; color: ${t.topSubtext}; margin-bottom: 10px; }
-    .pip-zone { display: inline-block; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-bottom: 10px; background: rgba(255,255,255,0.2); color: white; }
-    .pip-btn-row { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
-    .pip-btn { padding: 7px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; transition: opacity 0.15s; }
+    .pip-timer-sub { font-size: 9px; color: ${t.topSubtext}; margin-top: 2px; text-align: center; }
+    .pip-zone { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-bottom: 5px; background: rgba(255,255,255,0.18); color: white; }
+    /* Buttons in top — full-width flex row matching setup card */
+    .pip-btn-row { display: flex; gap: 6px; margin-top: 2px; }
+    .pip-btn { flex: 1; padding: 8px 4px; border-radius: 8px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; line-height: 1; transition: opacity 0.15s; }
     .pip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
     .pip-btn-pause:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
@@ -2232,17 +2235,27 @@ const PlanAssist = () => {
     .pip-btn-proceed:hover:not(:disabled) { background: #16a34a; }
     .pip-btn-exit { background: ${t.exitBtn}; color: white; }
     .pip-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
-    .pip-bottom { padding: 14px; }
-    .pip-meta { display: flex; gap: 12px; font-size: 11px; color: ${t.isDark ? '#9ca3af' : '#6b7280'}; margin-bottom: 10px; flex-wrap: wrap; }
+    /* Bottom */
+    .pip-bottom { padding: 9px 12px; background: ${t.cardBg}; }
+    .pip-meta { display: flex; gap: 8px; font-size: 10px; color: ${t.isDark ? '#9ca3af' : '#6b7280'}; margin-bottom: 7px; flex-wrap: wrap; }
     .pip-meta-prev { color: ${t.metaRowColor}; font-weight: 600; }
-    .pip-btn-complete { width: 100%; padding: 10px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 13px; font-weight: 700; cursor: pointer; margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 6px; transition: opacity 0.15s; }
+    .pip-btn-complete { width: 100%; padding: 8px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; gap: 5px; }
     .pip-btn-complete:hover:not(:disabled) { background: #16a34a; }
     .pip-btn-complete:disabled { opacity: 0.5; cursor: not-allowed; }
-    .pip-btn-workspace { width: 100%; padding: 8px; background: ${t.workspaceBg}; color: ${t.workspaceText}; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; }
+    .pip-btn-workspace { width: 100%; padding: 7px; background: ${t.workspaceBg}; color: ${t.workspaceText}; border: none; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; }
     .pip-btn-workspace:hover { opacity: 0.85; }
-    .pip-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: pa-spin 0.6s linear infinite; display: inline-block; flex-shrink: 0; }
-    .pip-spinner-green { border-color: rgba(255,255,255,0.4); border-top-color: white; }
+    /* Spinner */
+    .pip-spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: pa-spin 0.6s linear infinite; display: inline-block; flex-shrink: 0; }
     @keyframes pa-spin { to { transform: rotate(360deg); } }
+    @keyframes pa-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+    /* Alt ring */
+    .pip-alt-ring-wrap { position: relative; width: 104px; height: 104px; margin: 4px auto 5px; }
+    .pip-alt-ring-bg { fill: none; stroke: rgba(255,255,255,0.18); stroke-width: 9; }
+    .pip-alt-ring-fg { fill: none; stroke: white; stroke-width: 9; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 52px 52px; transition: stroke-dashoffset 1s linear; }
+    .pip-alt-ring-fg.flash { stroke: #fca5a5; animation: pa-pulse 1s infinite; }
+    .pip-alt-time { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+    .pip-alt-cd { font-size: 22px; font-weight: 800; color: white; font-variant-numeric: tabular-nums; line-height: 1; }
+    .pip-alt-label { font-size: 9px; color: rgba(255,255,255,0.6); margin-top: 2px; }
   `;
 
   // ── Keep all PiP callbacks fresh on every render ─────────────────────────
@@ -2275,12 +2288,12 @@ const PlanAssist = () => {
     window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
     window.__pa_pipAgendaProceed = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 400, height: 470 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 310 }); } catch(e){}
       agendaSaveAndProceed(nextPip);
     };
     window.__pa_pipAgendaMarkComplete = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 400, height: 470 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 310 }); } catch(e){}
       agendaMarkComplete(nextPip);
     };
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
@@ -2297,8 +2310,8 @@ const PlanAssist = () => {
     const pipMode = mode || pipPopupMode || 'micro';
 
     const isMicro = pipMode === 'micro';
-    const w = isMicro ? 220 : 340;
-    const h = isMicro ? 110 : 300;
+    const w = isMicro ? 220 : 300;
+    const h = isMicro ? 110 : 265;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2338,8 +2351,8 @@ const PlanAssist = () => {
           ? (task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60)) : null;
 
         pipWin.document.body.innerHTML = `
-          <div class="pip-card">
-            <div class="pip-top">
+          <div class="pip-card" style="height:100%;display:flex;flex-direction:column;">
+            <div class="pip-top" style="flex:1;">
               <div class="pip-class">
                 <span class="pip-class-dot" style="background:${classColor}"></span>
                 <span>${classLabel}</span>
@@ -2348,17 +2361,17 @@ const PlanAssist = () => {
               <div class="pip-timer" id="pip-elapsed">${initStr}</div>
               <div class="pip-timer-label">Time on this task</div>
               <div class="pip-btn-row">
-                <button class="pip-btn pip-btn-pause" id="pip-pause-btn" title="Pause/Resume" onclick="window.opener.__pa_pipPauseResume()">⏸</button>
-                <button class="pip-btn pip-btn-complete" id="pip-complete-btn-top" title="Mark Complete" onclick="window.opener.__pa_pipMarkComplete()" style="background:rgba(34,197,94,0.3);color:white;padding:7px 12px;">✓</button>
-                <button class="pip-btn pip-btn-exit" id="pip-exit-btn" title="Save & Exit" onclick="window.opener.__pa_pipSaveExit()">✕</button>
+                <button class="pip-btn pip-btn-pause" id="pip-pause-btn" onclick="window.opener.__pa_pipPauseResume()">⏸ Pause</button>
+                <button class="pip-btn pip-btn-exit" id="pip-exit-btn" onclick="window.opener.__pa_pipSaveExit()">✕ Exit</button>
               </div>
             </div>
             <div class="pip-bottom">
               <div class="pip-meta">
-                <span>🕐 Est. ${estMins} min</span>
-                ${dueDateStr ? `<span>📅 Due ${dueDateStr}</span>` : ''}
-                ${prevMins ? `<span class="pip-meta-prev">⏱ ${prevMins} min prev.</span>` : ''}
+                <span>Est. ${estMins} min</span>
+                ${dueDateStr ? `<span>Due ${dueDateStr}</span>` : ''}
+                ${prevMins ? `<span class="pip-meta-prev">${prevMins} min prev.</span>` : ''}
               </div>
+              <button class="pip-btn-complete" id="pip-complete-btn-top" onclick="window.opener.__pa_pipMarkComplete()">✓ Mark Complete</button>
               <button class="pip-btn-workspace" onclick="window.opener.__pa_pipOpenWorkspace()">📖 Open Workspace</button>
             </div>
           </div>`;
@@ -2383,8 +2396,8 @@ const PlanAssist = () => {
     const pipMode = mode || pipPopupMode || 'micro';
     const isMicro = pipMode === 'micro';
     const isAlt   = pipMode === 'alt';
-    const w = isMicro ? 220 : 360;
-    const h = isMicro ? 110 : isAlt ? 220 : 340;
+    const w = isMicro ? 220 : 300;
+    const h = isMicro ? 110 : isAlt ? 210 : 310;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2428,56 +2441,57 @@ const PlanAssist = () => {
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
       } else if (isAlt) {
-        // Alt: countdown ring + controls
+        // Alt: countdown ring — uses CSS classes from buildPipStyles
         const totalSecs = (currentRow?.timeMins || 25) * 60;
-        const circumference = 2 * Math.PI * 54; // r=54
+        const r = 46; // radius sized for 104px wrap (r=52 center minus stroke/2=9/2)
+        const circumference = 2 * Math.PI * r;
         const pct = Math.max(0, Math.min(1, initCountdown / totalSecs));
         const dashoffset = circumference * (1 - pct);
-        pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
-          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif;gap:6px;box-sizing:border-box;overflow:hidden;">
-            <div style="font-size:10px;color:${t.topSubtext};text-align:center;margin-bottom:2px;">${classLabel} · ${rowCountStr}</div>
-            <div class="pip-alt-ring-wrap" id="pip-alt-ring-wrap">
-              <svg viewBox="0 0 120 120" width="120" height="120">
-                <circle class="pip-alt-ring-bg" cx="60" cy="60" r="54"/>
+          <div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:5px;overflow:hidden;">
+            <div style="font-size:11px;font-weight:500;color:rgba(255,255,255,0.7);text-align:center;">${titleText}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.5);text-align:center;margin-bottom:2px;">${classLabel} · ${rowCountStr}</div>
+            <div class="pip-alt-ring-wrap">
+              <svg viewBox="0 0 104 104" width="104" height="104">
+                <circle class="pip-alt-ring-bg" cx="52" cy="52" r="${r}"/>
                 <circle class="pip-alt-ring-fg${initCountdown <= 0 ? ' flash' : ''}" id="pip-alt-ring-fg"
-                  cx="60" cy="60" r="54"
-                  stroke-dasharray="${circumference}"
-                  stroke-dashoffset="${dashoffset}"/>
+                  cx="52" cy="52" r="${r}"
+                  stroke-dasharray="${circumference.toFixed(2)}"
+                  stroke-dashoffset="${dashoffset.toFixed(2)}"/>
               </svg>
               <div class="pip-alt-time">
                 <div class="pip-alt-cd" id="pip-agenda-countdown">${cdStr}</div>
                 <div class="pip-alt-label">remaining</div>
               </div>
             </div>
-            <div style="display:flex;gap:8px;justify-content:center;">
-              <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" title="Start/Pause" onclick="window.opener.__pa_pipAgendaPauseResume()">▶</button>
-              <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" title="${isLast ? 'Finish' : 'Proceed'}" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓' : '→'}</button>
-              <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" title="Save & Exit" onclick="window.opener.__pa_pipAgendaSaveExit()">✕</button>
+            <div style="display:flex;gap:5px;width:100%;">
+              <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" style="flex:1;font-size:11px;" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start</button>
+              <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" style="flex:1;font-size:11px;" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Next'}</button>
+              <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" style="flex:1;font-size:11px;" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
             </div>
             <div id="pip-agenda-elapsed" style="display:none;">${elStr}</div>
           </div>`;
-        // Store total for ring sync
         pipWin.__pa_totalSecs = totalSecs;
         pipWin.__pa_circumference = circumference;
       } else {
-        // Macro
+        // Macro agenda — card fills window
         const actionText = currentRow?.action || 'Work on Task';
         const zoneMap = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
         const zoneLabel = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
         const estMins = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
         pipWin.document.body.innerHTML = `
-          <div class="pip-card">
-            <div class="pip-top">
+          <div class="pip-card" style="height:100%;display:flex;flex-direction:column;">
+            <div class="pip-top" style="flex:1;">
               <div class="pip-class"><span class="pip-class-dot" style="background:${classColor}"></span><span>${classLabel}</span></div>
               <div class="pip-title">${titleText}</div>
-              <div class="pip-action">${actionText}</div>
+              <div class="pip-action">"${actionText}"</div>
               ${zoneLabel ? `<div class="pip-zone">${zoneLabel}</div>` : ''}
               <div class="pip-timer-row">
                 <div style="text-align:center">
                   <div class="pip-elapsed" id="pip-agenda-elapsed">${elStr}</div>
                   <div class="pip-timer-sub">elapsed</div>
                 </div>
+                <div style="color:rgba(255,255,255,0.3);font-size:18px;line-height:1;padding-bottom:2px;">·</div>
                 <div style="text-align:center">
                   <div class="pip-countdown" id="pip-agenda-countdown">${cdStr}</div>
                   <div class="pip-timer-sub">remaining</div>
@@ -2485,13 +2499,13 @@ const PlanAssist = () => {
               </div>
               <div class="pip-btn-row">
                 <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start</button>
-                <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Proceed'}</button>
-                <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" onclick="window.opener.__pa_pipAgendaSaveExit()">✕</button>
+                <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Next'}</button>
+                <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
               </div>
             </div>
             <div class="pip-bottom">
               <div class="pip-meta">
-                <span>🕐 Est. ${estMins} min</span>
+                <span>Est. ${estMins} min</span>
                 <span style="color:${t.metaRowColor};font-weight:600">${rowCountStr}</span>
               </div>
               <button class="pip-btn-complete" id="pip-agenda-complete-btn" onclick="window.opener.__pa_pipAgendaMarkComplete()">✓ Mark Complete</button>
@@ -2774,8 +2788,8 @@ const PlanAssist = () => {
     let earlyPipRequest = null;
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
-      const preW = preMode === 'micro' ? 220 : preMode === 'alt' ? 360 : 360;
-      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 220 : 340;
+      const preW = preMode === 'micro' ? 220 : 300;
+      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 210 : 310;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
