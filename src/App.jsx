@@ -6244,10 +6244,13 @@ const PlanAssist = () => {
           </div>
         )}
         {currentPage === 'sessions' && (() => {
-          const eligibleTasks = sessionTasks;
+          // eligibleTasks: enabled-courses only — shown in pickers, suggested list, urgentCount.
+          // focusTasks: derived from saved priority IDs — intentionally unfiltered so
+          // already-set priorities persist even if a course is later deactivated.
+          const eligibleTasks = sessionTasks.filter(t => isCourseEnabled(t));
           const todayFocusIds = sessionPriorities;
           const focusTasks = todayFocusIds
-            ? eligibleTasks.filter(t => todayFocusIds.includes(t.id))
+            ? sessionTasks.filter(t => todayFocusIds.includes(t.id))
                 .sort((a, b) => todayFocusIds.indexOf(a.id) - todayFocusIds.indexOf(b.id))
             : null;
           const now = new Date();
@@ -6934,7 +6937,7 @@ const PlanAssist = () => {
                                                 className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500"
                                               >
                                                 <option value="">— pick task —</option>
-                                                {sessionTasks.map(t => (
+                                                {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
                                                   <option key={t.id} value={t.id}>{cleanTaskTitle(t)}{t.dueDate ? ` — due ${t.dueDate.toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : ""}</option>
                                                 ))}
                                               </select>
@@ -7070,7 +7073,7 @@ const PlanAssist = () => {
                                             <select value={row.taskId || ''} onChange={e => setEditRowTask(idx, parseInt(e.target.value) || null)}
                                               className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-purple-500">
                                               <option value="">— pick task —</option>
-                                              {sessionTasks.map(t => (
+                                              {sessionTasks.filter(t => isCourseEnabled(t)).map(t => (
                                                 <option key={t.id} value={t.id}>{cleanTaskTitle(t)}{t.dueDate ? ` — due ${t.dueDate.toLocaleDateString("en-US",{month:"short",day:"numeric"})}` : ""}</option>
                                               ))}
                                             </select>
