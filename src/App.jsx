@@ -2368,6 +2368,8 @@ const PlanAssist = () => {
         pipWindowRef.current = null;
         setPipActive(false);
       });
+    }).catch(err => console.error('Session PiP launch failed:', err));
+  };
 
   const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise, currentElapsed, mode) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
