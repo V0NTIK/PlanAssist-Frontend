@@ -937,7 +937,11 @@ const PlanAssist = () => {
     const handler = (e) => {
       // Don't fire inside input/textarea/select
       if (['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
-      if (BLOCKED_PAGES.includes(currentPage)) return;
+      // Block keyboard shortcuts during session/agenda only when PiP is NOT supported
+      // (legacy in-page fallback). With PiP active, the session is in the popup and
+      // the user should be free to navigate the main tab normally.
+      const pipSupported = typeof window.documentPictureInPicture !== 'undefined';
+      if (BLOCKED_PAGES.includes(currentPage) && !pipSupported) return;
       if (isDialogOpen()) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const key = e.key.toLowerCase();
@@ -2030,6 +2034,16 @@ const PlanAssist = () => {
 
   const startTaskSession = async (task) => {
     setSessionStartingId(task.id);
+
+    // Request the PiP window IMMEDIATELY inside the click handler — before any
+    // await — so the browser user-gesture requirement is satisfied.
+    // If PiP is unavailable we get null and fall back to the in-page render.
+    let earlyPipRequest = null;
+    if (typeof window.documentPictureInPicture !== 'undefined') {
+      try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: 380, height: 430 }); }
+      catch(e) { earlyPipRequest = null; }
+    }
+
     try {
       await apiCall(`/sessions/start/${task.id}`, 'POST');
       setSessionTasks(prev => prev.map(t =>
@@ -2042,8 +2056,10 @@ const PlanAssist = () => {
       setIsTimerRunning(true);
       setCurrentPage('session-active');
       window.__pa_pipSessionStillActive = true;
-      launchSessionPiP(task);
+      launchSessionPiP(task, earlyPipRequest);
     } catch (err) {
+      // If the API call failed, close the early PiP window if it already opened
+      if (earlyPipRequest) earlyPipRequest.then(w => { try { w.close(); } catch(e){} }).catch(()=>{});
       console.error('Failed to start session:', err);
       alert('Failed to start session: ' + err.message);
     } finally {
@@ -2222,7 +2238,7 @@ const PlanAssist = () => {
     @keyframes pa-spin { to { transform: rotate(360deg); } }
   `;
 
-  const launchSessionPiP = (task) => {
+  const launchSessionPiP = (task, pipPromise) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
 
@@ -2241,7 +2257,10 @@ const PlanAssist = () => {
     window.__pa_pipTask          = task;
     window.__pa_isTimerRunning   = true;
 
-    window.documentPictureInPicture.requestWindow({ width: 380, height: 430 }).then((pipWin) => {
+    // Use the pre-requested window (from inside the click handler) or open a fresh one
+    const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: 380, height: 430 });
+
+    winPromise.then((pipWin) => {
       pipWindowRef.current = pipWin;
       setPipActive(true);
 
@@ -2291,7 +2310,6 @@ const PlanAssist = () => {
         </div>
       `;
 
-      // Issue 2: X/close button = Save & Exit; guard against double-call
       pipWin.addEventListener('pagehide', () => {
         pipWindowRef.current = null;
         setPipActive(false);
@@ -2302,7 +2320,7 @@ const PlanAssist = () => {
     }).catch(err => console.error('Session PiP launch failed:', err));
   };
 
-  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown) => {
+  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
 
@@ -2315,16 +2333,29 @@ const PlanAssist = () => {
         agendaStartTimer(window.__pa_agendaElapsedSnap, window.__pa_agendaCountdownSnap);
       }
     };
-    window.__pa_pipAgendaSaveExit     = () => agendaSaveAndExit();
-    window.__pa_pipAgendaProceed      = () => agendaSaveAndProceed();
-    window.__pa_pipAgendaMarkComplete = () => agendaMarkComplete();
+    window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
+    // For Proceed and MarkComplete, pre-request the next PiP window immediately
+    // inside this click-handler context before any async work elapses.
+    window.__pa_pipAgendaProceed = () => {
+      let nextPip = null;
+      try { nextPip = window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }); } catch(e){}
+      agendaSaveAndProceed(nextPip);
+    };
+    window.__pa_pipAgendaMarkComplete = () => {
+      let nextPip = null;
+      try { nextPip = window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }); } catch(e){}
+      agendaMarkComplete(nextPip);
+    };
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
     window.__pa_pipAgendaTask         = rowTask;
     window.__pa_agendaRunning         = false;
     window.__pa_agendaElapsedSnap     = 0;
     window.__pa_agendaCountdownSnap   = initCountdown;
 
-    window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }).then((pipWin) => {
+    // Use pre-requested window (gesture-bound) or open a fresh one (Reopen Popup)
+    const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: 400, height: 470 });
+
+    winPromise.then((pipWin) => {
       pipWindowRef.current = pipWin;
       setPipActive(true);
 
@@ -2688,6 +2719,15 @@ const PlanAssist = () => {
     const taskAccumSecs = ((rowData?.task?.accumulated_time) || 0) * 60;
     const fullCountdown = (rowData?.timeMins || 25) * 60;
     const savedCountdown = agenda.current_row_countdown ?? fullCountdown;
+
+    // Request the PiP window NOW while the user gesture is still live,
+    // before any async work or setTimeout can expire it.
+    let earlyPipRequest = null;
+    if (typeof window.documentPictureInPicture !== 'undefined') {
+      try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }); }
+      catch(e) { earlyPipRequest = null; }
+    }
+
     setCurrentAgenda(agenda);
     setAgendaCurrentRow(row);
     setAgendaElapsed(taskAccumSecs);
@@ -2703,8 +2743,8 @@ const PlanAssist = () => {
     }
     setCurrentPage('agenda-active');
     window.__pa_pipAgendaSessionStillActive = true;
-    // Defer PiP launch one tick so currentAgenda state is set
-    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown), 0);
+    // Defer HTML injection one tick so state is committed; pass pre-requested promise
+    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown, earlyPipRequest), 0);
   };
 
   const agendaSaveAndExit = async () => {
@@ -2737,7 +2777,7 @@ const PlanAssist = () => {
     loadAgendas();
   };
 
-  const agendaSaveAndProceed = async () => {
+  const agendaSaveAndProceed = async (nextPipPromise) => {
     setAgendaProceedLoading(true);
     const { snappedElapsed } = agendaStopTimer();
     const rows = currentAgenda.rows || [];
@@ -2757,6 +2797,8 @@ const PlanAssist = () => {
         }
         window.__pa_pipAgendaSessionStillActive = false;
         if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+        // Close unused pre-requested window if the agenda just finished
+        if (nextPipPromise) nextPipPromise.then(w => { try { w.close(); } catch(e){} }).catch(()=>{});
         setPipActive(false);
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
@@ -2768,7 +2810,7 @@ const PlanAssist = () => {
         const nextTaskAccumSecs = ((nextRowData?.task?.accumulated_time) || 0) * 60;
         setAgendaCurrentRow(nextRow);
         setAgendaElapsed(nextTaskAccumSecs);
-        setAgendaBaseElapsed(nextTaskAccumSecs); // ← reset base so next row's time delta is correct
+        setAgendaBaseElapsed(nextTaskAccumSecs);
         setAgendaCountdown(nextCountdown);
         setAgendaCountdownFlash(false);
         // Update session_active to the next row's task
@@ -2777,14 +2819,15 @@ const PlanAssist = () => {
         }
         // Update local agenda current_row
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
-        // Relaunch PiP for the new row
+        // Relaunch PiP for the new row, passing the pre-requested window promise
         const nextTask = nextRowData?.task || null;
         setTimeout(() => launchAgendaPiP(
           { ...currentAgenda, current_row: nextRow, rows },
           nextRow,
           nextTask,
           nextRowData || null,
-          nextCountdown
+          nextCountdown,
+          nextPipPromise
         ), 0);
       }
     } catch (err) {
@@ -2795,8 +2838,8 @@ const PlanAssist = () => {
     }
   };
 
-  const agendaFinishLast = async () => {
-    await agendaSaveAndProceed(); // last row proceed triggers finished
+  const agendaFinishLast = async (nextPipPromise) => {
+    await agendaSaveAndProceed(nextPipPromise); // last row proceed triggers finished
   };
 
   const saveEditAgenda = async () => {
@@ -2814,7 +2857,7 @@ const PlanAssist = () => {
     }
   };
 
-  const agendaMarkComplete = async () => {
+  const agendaMarkComplete = async (nextPipPromise) => {
     const rows = currentAgenda?.rows || [];
     const currentRow = rows[agendaCurrentRow];
     if (!currentRow?.taskId) return;
@@ -2865,6 +2908,8 @@ const PlanAssist = () => {
         }
         window.__pa_pipAgendaSessionStillActive = false;
         if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+        // Close unused pre-requested window if agenda just finished
+        if (nextPipPromise) nextPipPromise.then(w => { try { w.close(); } catch(e){} }).catch(()=>{});
         setPipActive(false);
         setCurrentAgenda(null);
         setCurrentPage('agenda-summary');
@@ -2889,9 +2934,9 @@ const PlanAssist = () => {
           apiCall(`/sessions/agenda-start/${nextRowData.taskId}`, 'POST').catch(() => {});
         }
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
-        // Relaunch PiP for the new row
+        // Relaunch PiP for the new row, passing the pre-requested window promise
         const updatedAgenda = { ...currentAgenda, current_row: nextRow, rows };
-        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown), 0);
+        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown, nextPipPromise), 0);
       }
     } catch (err) {
       console.error('Mark complete failed:', err);
