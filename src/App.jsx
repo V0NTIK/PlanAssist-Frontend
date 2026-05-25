@@ -2318,11 +2318,12 @@ const PlanAssist = () => {
       const initStr = `${initMins}:${String(initSecs).padStart(2,'0')}`;
 
       if (isMicro) {
-        // Micro: just the timer
+        // Micro: just the timer — no scroll, fits exactly in 220×110
+        pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
-          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;font-family:system-ui,sans-serif;">
-            <div style="font-size:10px;color:${t.topSubtext};margin-bottom:4px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px;">${titleText}</div>
-            <div id="pip-elapsed" style="font-size:44px;font-weight:800;color:white;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;">${initStr}</div>
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:system-ui,sans-serif;box-sizing:border-box;overflow:hidden;">
+            <div style="font-size:10px;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${titleText}</div>
+            <div id="pip-elapsed" style="font-size:46px;font-weight:800;color:white;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;">${initStr}</div>
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
       } else {
@@ -2419,10 +2420,11 @@ const PlanAssist = () => {
       const elStr = `${elMins}:${String(elSecs).padStart(2,'0')}`;
 
       if (isMicro) {
+        pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
-          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;font-family:system-ui,sans-serif;">
-            <div style="font-size:10px;color:${t.topSubtext};margin-bottom:4px;text-align:center;">${titleText}</div>
-            <div id="pip-agenda-elapsed" style="font-size:44px;font-weight:800;color:white;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;">${elStr}</div>
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:system-ui,sans-serif;box-sizing:border-box;overflow:hidden;">
+            <div style="font-size:10px;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${titleText}</div>
+            <div id="pip-agenda-elapsed" style="font-size:46px;font-weight:800;color:white;font-variant-numeric:tabular-nums;letter-spacing:-2px;line-height:1;">${elStr}</div>
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
       } else if (isAlt) {
@@ -2431,8 +2433,9 @@ const PlanAssist = () => {
         const circumference = 2 * Math.PI * 54; // r=54
         const pct = Math.max(0, Math.min(1, initCountdown / totalSecs));
         const dashoffset = circumference * (1 - pct);
+        pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
-          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif;gap:6px;">
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;font-family:system-ui,sans-serif;gap:6px;box-sizing:border-box;overflow:hidden;">
             <div style="font-size:10px;color:${t.topSubtext};text-align:center;margin-bottom:2px;">${classLabel} · ${rowCountStr}</div>
             <div class="pip-alt-ring-wrap" id="pip-alt-ring-wrap">
               <svg viewBox="0 0 120 120" width="120" height="120">
@@ -2591,16 +2594,6 @@ const PlanAssist = () => {
       else { completeBtn.innerHTML = '✓ Mark Complete'; completeBtn.disabled = agendaExitLoading; }
     }
   }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, agendaProceedLoading, agendaExitLoading]);
-
-  // Close pip popup selector on outside click
-  useEffect(() => {
-    if (!pipPopupSelectorOpen) return;
-    const handler = (e) => {
-      if (!e.target.closest('[data-pip-selector]')) setPipPopupSelectorOpen(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [pipPopupSelectorOpen]);
 
   const handleStartEditTime = (taskId, currentTime) => {
     setEditingTimeTaskId(taskId);
@@ -7365,7 +7358,6 @@ const PlanAssist = () => {
                           style={{ background: t.workspaceBg, color: t.workspaceText }}>
                           <BookOpen className="w-3.5 h-3.5"/> Open Workspace
                         </button>
-                        {/* Popup button — only shown when PiP is supported */}
                         {pipSupported && (
                           <div className="relative">
                             <button onClick={() => setPipPopupSelectorOpen(o => !o)}
@@ -7375,19 +7367,22 @@ const PlanAssist = () => {
                               <Play className="w-3.5 h-3.5"/> Popup
                             </button>
                             {pipPopupSelectorOpen && (
-                              <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-44">
-                                <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup size</p>
-                                {[['micro','⬡ Micro','Timer only'],['macro','⬢ Macro','Timer + controls']].map(([m, label, desc]) => (
-                                  <button key={m} onClick={() => {
-                                    setPipPopupMode(m);
-                                    setPipPopupSelectorOpen(false);
-                                    launchSessionPiP(currentSessionTask, null, m);
-                                  }} className={`w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50 ${pipPopupMode === m ? 'bg-purple-50' : ''}`}>
-                                    <p className="text-sm font-semibold text-gray-800">{label}</p>
-                                    <p className="text-xs text-gray-400">{desc}</p>
-                                  </button>
-                                ))}
-                              </div>
+                              <>
+                                <div className="fixed inset-0 z-40" onClick={() => setPipPopupSelectorOpen(false)} />
+                                <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-44">
+                                  <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup size</p>
+                                  {[['micro','⬡ Micro','Timer only'],['macro','⬢ Macro','Timer + controls']].map(([m, label, desc]) => (
+                                    <button key={m} onClick={() => {
+                                      setPipPopupMode(m);
+                                      setPipPopupSelectorOpen(false);
+                                      launchSessionPiP(currentSessionTask, null, m);
+                                    }} className="w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50">
+                                      <p className="text-sm font-semibold text-gray-800">{label}</p>
+                                      <p className="text-xs text-gray-400">{desc}</p>
+                                    </button>
+                                  ))}
+                                </div>
+                              </>
                             )}
                           </div>
                         )}
@@ -7907,19 +7902,22 @@ const PlanAssist = () => {
                                     <Play className="w-3.5 h-3.5"/> Popup
                                   </button>
                                   {pipPopupSelectorOpen && (
-                                    <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-52">
-                                      <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup</p>
-                                      {[['micro','⬡ Micro','Task timer only'],['macro','⬢ Macro','Task timer + controls'],['alt','◎ Alternate','Row countdown ring']].map(([m, label, desc]) => (
-                                        <button key={m} onClick={() => {
-                                          setPipPopupMode(m);
-                                          setPipPopupSelectorOpen(false);
-                                          launchAgendaPiP(currentAgenda, agendaCurrentRow, rowTask, currentRow, agendaCountdown, null, agendaElapsed, m);
-                                        }} className={`w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50 ${pipPopupMode === m ? 'bg-purple-50' : ''}`}>
-                                          <p className="text-sm font-semibold text-gray-800">{label}</p>
-                                          <p className="text-xs text-gray-400">{desc}</p>
-                                        </button>
-                                      ))}
-                                    </div>
+                                    <>
+                                      <div className="fixed inset-0 z-40" onClick={() => setPipPopupSelectorOpen(false)} />
+                                      <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-52">
+                                        <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup</p>
+                                        {[['micro','⬡ Micro','Task timer only'],['macro','⬢ Macro','Task timer + controls'],['alt','◎ Alternate','Row countdown ring']].map(([m, label, desc]) => (
+                                          <button key={m} onClick={() => {
+                                            setPipPopupMode(m);
+                                            setPipPopupSelectorOpen(false);
+                                            launchAgendaPiP(currentAgenda, agendaCurrentRow, rowTask, currentRow, agendaCountdown, null, agendaElapsed, m);
+                                          }} className="w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50">
+                                            <p className="text-sm font-semibold text-gray-800">{label}</p>
+                                            <p className="text-xs text-gray-400">{desc}</p>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </>
                                   )}
                                 </div>
                               )}
