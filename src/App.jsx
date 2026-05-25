@@ -2045,8 +2045,8 @@ const PlanAssist = () => {
     let earlyPipRequest = null;
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
-      const preW = preMode === 'micro' ? 220 : 340;
-      const preH = preMode === 'micro' ? 110 : 300;
+      const preW = preMode === 'micro' ? 220 : 300;
+      const preH = preMode === 'micro' ? 110 : 240;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
@@ -2206,28 +2206,31 @@ const PlanAssist = () => {
   };
 
   const buildPipStyles = (t) => `
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
-    body { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); display: flex; flex-direction: column; }
-    /* Card */
-    .pip-card { background: ${t.cardBg}; border-radius: 14px; overflow: hidden; box-shadow: 0 8px 28px rgba(0,0,0,${t.isDark ? '0.55' : '0.22'}); }
-    /* Top */
-    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 13px 14px 11px; }
-    .pip-class { font-size: 12px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 3px; display: flex; align-items: center; gap: 5px; }
-    .pip-class-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-    .pip-title { font-size: 14px; font-weight: 700; line-height: 1.3; margin-bottom: 2px; }
-    .pip-action { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 5px; font-style: italic; }
-    .pip-timer { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1.5px; line-height: 1; margin: 7px 0 2px; }
-    .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 9px; }
-    .pip-timer-row { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin: 5px 0 7px; }
-    .pip-elapsed { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
-    .pip-countdown { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${t.topSubtext}; line-height: 1; }
+    html, body { height: 100%; width: 100%; overflow: hidden; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+    body { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); }
+    /* Card fills the full PiP window */
+    .pip-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: ${t.cardBg}; }
+    /* Top gradient section */
+    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 12px 13px 10px; flex-shrink: 0; }
+    .pip-class { font-size: 11px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 2px; display: flex; align-items: center; gap: 5px; }
+    .pip-class-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .pip-title { font-size: 13px; font-weight: 700; line-height: 1.25; margin-bottom: 2px; }
+    .pip-action { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 4px; font-style: italic; }
+    /* Session elapsed — matches setup card text-6xl font-bold tabular-nums */
+    .pip-timer { font-size: 38px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -1px; line-height: 1; margin: 6px 0 1px; }
+    .pip-timer-label { font-size: 10px; color: ${t.topSubtext}; margin-bottom: 8px; }
+    /* Agenda dual timer row */
+    .pip-timer-row { display: flex; align-items: flex-end; justify-content: center; gap: 16px; margin: 4px 0 6px; }
+    .pip-elapsed { font-size: 28px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+    .pip-countdown { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${t.topSubtext}; line-height: 1; padding-bottom: 1px; }
     .pip-countdown.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
-    .pip-timer-sub { font-size: 9px; color: ${t.topSubtext}; margin-top: 2px; text-align: center; }
-    .pip-zone { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-bottom: 5px; background: rgba(255,255,255,0.18); color: white; }
-    /* Buttons in top — full-width flex row matching setup card */
-    .pip-btn-row { display: flex; gap: 6px; margin-top: 2px; }
-    .pip-btn { flex: 1; padding: 8px 4px; border-radius: 8px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; line-height: 1; transition: opacity 0.15s; }
+    .pip-timer-sub { font-size: 9px; color: ${t.topSubtext}; margin-top: 1px; text-align: center; }
+    .pip-zone { display: inline-block; font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-bottom: 4px; background: rgba(255,255,255,0.18); color: white; }
+    /* Button row — matches setup card flex button style */
+    .pip-btn-row { display: flex; gap: 5px; margin-top: 2px; }
+    .pip-btn { flex: 1; padding: 7px 4px; border-radius: 7px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; line-height: 1; transition: opacity 0.15s; font-family: inherit; }
     .pip-btn:disabled { opacity: 0.5; cursor: not-allowed; }
     .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
     .pip-btn-pause:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
@@ -2235,27 +2238,41 @@ const PlanAssist = () => {
     .pip-btn-proceed:hover:not(:disabled) { background: #16a34a; }
     .pip-btn-exit { background: ${t.exitBtn}; color: white; }
     .pip-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
-    /* Bottom */
-    .pip-bottom { padding: 9px 12px; background: ${t.cardBg}; }
-    .pip-meta { display: flex; gap: 8px; font-size: 10px; color: ${t.isDark ? '#9ca3af' : '#6b7280'}; margin-bottom: 7px; flex-wrap: wrap; }
+    /* Bottom section — matches setup card pa-agenda-card-bottom */
+    .pip-bottom { padding: 8px 11px; background: ${t.cardBg}; flex-shrink: 0; }
+    .pip-meta { display: flex; gap: 8px; font-size: 10px; color: ${t.isDark ? '#9ca3af' : '#6b7280'}; margin-bottom: 6px; flex-wrap: wrap; }
     .pip-meta-prev { color: ${t.metaRowColor}; font-weight: 600; }
-    .pip-btn-complete { width: 100%; padding: 8px; background: #22c55e; color: white; border: none; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 5px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .pip-btn-complete { width: 100%; padding: 7px; background: #22c55e; color: white; border: none; border-radius: 7px; font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 5px; font-family: inherit; }
     .pip-btn-complete:hover:not(:disabled) { background: #16a34a; }
     .pip-btn-complete:disabled { opacity: 0.5; cursor: not-allowed; }
-    .pip-btn-workspace { width: 100%; padding: 7px; background: ${t.workspaceBg}; color: ${t.workspaceText}; border: none; border-radius: 8px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; }
+    .pip-btn-workspace { width: 100%; padding: 6px; background: ${t.workspaceBg}; color: ${t.workspaceText}; border: none; border-radius: 7px; font-size: 11px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; font-family: inherit; }
     .pip-btn-workspace:hover { opacity: 0.85; }
     /* Spinner */
-    .pip-spinner { width: 12px; height: 12px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: pa-spin 0.6s linear infinite; display: inline-block; flex-shrink: 0; }
+    .pip-spinner { width: 11px; height: 11px; border: 2px solid rgba(255,255,255,0.4); border-top-color: white; border-radius: 50%; animation: pa-spin 0.6s linear infinite; display: inline-block; flex-shrink: 0; }
     @keyframes pa-spin { to { transform: rotate(360deg); } }
     @keyframes pa-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-    /* Alt ring */
-    .pip-alt-ring-wrap { position: relative; width: 104px; height: 104px; margin: 4px auto 5px; }
-    .pip-alt-ring-bg { fill: none; stroke: rgba(255,255,255,0.18); stroke-width: 9; }
-    .pip-alt-ring-fg { fill: none; stroke: white; stroke-width: 9; stroke-linecap: round; transform: rotate(-90deg); transform-origin: 52px 52px; transition: stroke-dashoffset 1s linear; }
+    /* Alt popup — full-window gradient layout */
+    .pip-alt-wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 12px; gap: 6px; overflow: hidden; }
+    .pip-alt-label-top { font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.75); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+    .pip-alt-label-sub { font-size: 10px; color: rgba(255,255,255,0.5); text-align: center; }
+    /* Alt ring — SVG rotation done via attribute, not CSS transform, for cross-browser correctness */
+    .pip-alt-ring-wrap { position: relative; width: 100px; height: 100px; flex-shrink: 0; }
+    .pip-alt-ring-bg { fill: none; stroke: rgba(255,255,255,0.18); stroke-width: 8; }
+    .pip-alt-ring-fg { fill: none; stroke: white; stroke-width: 8; stroke-linecap: round; transition: stroke-dashoffset 1s linear; }
     .pip-alt-ring-fg.flash { stroke: #fca5a5; animation: pa-pulse 1s infinite; }
     .pip-alt-time { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-    .pip-alt-cd { font-size: 22px; font-weight: 800; color: white; font-variant-numeric: tabular-nums; line-height: 1; }
-    .pip-alt-label { font-size: 9px; color: rgba(255,255,255,0.6); margin-top: 2px; }
+    .pip-alt-cd { font-size: 21px; font-weight: 800; color: white; font-variant-numeric: tabular-nums; line-height: 1; font-family: inherit; }
+    .pip-alt-cd-label { font-size: 9px; color: rgba(255,255,255,0.55); margin-top: 2px; }
+    /* Alt button row */
+    .pip-alt-btn-row { display: flex; gap: 5px; width: 100%; }
+    .pip-alt-btn { flex: 1; padding: 7px 4px; border-radius: 7px; font-size: 11px; font-weight: 600; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 3px; line-height: 1; font-family: inherit; }
+    .pip-alt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pip-alt-btn-pause { background: rgba(255,255,255,0.2); color: white; }
+    .pip-alt-btn-pause:hover:not(:disabled) { background: rgba(255,255,255,0.3); }
+    .pip-alt-btn-proceed { background: #22c55e; color: white; }
+    .pip-alt-btn-proceed:hover:not(:disabled) { background: #16a34a; }
+    .pip-alt-btn-exit { background: ${t.exitBtn}; color: white; }
+    .pip-alt-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
   `;
 
   // ── Keep all PiP callbacks fresh on every render ─────────────────────────
@@ -2288,12 +2305,12 @@ const PlanAssist = () => {
     window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
     window.__pa_pipAgendaProceed = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 310 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 250 }); } catch(e){}
       agendaSaveAndProceed(nextPip);
     };
     window.__pa_pipAgendaMarkComplete = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 310 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 250 }); } catch(e){}
       agendaMarkComplete(nextPip);
     };
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
@@ -2311,7 +2328,7 @@ const PlanAssist = () => {
 
     const isMicro = pipMode === 'micro';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : 265;
+    const h = isMicro ? 110 : 240;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2351,8 +2368,8 @@ const PlanAssist = () => {
           ? (task.accumulatedTime < 60 ? '< 1' : Math.floor(task.accumulatedTime / 60)) : null;
 
         pipWin.document.body.innerHTML = `
-          <div class="pip-card" style="height:100%;display:flex;flex-direction:column;">
-            <div class="pip-top" style="flex:1;">
+          <div class="pip-card">
+            <div class="pip-top">
               <div class="pip-class">
                 <span class="pip-class-dot" style="background:${classColor}"></span>
                 <span>${classLabel}</span>
@@ -2397,7 +2414,7 @@ const PlanAssist = () => {
     const isMicro = pipMode === 'micro';
     const isAlt   = pipMode === 'alt';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : isAlt ? 210 : 310;
+    const h = isMicro ? 110 : isAlt ? 195 : 250;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2441,33 +2458,34 @@ const PlanAssist = () => {
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
       } else if (isAlt) {
-        // Alt: countdown ring — uses CSS classes from buildPipStyles
+        // Alt: countdown ring — rotation done via SVG transform attribute (not CSS) for cross-browser correctness
         const totalSecs = (currentRow?.timeMins || 25) * 60;
-        const r = 46; // radius sized for 104px wrap (r=52 center minus stroke/2=9/2)
-        const circumference = 2 * Math.PI * r;
+        const r = 42;
+        const circumference = +(2 * Math.PI * r).toFixed(2);
         const pct = Math.max(0, Math.min(1, initCountdown / totalSecs));
-        const dashoffset = circumference * (1 - pct);
+        const dashoffset = +(circumference * (1 - pct)).toFixed(2);
         pipWin.document.body.innerHTML = `
-          <div style="height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;gap:5px;overflow:hidden;">
-            <div style="font-size:11px;font-weight:500;color:rgba(255,255,255,0.7);text-align:center;">${titleText}</div>
-            <div style="font-size:10px;color:rgba(255,255,255,0.5);text-align:center;margin-bottom:2px;">${classLabel} · ${rowCountStr}</div>
+          <div class="pip-alt-wrap">
+            <div class="pip-alt-label-top">${titleText}</div>
+            <div class="pip-alt-label-sub">${classLabel} · ${rowCountStr}</div>
             <div class="pip-alt-ring-wrap">
-              <svg viewBox="0 0 104 104" width="104" height="104">
-                <circle class="pip-alt-ring-bg" cx="52" cy="52" r="${r}"/>
+              <svg viewBox="0 0 100 100" width="100" height="100" style="display:block;">
+                <circle class="pip-alt-ring-bg" cx="50" cy="50" r="${r}"/>
                 <circle class="pip-alt-ring-fg${initCountdown <= 0 ? ' flash' : ''}" id="pip-alt-ring-fg"
-                  cx="52" cy="52" r="${r}"
-                  stroke-dasharray="${circumference.toFixed(2)}"
-                  stroke-dashoffset="${dashoffset.toFixed(2)}"/>
+                  cx="50" cy="50" r="${r}"
+                  stroke-dasharray="${circumference}"
+                  stroke-dashoffset="${dashoffset}"
+                  transform="rotate(-90 50 50)"/>
               </svg>
               <div class="pip-alt-time">
                 <div class="pip-alt-cd" id="pip-agenda-countdown">${cdStr}</div>
-                <div class="pip-alt-label">remaining</div>
+                <div class="pip-alt-cd-label">remaining</div>
               </div>
             </div>
-            <div style="display:flex;gap:5px;width:100%;">
-              <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" style="flex:1;font-size:11px;" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start</button>
-              <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" style="flex:1;font-size:11px;" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Next'}</button>
-              <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" style="flex:1;font-size:11px;" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
+            <div class="pip-alt-btn-row">
+              <button class="pip-alt-btn pip-alt-btn-pause" id="pip-agenda-pause-btn" onclick="window.opener.__pa_pipAgendaPauseResume()">▶ Start</button>
+              <button class="pip-alt-btn pip-alt-btn-proceed" id="pip-agenda-proceed-btn" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? '✓ Finish' : '→ Next'}</button>
+              <button class="pip-alt-btn pip-alt-btn-exit" id="pip-agenda-exit-btn" onclick="window.opener.__pa_pipAgendaSaveExit()">✕ Exit</button>
             </div>
             <div id="pip-agenda-elapsed" style="display:none;">${elStr}</div>
           </div>`;
@@ -2480,8 +2498,8 @@ const PlanAssist = () => {
         const zoneLabel = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
         const estMins = rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—';
         pipWin.document.body.innerHTML = `
-          <div class="pip-card" style="height:100%;display:flex;flex-direction:column;">
-            <div class="pip-top" style="flex:1;">
+          <div class="pip-card">
+            <div class="pip-top">
               <div class="pip-class"><span class="pip-class-dot" style="background:${classColor}"></span><span>${classLabel}</span></div>
               <div class="pip-title">${titleText}</div>
               <div class="pip-action">"${actionText}"</div>
@@ -2491,7 +2509,7 @@ const PlanAssist = () => {
                   <div class="pip-elapsed" id="pip-agenda-elapsed">${elStr}</div>
                   <div class="pip-timer-sub">elapsed</div>
                 </div>
-                <div style="color:rgba(255,255,255,0.3);font-size:18px;line-height:1;padding-bottom:2px;">·</div>
+                <div style="color:rgba(255,255,255,0.25);font-size:16px;padding-bottom:2px;">·</div>
                 <div style="text-align:center">
                   <div class="pip-countdown" id="pip-agenda-countdown">${cdStr}</div>
                   <div class="pip-timer-sub">remaining</div>
@@ -2571,11 +2589,11 @@ const PlanAssist = () => {
       else cdEl.classList.remove('flash');
     }
 
-    // Alt mode: update the SVG ring
+    // Alt mode: update the SVG ring via stroke-dashoffset
     const ringFg = pipWin.document.getElementById('pip-alt-ring-fg');
     if (ringFg && pipWin.__pa_totalSecs) {
       const pct = Math.max(0, Math.min(1, (agendaCountdown || 0) / pipWin.__pa_totalSecs));
-      const offset = pipWin.__pa_circumference * (1 - pct);
+      const offset = +(pipWin.__pa_circumference * (1 - pct)).toFixed(2);
       ringFg.setAttribute('stroke-dashoffset', offset);
       if (agendaCountdownFlash) ringFg.classList.add('flash');
       else ringFg.classList.remove('flash');
@@ -2789,7 +2807,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 210 : 310;
+      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 195 : 250;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
