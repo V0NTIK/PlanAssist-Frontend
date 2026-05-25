@@ -461,8 +461,10 @@ const PlanAssist = () => {
   const timerStartWallRef = React.useRef(null);
   const timerBaseElapsedRef = React.useRef(0); // seconds accumulated before current run
   const [showSessionComplete, setShowSessionComplete] = useState(false);
-  const pipWindowRef = React.useRef(null);   // holds the documentPictureInPicture window
+  const pipWindowRef = React.useRef(null);        // holds the documentPictureInPicture window
   const [pipActive, setPipActive] = useState(false);  // true while PiP window is open
+  const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
+  const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
 
   // ── Itinerary & Enhance Schedule state ───────────────────────────────────
   const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
@@ -2055,7 +2057,7 @@ const PlanAssist = () => {
       setCurrentSessionTask(task);
       setIsTimerRunning(true);
       setCurrentPage('session-active');
-      window.__pa_pipSessionStillActive = true;
+      pipSessionActiveRef.current = true;
       launchSessionPiP(task, earlyPipRequest);
     } catch (err) {
       // If the API call failed, close the early PiP window if it already opened
@@ -2091,8 +2093,8 @@ const PlanAssist = () => {
           ? { ...t, accumulatedTime: newAccumMins }
           : t
       ));
-      window.__pa_pipSessionStillActive = false;
-      if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+      pipSessionActiveRef.current = false;
+      pipIntentionalCloseRef.current = true; if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
       setPipActive(false);
       setCurrentSessionTask(null);
       setCurrentPage('sessions');
@@ -2140,8 +2142,8 @@ const PlanAssist = () => {
           ? { ...t, completed: true, deleted: true }
           : t
       ));
-      window.__pa_pipSessionStillActive = false;
-      if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+      pipSessionActiveRef.current = false;
+      pipIntentionalCloseRef.current = true; if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
       setPipActive(false);
       triggerCompletionAnim('task');
       startBreakTimer(sessionElapsed); // sessionElapsed is in seconds
@@ -2257,7 +2259,6 @@ const PlanAssist = () => {
     window.__pa_pipMarkComplete  = () => completeTaskSession();
     window.__pa_pipOpenWorkspace = () => openWorkspace(window.__pa_pipTask, 'session');
     window.__pa_isTimerRunning   = isTimerRunning;
-    window.__pa_pipSessionStillActive = !!currentSessionTask;
 
     window.__pa_pipAgendaPauseResume = () => {
       if (window.__pa_agendaRunning) {
@@ -2281,12 +2282,11 @@ const PlanAssist = () => {
     window.__pa_agendaRunning          = agendaRunning;
     window.__pa_agendaElapsedSnap      = agendaElapsed;
     window.__pa_agendaCountdownSnap    = agendaCountdown;
-    window.__pa_pipAgendaSessionStillActive = !!currentAgenda;
   }); // intentionally no deps — must run after EVERY render
 
   const launchSessionPiP = (task, pipPromise) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
-    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipIntentionalCloseRef.current = true; if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
 
     window.__pa_pipTask = task;
 
@@ -2343,13 +2343,13 @@ const PlanAssist = () => {
         </div>
       `;
 
-      // X/close button = Save & Exit.
-      // window.__pa_pipSessionStillActive is kept current by the per-render effect above,
-      // so by the time pagehide fires it reflects true current state.
+      // X/close = Save & Exit. Uses a ref (not a global) so the check is always
+      // in sync with current state regardless of render timing.
       pipWin.addEventListener('pagehide', () => {
+        if (pipIntentionalCloseRef.current) return; // we closed it programmatically
         pipWindowRef.current = null;
         setPipActive(false);
-        if (window.__pa_pipSessionStillActive) {
+        if (pipSessionActiveRef.current) {
           pauseTaskSession();
         }
       });
@@ -2358,7 +2358,7 @@ const PlanAssist = () => {
 
   const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise, currentElapsed) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
-    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipIntentionalCloseRef.current = true; if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
 
     const initCountdown = initialCountdown ?? (currentRow?.timeMins || 25) * 60;
     // currentElapsed: the actual seconds already elapsed on this row (for initial display)
@@ -2435,9 +2435,10 @@ const PlanAssist = () => {
       `;
 
       pipWin.addEventListener('pagehide', () => {
+        if (pipIntentionalCloseRef.current) return; // we closed it programmatically
         pipWindowRef.current = null;
         setPipActive(false);
-        if (window.__pa_pipAgendaSessionStillActive) {
+        if (pipSessionActiveRef.current) {
           agendaSaveAndExit();
         }
       });
@@ -2739,7 +2740,7 @@ const PlanAssist = () => {
       apiCall(`/sessions/agenda-start/${rowData.taskId}`, 'POST').catch(() => {});
     }
     setCurrentPage('agenda-active');
-    window.__pa_pipAgendaSessionStillActive = true;
+    pipSessionActiveRef.current = true;
     // Defer HTML injection one tick so state is committed; pass pre-requested promise
     setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown, earlyPipRequest, taskAccumSecs), 0);
   };
@@ -2766,8 +2767,8 @@ const PlanAssist = () => {
       setAgendaExitLoading(false);
     }
     agendaTimerRef.current = null;
-    window.__pa_pipAgendaSessionStillActive = false;
-    if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+    pipSessionActiveRef.current = false;
+    pipIntentionalCloseRef.current = true; if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
     setPipActive(false);
     setCurrentAgenda(null);
     setCurrentPage('agendas');
@@ -2792,8 +2793,8 @@ const PlanAssist = () => {
         if (row?.taskId) {
           apiCall(`/sessions/agenda-end/${row.taskId}`, 'POST').catch(() => {});
         }
-        window.__pa_pipAgendaSessionStillActive = false;
-        if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+        pipSessionActiveRef.current = false;
+        pipIntentionalCloseRef.current = true; if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
         // Close unused pre-requested window if the agenda just finished
         if (nextPipPromise) nextPipPromise.then(w => { try { w.close(); } catch(e){} }).catch(()=>{});
         setPipActive(false);
@@ -2904,8 +2905,8 @@ const PlanAssist = () => {
         if (currentRow?.taskId) {
           apiCall(`/sessions/agenda-end/${currentRow.taskId}`, 'POST').catch(() => {});
         }
-        window.__pa_pipAgendaSessionStillActive = false;
-        if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} pipWindowRef.current = null; }
+        pipSessionActiveRef.current = false;
+        pipIntentionalCloseRef.current = true; if (pipWindowRef.current && !pipWindowRef.current.closed) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
         // Close unused pre-requested window if agenda just finished
         if (nextPipPromise) nextPipPromise.then(w => { try { w.close(); } catch(e){} }).catch(()=>{});
         setPipActive(false);
