@@ -463,7 +463,7 @@ const PlanAssist = () => {
   const [showSessionComplete, setShowSessionComplete] = useState(false);
   const pipWindowRef = React.useRef(null);        // holds the documentPictureInPicture window
   const [pipActive, setPipActive] = useState(false);  // true while PiP window is open
-  const [pipPopupMode, setPipPopupMode] = useState(null); // 'micro' | 'macro' | 'alt'
+  const [pipPopupMode, setPipPopupMode] = useState('micro'); // 'micro' | 'macro' | 'alt'
   const [pipPopupSelectorOpen, setPipPopupSelectorOpen] = useState(false);
   const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
   const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
@@ -2044,7 +2044,10 @@ const PlanAssist = () => {
     // If PiP is unavailable we get null and fall back to the in-page render.
     let earlyPipRequest = null;
     if (typeof window.documentPictureInPicture !== 'undefined') {
-      try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: 380, height: 430 }); }
+      const preMode = pipPopupMode || 'micro';
+      const preW = preMode === 'micro' ? 220 : 340;
+      const preH = preMode === 'micro' ? 110 : 300;
+      try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
 
@@ -2291,7 +2294,7 @@ const PlanAssist = () => {
     pipIntentionalCloseRef.current = true; if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} } pipWindowRef.current = null; pipIntentionalCloseRef.current = false;
 
     window.__pa_pipTask = task;
-    const pipMode = mode || pipPopupMode || 'macro';
+    const pipMode = mode || pipPopupMode || 'micro';
 
     const isMicro = pipMode === 'micro';
     const w = isMicro ? 220 : 340;
@@ -2364,12 +2367,7 @@ const PlanAssist = () => {
         if (pipIntentionalCloseRef.current) return;
         pipWindowRef.current = null;
         setPipActive(false);
-        if (pipSessionActiveRef.current) {
-          window.__pa_pipSaveExit();
-        }
       });
-    }).catch(err => console.error('Session PiP launch failed:', err));
-  };
 
   const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise, currentElapsed, mode) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
@@ -2379,7 +2377,7 @@ const PlanAssist = () => {
     const initElapsed = currentElapsed ?? 0;
     window.__pa_pipAgendaTask = rowTask;
 
-    const pipMode = mode || pipPopupMode || 'macro';
+    const pipMode = mode || pipPopupMode || 'micro';
     const isMicro = pipMode === 'micro';
     const isAlt   = pipMode === 'alt';
     const w = isMicro ? 220 : 360;
@@ -2501,9 +2499,6 @@ const PlanAssist = () => {
         if (pipIntentionalCloseRef.current) return;
         pipWindowRef.current = null;
         setPipActive(false);
-        if (pipSessionActiveRef.current) {
-          window.__pa_pipAgendaSaveExit();
-        }
       });
     }).catch(err => console.error('Agenda PiP launch failed:', err));
   };
@@ -2783,7 +2778,10 @@ const PlanAssist = () => {
     // before any async work or setTimeout can expire it.
     let earlyPipRequest = null;
     if (typeof window.documentPictureInPicture !== 'undefined') {
-      try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }); }
+      const preMode = pipPopupMode || 'micro';
+      const preW = preMode === 'micro' ? 220 : preMode === 'alt' ? 360 : 360;
+      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 220 : 340;
+      try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
 
@@ -7761,8 +7759,6 @@ const PlanAssist = () => {
           const isLastRow = agendaCurrentRow >= rows.length - 1;
           const rowTask = currentRow?.task || (currentRow?.taskId ? tasks.find(t => t.id === currentRow.taskId) : null);
           const classColor = rowTask ? getClassColor(rowTask.class) : '#a855f7';
-          // dueDate: prefer hydrated Date from tasks[], fall back to constructing from
-          // raw server fields (deadline_date / deadline_time) on the embedded row task.
           const dueDate = rowTask
             ? (rowTask.dueDate instanceof Date
                 ? rowTask.dueDate
@@ -7775,196 +7771,166 @@ const PlanAssist = () => {
           const countdownMins = Math.floor((agendaCountdown || 0) / 60);
           const countdownSecs = (agendaCountdown || 0) % 60;
           const countdownStr = `${String(countdownMins).padStart(2,'0')}:${String(countdownSecs).padStart(2,'0')}`;
+          const at = getPipTheme(colorTheme);
+          const pipSupported = typeof window.documentPictureInPicture !== 'undefined';
 
           return (
-            <div className="min-h-screen pa-agenda-bg flex flex-col" data-planassist-theme={colorTheme}>
-              {/* Top bar */}
-              <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
-                <h2 className="text-lg font-bold text-gray-900">{currentAgenda.name}</h2>
-                <div className="flex items-center gap-3">
-                  {/* Countdown timer */}
-                  <div className={`flex items-center gap-2 px-4 py-2 rounded-lg font-mono text-lg font-bold transition-colors ${
-                    agendaCountdownFlash ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-gray-100 text-gray-700'
-                  }`}>
-                    <Timer className="w-4 h-4" />
-                    {countdownStr}
-                  </div>
-                  {/* Save and Proceed / Finish Agenda */}
-                  {isLastRow ? (
-                    <button onClick={agendaFinishLast} disabled={agendaProceedLoading}
-                      className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm transition-colors disabled:opacity-60">
-                      {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
-                      Finish Agenda
-                    </button>
-                  ) : (
-                    <button onClick={agendaSaveAndProceed} disabled={agendaProceedLoading}
-                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors disabled:opacity-60">
-                      {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <ChevronRight className="w-4 h-4" />}
-                      Save &amp; Proceed
-                    </button>
-                  )}
-                  <button onClick={agendaSaveAndExit} disabled={agendaExitLoading}
-                    className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 text-sm transition-colors disabled:opacity-60">
-                    {agendaExitLoading
-                      ? <div className="w-4 h-4 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" />
-                      : <X className="w-4 h-4" />}
-                    Save &amp; Exit
-                  </button>
-                </div>
-              </div>
+            <div className="fixed inset-0 z-40 flex items-center justify-center" style={{ backdropFilter:'blur(8px)', WebkitBackdropFilter:'blur(8px)', backgroundColor:'rgba(0,0,0,0.4)' }}>
+              <div className="w-full max-w-3xl mx-4 flex flex-col" style={{ maxHeight:'calc(100vh - 80px)' }}>
 
-              {/* Main content: row tracker + in-session card */}
-              <div className="flex flex-1 overflow-hidden">
-                {/* ── Left: Row tracker ── */}
-                <div className="w-56 flex-shrink-0 bg-white border-r border-gray-200 overflow-y-auto">
-                  <div className="p-4">
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Agenda Rows</p>
-                    <div className="space-y-1">
-                      {rows.map((row, idx) => {
-                        const isCurrentRow = idx === agendaCurrentRow;
-                        const isPast = idx < agendaCurrentRow;
-                        const rTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
-                        const rColor = rTask ? getClassColor(rTask.class) : '#d1d5db';
-                        return (
-                          <div key={idx} className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg transition-colors ${
-                            isCurrentRow ? 'bg-purple-100 border border-purple-300' :
-                            isPast ? 'opacity-40' : 'hover:bg-gray-50'
-                          }`}>
-                            <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: isPast ? '#d1d5db' : isCurrentRow ? '#7c3aed' : rColor }} />
-                            <div className="flex-shrink-0">
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold ${
+                {/* ── Top bar ── */}
+                <div className="rounded-t-2xl bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between flex-shrink-0 shadow-sm">
+                  <h2 className="text-base font-bold text-gray-900">{currentAgenda.name}</h2>
+                  <div className="flex items-center gap-2">
+                    <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-base font-bold transition-colors ${agendaCountdownFlash ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-gray-100 text-gray-700'}`}>
+                      <Timer className="w-3.5 h-3.5" />{countdownStr}
+                    </div>
+                    {isLastRow ? (
+                      <button onClick={agendaFinishLast} disabled={agendaProceedLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm disabled:opacity-60">
+                        {agendaProceedLoading ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                        Finish
+                      </button>
+                    ) : (
+                      <button onClick={agendaSaveAndProceed} disabled={agendaProceedLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm disabled:opacity-60">
+                        {agendaProceedLoading ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                        Proceed
+                      </button>
+                    )}
+                    <button onClick={agendaSaveAndExit} disabled={agendaExitLoading}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300 text-sm disabled:opacity-60">
+                      {agendaExitLoading ? <div className="w-3.5 h-3.5 border-2 border-gray-500 border-t-transparent rounded-full animate-spin" /> : <X className="w-3.5 h-3.5" />}
+                      Save &amp; Exit
+                    </button>
+                  </div>
+                </div>
+
+                {/* ── Body: left list + right card ── */}
+                <div className="flex flex-1 overflow-hidden rounded-b-2xl shadow-2xl" style={{ minHeight:0 }}>
+
+                  {/* Left: row tracker */}
+                  <div className="w-52 flex-shrink-0 bg-white border-r border-gray-100 overflow-y-auto">
+                    <div className="p-3">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Rows</p>
+                      <div className="space-y-1">
+                        {rows.map((row, idx) => {
+                          const isCurrentRow = idx === agendaCurrentRow;
+                          const isPast = idx < agendaCurrentRow;
+                          const rTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
+                          const rColor = rTask ? getClassColor(rTask.class) : '#d1d5db';
+                          return (
+                            <div key={idx} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors ${
+                              isCurrentRow ? 'bg-purple-100 border border-purple-300' :
+                              isPast ? 'opacity-40' : 'hover:bg-gray-50'
+                            }`}>
+                              <div className="w-1 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: isPast ? '#d1d5db' : isCurrentRow ? '#7c3aed' : rColor }} />
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                                 isCurrentRow ? 'bg-purple-600 text-white' : isPast ? 'bg-gray-300 text-white' : 'bg-gray-100 text-gray-500'
                               }`}>{idx + 1}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className={`text-xs font-medium truncate ${isCurrentRow ? 'text-purple-900' : 'text-gray-700'}`}>
+                                  {rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}
+                                </p>
+                                <p className="text-xs text-gray-400 truncate">{row.action || 'Work'} · {row.timeMins}m{row.zone ? ` · ${row.zone==='focus'?'🎯':row.zone==='semi'?'🤝':'👥'}` : ''}</p>
+                              </div>
+                              {isPast && <Check className="w-3 h-3 text-green-500 flex-shrink-0" />}
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p className={`text-xs font-medium truncate ${isCurrentRow ? 'text-purple-900' : 'text-gray-700'}`}>
-                                {rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}
-                              </p>
-                              <p className="text-xs text-gray-400 truncate">{row.action || 'Work on Task'} · {row.timeMins}m{row.zone ? ` · ${row.zone === 'focus' ? '🎯' : row.zone === 'semi' ? '🤝' : '👥'}` : ''}</p>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right: in-session card */}
+                  <div className="flex-1 flex items-center justify-center p-5 pa-agenda-bg overflow-y-auto" data-planassist-theme={colorTheme}>
+                    <div className="w-full max-w-sm">
+                      {currentRow ? (
+                        <div className="rounded-2xl shadow-lg overflow-hidden">
+                          {/* Card top */}
+                          <div style={{ background:`linear-gradient(135deg,${at.grad1},${at.grad2})` }} className="text-white p-6 flex flex-col items-center">
+                            <div className="flex items-center gap-2 mb-1 self-start">
+                              <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                              <span className="text-xs font-medium truncate max-w-[180px]" style={{ color: at.topSubtext }}>
+                                {rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class'}
+                              </span>
                             </div>
-                            {isPast && <Check className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />}
+                            {rowTask?.url
+                              ? <a href={rowTask.url} target="_blank" rel="noopener noreferrer" className="text-base font-bold text-center mb-1 hover:underline leading-tight line-clamp-2">
+                                  {rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow.taskId}`}
+                                </a>
+                              : <p className="text-base font-bold text-center mb-1 leading-tight line-clamp-2">
+                                  {rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow.taskId}`}
+                                </p>}
+                            <p className="text-xs mb-2 italic" style={{ color: at.topSubtext }}>"{currentRow.action || 'Work on Task'}"</p>
+                            {currentRow.zone && (() => {
+                              const zm = { focus:{label:'Focus Zone',bg:'bg-indigo-500 bg-opacity-40',text:'text-indigo-100'}, semi:{label:'Semi-Collaborative',bg:'bg-yellow-500 bg-opacity-30',text:'text-yellow-100'}, collab:{label:'Collaborative',bg:'bg-green-500 bg-opacity-30',text:'text-green-100'} };
+                              const z = zm[currentRow.zone];
+                              return z ? <span className={`text-xs font-semibold px-2 py-0.5 rounded-full mb-3 ${z.bg} ${z.text}`}>{z.label}</span> : null;
+                            })()}
+                            {!currentRow.zone && <div className="mb-2" />}
+                            <div className="text-5xl font-bold tabular-nums mb-0.5">{formatTime(agendaElapsed)}</div>
+                            <p className="text-xs mb-4" style={{ color: at.topSubtext }}>Time on this task</p>
+                            <button
+                              onClick={() => { if (agendaRunning) agendaStopTimer(); else agendaStartTimer(agendaElapsed, agendaCountdown ?? (currentRow.timeMins * 60)); }}
+                              className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-semibold text-sm transition-colors"
+                              style={{ background:'rgba(255,255,255,0.2)', color:'white' }}>
+                              {agendaRunning ? <><Pause className="w-4 h-4"/>Pause Timer</> : <><Play className="w-4 h-4"/>{agendaElapsed > 0 ? 'Resume Timer' : 'Start Timer'}</>}
+                            </button>
                           </div>
-                        );
-                      })}
+                          {/* Card bottom */}
+                          <div className="pa-agenda-card-bottom p-4 space-y-2" data-planassist-theme={colorTheme}>
+                            <div className="flex items-center gap-2 text-xs flex-wrap" style={{ color: at.isDark ? '#9ca3af' : '#6b7280' }}>
+                              <span className="flex items-center gap-1"><Clock className="w-3 h-3"/>Est. {rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—'} min</span>
+                              {dueDate && <span className="flex items-center gap-1"><Calendar className="w-3 h-3"/>Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>}
+                              <span className="flex items-center gap-1 font-medium" style={{ color: at.metaRowColor }}>Row {agendaCurrentRow + 1} of {rows.length}</span>
+                            </div>
+                            <button onClick={agendaMarkComplete} disabled={agendaProceedLoading}
+                              className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm disabled:opacity-60">
+                              {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"/> : <Check className="w-4 h-4"/>}
+                              Mark Complete
+                            </button>
+                            <div className="flex gap-2">
+                              <button onClick={() => openWorkspace(rowTask,'agenda')}
+                                className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg font-medium text-sm transition-colors"
+                                style={{ background: at.workspaceBg, color: at.workspaceText }}>
+                                <BookOpen className="w-3.5 h-3.5"/> Open Workspace
+                              </button>
+                              {pipSupported && (
+                                <div className="relative">
+                                  <button onClick={() => setPipPopupSelectorOpen(o => !o)}
+                                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium text-sm transition-colors"
+                                    style={{ background: at.workspaceBg, color: at.workspaceText }}
+                                    title="Open persistent popup">
+                                    <Play className="w-3.5 h-3.5"/> Popup
+                                  </button>
+                                  {pipPopupSelectorOpen && (
+                                    <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-52">
+                                      <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup</p>
+                                      {[['micro','⬡ Micro','Task timer only'],['macro','⬢ Macro','Task timer + controls'],['alt','◎ Alternate','Row countdown ring']].map(([m, label, desc]) => (
+                                        <button key={m} onClick={() => {
+                                          setPipPopupMode(m);
+                                          setPipPopupSelectorOpen(false);
+                                          launchAgendaPiP(currentAgenda, agendaCurrentRow, rowTask, currentRow, agendaCountdown, null, agendaElapsed, m);
+                                        }} className={`w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50 ${pipPopupMode === m ? 'bg-purple-50' : ''}`}>
+                                          <p className="text-sm font-semibold text-gray-800">{label}</p>
+                                          <p className="text-xs text-gray-400">{desc}</p>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-gray-400 text-center">No row data available.</p>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                {/* ── Right: In-session card ── */}
-                <div className="flex-1 flex items-center justify-center p-6">
-                  <div className="w-full max-w-md">
-                    {currentRow ? (
-                      <div className="rounded-2xl shadow-lg overflow-hidden">
-                        {/* Session card top */}
-                        <div className="bg-gradient-to-br from-purple-600 to-blue-600 text-white p-7 flex flex-col items-center">
-                          <div className="flex items-center gap-2 mb-2">
-                            <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                            <span className="text-purple-200 text-xs font-medium truncate max-w-[200px]">
-                              {rowTask?.class?.replace(/[\[\]]/g,'') || 'No Class'}
-                            </span>
-                          </div>
-                          {rowTask?.url ? (
-                            <a href={rowTask.url} target="_blank" rel="noopener noreferrer"
-                              className="text-lg font-bold text-center mb-1 hover:underline leading-tight line-clamp-2">
-                              {rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow.taskId}`}
-                            </a>
-                          ) : (
-                            <p className="text-lg font-bold text-center mb-1 leading-tight line-clamp-2">
-                              {rowTask ? cleanTaskTitle(rowTask) : `Task ${currentRow.taskId}`}
-                            </p>
-                          )}
-                          {/* Action label */}
-                          <p className="text-purple-200 text-sm mb-2 italic">"{currentRow.action || 'Work on Task'}"</p>
-                          {/* Zone badge */}
-                          {currentRow.zone && (() => {
-                            const zoneMap = {
-                              focus: { label: 'Focus Zone', bg: 'bg-indigo-500 bg-opacity-40', text: 'text-indigo-100' },
-                              semi:  { label: 'Semi-Collaborative Zone', bg: 'bg-yellow-500 bg-opacity-30', text: 'text-yellow-100' },
-                              collab:{ label: 'Collaborative Zone', bg: 'bg-green-500 bg-opacity-30', text: 'text-green-100' },
-                            };
-                            const z = zoneMap[currentRow.zone];
-                            return z ? (
-                              <span className={`text-xs font-semibold px-2.5 py-1 rounded-full mb-4 ${z.bg} ${z.text}`}>{z.label}</span>
-                            ) : null;
-                          })()}
-                          {!currentRow.zone && <div className="mb-3" />}
-                          {/* In-session elapsed timer */}
-                          <div className="text-5xl font-bold tabular-nums mb-1">{formatTime(agendaElapsed)}</div>
-                          <p className="text-purple-200 text-xs mb-6">Time on this task</p>
-                          {/* Start/pause button */}
-                          <button
-                            onClick={() => {
-                              if (agendaRunning) {
-                                agendaStopTimer();
-                              } else {
-                                agendaStartTimer(agendaElapsed, agendaCountdown ?? (currentRow.timeMins * 60));
-                              }
-                            }}
-                            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-white bg-opacity-20 hover:bg-opacity-30 rounded-lg font-semibold text-sm transition-colors"
-                          >
-                            {agendaRunning
-                              ? <><Pause className="w-4 h-4" /> Pause Timer</>
-                              : <><Play className="w-4 h-4" /> {agendaElapsed > 0 ? 'Resume Timer' : 'Start Timer'}</>
-                            }
-                          </button>
-                        </div>
-                        {/* Session card bottom */}
-                        <div className="pa-agenda-card-bottom p-4 space-y-2">
-                          <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
-                            <span className="flex items-center gap-1"><Clock className="w-3 h-3" />Est. {rowTask?.userEstimate || rowTask?.user_estimated_time || rowTask?.estimatedTime || rowTask?.estimated_time || '—'} min</span>
-                            {dueDate && (
-                              <span className="flex items-center gap-1"><Calendar className="w-3 h-3" />Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>
-                            )}
-                            <span className="flex items-center gap-1 text-purple-500 font-medium">
-                              <span>Row {agendaCurrentRow + 1} of {rows.length}</span>
-                            </span>
-                          </div>
-                          <button onClick={agendaMarkComplete} disabled={agendaProceedLoading}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 text-sm transition-colors disabled:opacity-60">
-                            {agendaProceedLoading ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
-                            Mark Complete
-                          </button>
-                          <div className="flex gap-2">
-                          <button onClick={() => openWorkspace(rowTask, 'agenda')}
-                            className="flex-1 flex items-center justify-center gap-2 py-2 bg-purple-50 text-purple-700 rounded-lg font-medium hover:bg-purple-100 text-sm transition-colors">
-                            <BookOpen className="w-3.5 h-3.5" /> Open Workspace
-                          </button>
-                          {typeof window.documentPictureInPicture !== 'undefined' && (() => {
-                            const pipTh = getPipTheme(colorTheme);
-                            return (
-                              <div className="relative">
-                                <button onClick={() => setPipPopupSelectorOpen(o => !o)}
-                                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg font-medium text-sm transition-colors"
-                                  style={{ background: pipTh.workspaceBg, color: pipTh.workspaceText }}
-                                  title="Open persistent popup">
-                                  <Play className="w-3.5 h-3.5"/> Popup
-                                </button>
-                                {pipPopupSelectorOpen && (
-                                  <div className="absolute bottom-full right-0 mb-2 bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden z-50 w-52">
-                                    <p className="px-3 pt-2.5 pb-1 text-xs font-semibold text-gray-400 uppercase tracking-wider">Select popup</p>
-                                    {[['micro','⬡ Micro','Task timer only'],['macro','⬢ Macro','Task timer + controls'],['alt','◎ Alternate','Row countdown ring']].map(([m, label, desc]) => (
-                                      <button key={m} onClick={() => {
-                                        setPipPopupMode(m);
-                                        setPipPopupSelectorOpen(false);
-                                        launchAgendaPiP(currentAgenda, agendaCurrentRow, rowTask, currentRow, agendaCountdown, null, agendaElapsed, m);
-                                      }} className={`w-full text-left px-3 py-2.5 hover:bg-purple-50 transition-colors border-t border-gray-50 ${pipPopupMode === m ? 'bg-purple-50' : ''}`}>
-                                        <p className="text-sm font-semibold text-gray-800">{label}</p>
-                                        <p className="text-xs text-gray-400">{desc}</p>
-                                      </button>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <p className="text-gray-400 text-center">No row data available.</p>
-                    )}
-                  </div>
-                </div>
               </div>
             </div>
           );
