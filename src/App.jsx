@@ -2238,10 +2238,12 @@ const PlanAssist = () => {
     @keyframes pa-spin { to { transform: rotate(360deg); } }
   `;
 
-  const launchSessionPiP = (task, pipPromise) => {
-    if (typeof window.documentPictureInPicture === 'undefined') return;
-    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
-
+  // ── Keep all PiP callbacks fresh on every render ─────────────────────────
+  // The PiP window calls back into the main window via window.__pa_* globals.
+  // These must ALWAYS reference the latest React state/functions, not a stale
+  // closure captured at launch time. A useEffect with no deps runs after every
+  // render and keeps them current.
+  useEffect(() => {
     window.__pa_pipPauseResume = () => {
       if (window.__pa_isTimerRunning) {
         const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
@@ -2254,8 +2256,39 @@ const PlanAssist = () => {
     window.__pa_pipSaveExit      = () => pauseTaskSession();
     window.__pa_pipMarkComplete  = () => completeTaskSession();
     window.__pa_pipOpenWorkspace = () => openWorkspace(window.__pa_pipTask, 'session');
-    window.__pa_pipTask          = task;
-    window.__pa_isTimerRunning   = true;
+    window.__pa_isTimerRunning   = isTimerRunning;
+    window.__pa_pipSessionStillActive = !!currentSessionTask;
+
+    window.__pa_pipAgendaPauseResume = () => {
+      if (window.__pa_agendaRunning) {
+        agendaStopTimer();
+      } else {
+        agendaStartTimer(window.__pa_agendaElapsedSnap, window.__pa_agendaCountdownSnap);
+      }
+    };
+    window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
+    window.__pa_pipAgendaProceed = () => {
+      let nextPip = null;
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 400, height: 470 }); } catch(e){}
+      agendaSaveAndProceed(nextPip);
+    };
+    window.__pa_pipAgendaMarkComplete = () => {
+      let nextPip = null;
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 400, height: 470 }); } catch(e){}
+      agendaMarkComplete(nextPip);
+    };
+    window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
+    window.__pa_agendaRunning          = agendaRunning;
+    window.__pa_agendaElapsedSnap      = agendaElapsed;
+    window.__pa_agendaCountdownSnap    = agendaCountdown;
+    window.__pa_pipAgendaSessionStillActive = !!currentAgenda;
+  }); // intentionally no deps — must run after EVERY render
+
+  const launchSessionPiP = (task, pipPromise) => {
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+
+    window.__pa_pipTask = task;
 
     // Use the pre-requested window (from inside the click handler) or open a fresh one
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: 380, height: 430 });
@@ -2310,6 +2343,9 @@ const PlanAssist = () => {
         </div>
       `;
 
+      // X/close button = Save & Exit.
+      // window.__pa_pipSessionStillActive is kept current by the per-render effect above,
+      // so by the time pagehide fires it reflects true current state.
       pipWin.addEventListener('pagehide', () => {
         pipWindowRef.current = null;
         setPipActive(false);
@@ -2320,37 +2356,15 @@ const PlanAssist = () => {
     }).catch(err => console.error('Session PiP launch failed:', err));
   };
 
-  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise) => {
+  const launchAgendaPiP = (agenda, rowIdx, rowTask, currentRow, initialCountdown, pipPromise, currentElapsed) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
 
     const initCountdown = initialCountdown ?? (currentRow?.timeMins || 25) * 60;
+    // currentElapsed: the actual seconds already elapsed on this row (for initial display)
+    const initElapsed = currentElapsed ?? 0;
 
-    window.__pa_pipAgendaPauseResume = () => {
-      if (window.__pa_agendaRunning) {
-        agendaStopTimer();
-      } else {
-        agendaStartTimer(window.__pa_agendaElapsedSnap, window.__pa_agendaCountdownSnap);
-      }
-    };
-    window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
-    // For Proceed and MarkComplete, pre-request the next PiP window immediately
-    // inside this click-handler context before any async work elapses.
-    window.__pa_pipAgendaProceed = () => {
-      let nextPip = null;
-      try { nextPip = window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }); } catch(e){}
-      agendaSaveAndProceed(nextPip);
-    };
-    window.__pa_pipAgendaMarkComplete = () => {
-      let nextPip = null;
-      try { nextPip = window.documentPictureInPicture.requestWindow({ width: 400, height: 470 }); } catch(e){}
-      agendaMarkComplete(nextPip);
-    };
-    window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
-    window.__pa_pipAgendaTask         = rowTask;
-    window.__pa_agendaRunning         = false;
-    window.__pa_agendaElapsedSnap     = 0;
-    window.__pa_agendaCountdownSnap   = initCountdown;
+    window.__pa_pipAgendaTask = rowTask;
 
     // Use pre-requested window (gesture-bound) or open a fresh one (Reopen Popup)
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: 400, height: 470 });
@@ -2375,10 +2389,13 @@ const PlanAssist = () => {
       const zoneMap     = { focus: '🎯 Focus Zone', semi: '🤝 Semi-Collaborative', collab: '👥 Collaborative Zone' };
       const zoneLabel   = currentRow?.zone ? zoneMap[currentRow.zone] || '' : '';
 
-      // Render initial countdown from the actual saved value
+      // Render both timers from actual current values
       const cdMins = Math.floor(initCountdown / 60);
       const cdSecs = initCountdown % 60;
       const cdStr  = `${cdMins}:${String(cdSecs).padStart(2,'0')}`;
+      const elMins = Math.floor(initElapsed / 60);
+      const elSecs = initElapsed % 60;
+      const elStr  = `${elMins}:${String(elSecs).padStart(2,'0')}`;
 
       pipWin.document.body.innerHTML = `
         <div class="pip-card">
@@ -2392,7 +2409,7 @@ const PlanAssist = () => {
             ${zoneLabel ? `<div class="pip-zone">${zoneLabel}</div>` : ''}
             <div class="pip-timer-row">
               <div style="text-align:center">
-                <div class="pip-elapsed" id="pip-agenda-elapsed">0:00</div>
+                <div class="pip-elapsed" id="pip-agenda-elapsed">${elStr}</div>
                 <div class="pip-timer-sub">elapsed</div>
               </div>
               <div style="text-align:center">
@@ -2417,7 +2434,6 @@ const PlanAssist = () => {
         </div>
       `;
 
-      // Issue 2: X/close = Save & Exit
       pipWin.addEventListener('pagehide', () => {
         pipWindowRef.current = null;
         setPipActive(false);
@@ -2428,26 +2444,23 @@ const PlanAssist = () => {
     }).catch(err => console.error('Agenda PiP launch failed:', err));
   };
 
-  // ── Sync Session PiP on every timer / loading-state tick ─────────────────
+  // ── Sync Session PiP DOM on every timer / loading-state tick ────────────
   useEffect(() => {
     const pipWin = pipWindowRef.current;
     if (!pipWin || pipWin.closed) return;
     const elEl = pipWin.document.getElementById('pip-elapsed');
     if (!elEl) return; // not a session PiP
 
-    // Timer display
     const mins = Math.floor(sessionElapsed / 60);
     const secs = sessionElapsed % 60;
     elEl.textContent = `${mins}:${secs.toString().padStart(2,'0')}`;
 
-    // Pause/Resume button
     const pauseBtn = pipWin.document.getElementById('pip-pause-btn');
     if (pauseBtn) {
       pauseBtn.textContent = isTimerRunning ? '⏸ Pause Timer' : '▶ Resume Timer';
       pauseBtn.disabled = savingSession || markingComplete;
     }
 
-    // Save & Exit button — loading state (issue 1)
     const exitBtn = pipWin.document.getElementById('pip-exit-btn');
     if (exitBtn) {
       if (savingSession) {
@@ -2459,7 +2472,6 @@ const PlanAssist = () => {
       }
     }
 
-    // Mark Complete button — loading state (issue 1)
     const completeBtn = pipWin.document.getElementById('pip-complete-btn');
     if (completeBtn) {
       if (markingComplete) {
@@ -2470,24 +2482,19 @@ const PlanAssist = () => {
         completeBtn.disabled = savingSession;
       }
     }
+  }, [sessionElapsed, isTimerRunning, savingSession, markingComplete]);
 
-    window.__pa_isTimerRunning = isTimerRunning;
-    window.__pa_pipSessionStillActive = !!currentSessionTask;
-  }, [sessionElapsed, isTimerRunning, currentSessionTask, savingSession, markingComplete]);
-
-  // ── Sync Agenda PiP on every timer / loading-state tick ──────────────────
+  // ── Sync Agenda PiP DOM on every timer / loading-state tick ──────────────
   useEffect(() => {
     const pipWin = pipWindowRef.current;
     if (!pipWin || pipWin.closed) return;
     const elEl = pipWin.document.getElementById('pip-agenda-elapsed');
     if (!elEl) return; // not an agenda PiP
 
-    // Elapsed timer
     const eMins = Math.floor(agendaElapsed / 60);
     const eSecs = agendaElapsed % 60;
     elEl.textContent = `${eMins}:${eSecs.toString().padStart(2,'0')}`;
 
-    // Countdown timer
     const cdEl = pipWin.document.getElementById('pip-agenda-countdown');
     if (cdEl && agendaCountdown != null) {
       const cMins = Math.floor(agendaCountdown / 60);
@@ -2497,26 +2504,22 @@ const PlanAssist = () => {
       else cdEl.classList.remove('flash');
     }
 
-    // Pause/Resume button
     const pauseBtn = pipWin.document.getElementById('pip-agenda-pause-btn');
     if (pauseBtn) {
       pauseBtn.textContent = agendaRunning ? '⏸ Pause Timer' : (agendaElapsed > 0 ? '▶ Resume Timer' : '▶ Start Timer');
       pauseBtn.disabled = agendaProceedLoading || agendaExitLoading;
     }
 
-    // Proceed/Finish button — loading state (issue 1)
     const proceedBtn = pipWin.document.getElementById('pip-agenda-proceed-btn');
     if (proceedBtn) {
       if (agendaProceedLoading) {
         proceedBtn.innerHTML = '<span class="pip-spinner"></span>';
         proceedBtn.disabled = true;
       } else {
-        // label was set on build; just re-enable
         proceedBtn.disabled = agendaExitLoading;
       }
     }
 
-    // Exit button — loading state (issue 1)
     const exitBtn = pipWin.document.getElementById('pip-agenda-exit-btn');
     if (exitBtn) {
       if (agendaExitLoading) {
@@ -2528,7 +2531,6 @@ const PlanAssist = () => {
       }
     }
 
-    // Mark Complete button — loading state (issue 1)
     const completeBtn = pipWin.document.getElementById('pip-agenda-complete-btn');
     if (completeBtn) {
       if (agendaProceedLoading) {
@@ -2539,12 +2541,7 @@ const PlanAssist = () => {
         completeBtn.disabled = agendaExitLoading;
       }
     }
-
-    window.__pa_agendaRunning       = agendaRunning;
-    window.__pa_agendaElapsedSnap   = agendaElapsed;
-    window.__pa_agendaCountdownSnap = agendaCountdown;
-    window.__pa_pipAgendaSessionStillActive = !!currentAgenda;
-  }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, currentAgenda, agendaProceedLoading, agendaExitLoading]);
+  }, [agendaElapsed, agendaCountdown, agendaCountdownFlash, agendaRunning, agendaProceedLoading, agendaExitLoading]);
 
   const handleStartEditTime = (taskId, currentTime) => {
     setEditingTimeTaskId(taskId);
@@ -2744,7 +2741,7 @@ const PlanAssist = () => {
     setCurrentPage('agenda-active');
     window.__pa_pipAgendaSessionStillActive = true;
     // Defer HTML injection one tick so state is committed; pass pre-requested promise
-    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown, earlyPipRequest), 0);
+    setTimeout(() => launchAgendaPiP(agenda, row, rowData?.task || null, rowData || null, savedCountdown, earlyPipRequest, taskAccumSecs), 0);
   };
 
   const agendaSaveAndExit = async () => {
@@ -2827,7 +2824,8 @@ const PlanAssist = () => {
           nextTask,
           nextRowData || null,
           nextCountdown,
-          nextPipPromise
+          nextPipPromise,
+          nextTaskAccumSecs
         ), 0);
       }
     } catch (err) {
@@ -2936,7 +2934,7 @@ const PlanAssist = () => {
         setCurrentAgenda(prev => ({ ...prev, current_row: nextRow, current_row_elapsed: 0, current_row_countdown: null }));
         // Relaunch PiP for the new row, passing the pre-requested window promise
         const updatedAgenda = { ...currentAgenda, current_row: nextRow, rows };
-        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown, nextPipPromise), 0);
+        setTimeout(() => launchAgendaPiP(updatedAgenda, nextRow, nextRowData?.task || null, nextRowData || null, nextCountdown, nextPipPromise, nextTaskAccumSecs), 0);
       }
     } catch (err) {
       console.error('Mark complete failed:', err);
@@ -7269,7 +7267,7 @@ const PlanAssist = () => {
                       } else if (currentPage === 'agenda-active' && currentAgenda) {
                         const rows = currentAgenda.rows || [];
                         const row = rows[agendaCurrentRow];
-                        launchAgendaPiP(currentAgenda, agendaCurrentRow, row?.task || null, row || null, agendaCountdown);
+                        launchAgendaPiP(currentAgenda, agendaCurrentRow, row?.task || null, row || null, agendaCountdown, null, agendaElapsed);
                       }
                     }}
                     className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors mb-3"
