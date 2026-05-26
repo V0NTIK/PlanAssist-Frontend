@@ -2921,7 +2921,8 @@ const PlanAssist = () => {
           nextRowData || null,
           nextCountdown,
           nextPipPromise,
-          nextTaskAccumSecs
+          nextTaskAccumSecs,
+          pipPopupMode
         ), 0);
       }
     } catch (err) {
