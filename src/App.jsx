@@ -2048,7 +2048,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : 175;
+      const preH = preMode === 'micro' ? 110 : 190;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
@@ -2311,12 +2311,12 @@ const PlanAssist = () => {
     window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
     window.__pa_pipAgendaProceed = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 175 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 190 }); } catch(e){}
       agendaSaveAndProceed(nextPip);
     };
     window.__pa_pipAgendaMarkComplete = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 175 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 190 }); } catch(e){}
       agendaMarkComplete(nextPip);
     };
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
@@ -2334,7 +2334,7 @@ const PlanAssist = () => {
 
     const isMicro = pipMode === 'micro';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : 175;
+    const h = isMicro ? 110 : 190;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2412,7 +2412,7 @@ const PlanAssist = () => {
     const isMicro = pipMode === 'micro';
     const isAlt   = pipMode === 'alt';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : isAlt ? 190 : 175;
+    const h = isMicro ? 110 : 190;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2816,7 +2816,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 190 : 175;
+      const preH = preMode === 'micro' ? 110 : 190;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
