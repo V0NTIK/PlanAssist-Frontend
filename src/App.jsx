@@ -2046,7 +2046,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : 180;
+      const preH = preMode === 'micro' ? 110 : 190;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
@@ -2206,75 +2206,80 @@ const PlanAssist = () => {
   };
 
   const buildPipStyles = (t) => `
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { height: 100%; width: 100%; overflow: hidden; font-family: 'Inter', system-ui, -apple-system, sans-serif; }
-    body { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); }
-    /* Card fills the full PiP window exactly */
+    html, body { height: 100%; width: 100%; overflow: hidden; }
+    body { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    /* Card fills window */
     .pip-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: ${t.cardBg}; }
-    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 12px 13px 11px; flex: 1; display: flex; flex-direction: column; }
-    /* Class row — matches setup: text-sm font-medium + w-2.5 h-2.5 dot */
-    .pip-class { font-size: 13px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 3px; display: flex; align-items: center; gap: 5px; }
-    .pip-class-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
-    /* Task title — matches setup: text-xl font-bold */
-    .pip-title { font-size: 15px; font-weight: 700; line-height: 1.25; margin-bottom: 2px; }
-    /* Action/zone title — italic, matches agenda setup */
-    .pip-action-title { font-size: 13px; font-weight: 600; line-height: 1.3; margin-bottom: 2px; font-style: italic; color: rgba(255,255,255,0.9); }
-    /* Session timer — matches setup: text-6xl font-bold tabular-nums (60px → scaled to popup) */
-    .pip-timer { font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; margin: auto 0; text-align: center; }
-    .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; margin-bottom: 4px; text-align: center; }
-    /* Agenda dual timer row */
-    .pip-timer-row { display: flex; align-items: flex-end; justify-content: center; gap: 14px; margin: auto 0 4px; }
-    .pip-elapsed { font-size: 36px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
-    .pip-elapsed-label { font-size: 9px; color: ${t.topSubtext}; margin-top: 2px; text-align: center; }
-    .pip-sep { font-size: 20px; color: rgba(255,255,255,0.2); padding-bottom: 3px; }
-    .pip-countdown { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: ${t.topSubtext}; line-height: 1; }
+    .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 14px 14px 12px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
+    /* Class row — matches setup text-sm font-medium + w-2.5 h-2.5 dot */
+    .pip-class { font-size: 13px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+    .pip-class-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+    /* Task title — matches setup text-xl font-bold */
+    .pip-title { font-size: 17px; font-weight: 700; line-height: 1.25; margin-bottom: 0; }
+    /* Action/zone subtitle — matches agenda setup italic text-xs below title */
+    .pip-action-title { font-size: 13px; font-weight: 600; line-height: 1.3; font-style: italic; color: rgba(255,255,255,0.88); margin-bottom: 0; }
+    /* Timer — matches setup text-6xl font-bold tabular-nums: 60px 700 no letter-spacing */
+    .pip-timer { font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; text-align: center; margin: 6px 0 2px; }
+    .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; text-align: center; margin-bottom: 0; }
+    /* Agenda dual-timer row — matches setup text-5xl elapsed / smaller countdown */
+    .pip-timer-row { display: flex; align-items: flex-end; justify-content: center; gap: 12px; }
+    .pip-elapsed { font-size: 38px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; }
+    .pip-elapsed-label { font-size: 9px; color: ${t.topSubtext}; margin-top: 1px; text-align: center; }
+    .pip-sep { font-size: 22px; color: rgba(255,255,255,0.2); padding-bottom: 3px; }
+    .pip-countdown { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; color: ${t.topSubtext}; line-height: 1; }
     .pip-countdown.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
-    .pip-countdown-label { font-size: 9px; color: ${t.topSubtext}; margin-top: 2px; text-align: center; }
-    /* Icon-only button row — 4 equal buttons */
-    .pip-btn-row { display: flex; gap: 5px; margin-top: 4px; }
-    .pip-btn { flex: 1; padding: 9px 4px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: opacity 0.15s; font-family: inherit; }
+    .pip-countdown-label { font-size: 9px; color: ${t.topSubtext}; margin-top: 1px; text-align: center; }
+    /* Icon-only button row — matches setup: py-2.5 rounded-lg font-semibold */
+    .pip-btn-row { display: flex; gap: 6px; }
+    .pip-btn { flex: 1; padding: 10px 4px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-family: inherit; transition: opacity 0.15s; }
     .pip-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    /* Matches setup Pause button: rgba(255,255,255,0.2) */
     .pip-btn-pause { background: rgba(255,255,255,0.2); color: white; }
     .pip-btn-pause:hover:not(:disabled) { background: rgba(255,255,255,0.32); }
-    .pip-btn-proceed { background: rgba(34,197,94,0.35); color: white; }
-    .pip-btn-proceed:hover:not(:disabled) { background: rgba(34,197,94,0.5); }
-    .pip-btn-complete { background: rgba(34,197,94,0.35); color: white; }
-    .pip-btn-complete:hover:not(:disabled) { background: rgba(34,197,94,0.5); }
+    /* Matches setup Mark Complete: bg-green-500 */
+    .pip-btn-complete { background: #22c55e; color: white; }
+    .pip-btn-complete:hover:not(:disabled) { background: #16a34a; }
+    /* Proceed: semi-transparent green like agenda setup Finish = bg-green-500, Proceed = bg-purple-600 */
+    .pip-btn-proceed { background: rgba(255,255,255,0.18); color: white; border: 1px solid rgba(255,255,255,0.3); }
+    .pip-btn-proceed:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+    /* Matches setup Save & Exit: t.exitBtn */
     .pip-btn-exit { background: ${t.exitBtn}; color: white; }
     .pip-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
     /* Spinner */
     .pip-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.35); border-top-color: white; border-radius: 50%; animation: pa-spin 0.6s linear infinite; display: inline-block; }
     @keyframes pa-spin { to { transform: rotate(360deg); } }
     @keyframes pa-pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-    /* Alt popup — full gradient, no card */
-    .pip-alt-wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 11px 13px; gap: 5px; overflow: hidden; }
-    .pip-alt-title { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.9); text-align: center; font-style: italic; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .pip-alt-class { font-size: 10px; color: rgba(255,255,255,0.55); text-align: center; display: flex; align-items: center; justify-content: center; gap: 4px; }
-    .pip-alt-class-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    /* Alt popup */
+    .pip-alt-wrap { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 13px 13px 12px; overflow: hidden; }
+    /* Alt class row — same as macro .pip-class */
+    .pip-alt-class { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.65); display: flex; align-items: center; gap: 6px; text-align: center; }
+    .pip-alt-class-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+    /* Alt title — same as macro .pip-action-title */
+    .pip-alt-title { font-size: 13px; font-weight: 600; line-height: 1.3; font-style: italic; color: rgba(255,255,255,0.88); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Alt countdown — big, matches .pip-timer weight/style */
+    .pip-alt-cd { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; color: white; line-height: 1; text-align: center; }
+    .pip-alt-cd.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
+    .pip-alt-cd-label { font-size: 10px; color: rgba(255,255,255,0.55); text-align: center; margin-top: 1px; }
     /* Alt progress bar */
     .pip-alt-bar-wrap { width: 100%; height: 6px; background: rgba(255,255,255,0.18); border-radius: 3px; overflow: hidden; }
     .pip-alt-bar-fill { height: 100%; border-radius: 3px; background: white; transition: width 1s linear; }
     .pip-alt-bar-fill.flash { background: #fca5a5; animation: pa-pulse 1s infinite; }
-    /* Alt countdown */
-    .pip-alt-cd { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; color: white; line-height: 1; text-align: center; }
-    .pip-alt-cd.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
-    .pip-alt-cd-label { font-size: 9px; color: rgba(255,255,255,0.55); text-align: center; }
-    /* Alt buttons — same icon-only style */
-    .pip-alt-btn-row { display: flex; gap: 5px; width: 100%; }
-    .pip-alt-btn { flex: 1; padding: 8px 4px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: opacity 0.15s; font-family: inherit; }
+    /* Alt buttons — same style as macro */
+    .pip-alt-btn-row { display: flex; gap: 6px; width: 100%; }
+    .pip-alt-btn { flex: 1; padding: 10px 4px; border-radius: 8px; border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-family: inherit; transition: opacity 0.15s; }
     .pip-alt-btn:disabled { opacity: 0.45; cursor: not-allowed; }
     .pip-alt-btn-pause { background: rgba(255,255,255,0.2); color: white; }
     .pip-alt-btn-pause:hover:not(:disabled) { background: rgba(255,255,255,0.32); }
-    .pip-alt-btn-proceed { background: rgba(34,197,94,0.35); color: white; }
-    .pip-alt-btn-proceed:hover:not(:disabled) { background: rgba(34,197,94,0.5); }
-    .pip-alt-btn-complete { background: rgba(34,197,94,0.35); color: white; }
-    .pip-alt-btn-complete:hover:not(:disabled) { background: rgba(34,197,94,0.5); }
+    .pip-alt-btn-complete { background: #22c55e; color: white; }
+    .pip-alt-btn-complete:hover:not(:disabled) { background: #16a34a; }
+    .pip-alt-btn-proceed { background: rgba(255,255,255,0.18); color: white; border: 1px solid rgba(255,255,255,0.3); }
+    .pip-alt-btn-proceed:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
     .pip-alt-btn-exit { background: ${t.exitBtn}; color: white; }
     .pip-alt-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
   `;
 
-  // ── Keep all PiP callbacks fresh on every render ─────────────────────────
+  // ── Keep all PiP callbacks  // ── Keep all PiP callbacks fresh on every render ─────────────────────────
   // The PiP window calls back into the main window via window.__pa_* globals.
   // These must ALWAYS reference the latest React state/functions, not a stale
   // closure captured at launch time. A useEffect with no deps runs after every
@@ -2304,12 +2309,12 @@ const PlanAssist = () => {
     window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
     window.__pa_pipAgendaProceed = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 155 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 190 }); } catch(e){}
       agendaSaveAndProceed(nextPip);
     };
     window.__pa_pipAgendaMarkComplete = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 155 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 190 }); } catch(e){}
       agendaMarkComplete(nextPip);
     };
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
@@ -2327,7 +2332,7 @@ const PlanAssist = () => {
 
     const isMicro = pipMode === 'micro';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : 180;
+    const h = isMicro ? 110 : 190;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2350,19 +2355,19 @@ const PlanAssist = () => {
         // Micro: just the timer
         pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
-          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:'Inter',system-ui,sans-serif;box-sizing:border-box;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;overflow:hidden;">
             <div style="font-size:10px;font-weight:500;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${titleText}</div>
             <div id="pip-elapsed" style="font-size:46px;font-weight:700;color:white;font-variant-numeric:tabular-nums;letter-spacing:0;line-height:1;">${initStr}</div>
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
       } else {
-        // Macro: class dot + title + big timer + 3 icon-only buttons. No bottom section.
+        // Session Macro: class dot + title + timer + 3 icon-only buttons
         const classLabel = task.class ? task.class.replace(/[\[\]]/g,'') : 'No Class';
         const classColor = getClassColor(task.class);
-        const svgPause = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
-        const svgPlay  = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5,3 19,12 5,21"/></svg>`;
-        const svgX     = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-        const svgCheck = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`;
+        const svgPause = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
+        const svgPlay  = `<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+        const svgX     = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+        const svgCheck = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`;
 
         pipWin.document.body.innerHTML = `
           <div class="pip-card">
@@ -2372,8 +2377,10 @@ const PlanAssist = () => {
                 <span>${classLabel}</span>
               </div>
               <div class="pip-title">${titleText}</div>
-              <div class="pip-timer" id="pip-elapsed">${initStr}</div>
-              <div class="pip-timer-label">Time on this task</div>
+              <div>
+                <div class="pip-timer" id="pip-elapsed">${initStr}</div>
+                <div class="pip-timer-label">Time on this task</div>
+              </div>
               <div class="pip-btn-row">
                 <button class="pip-btn pip-btn-pause" id="pip-pause-btn" title="Pause / Resume" onclick="window.opener.__pa_pipPauseResume()">${svgPause}</button>
                 <button class="pip-btn pip-btn-complete" id="pip-complete-btn-top" title="Mark Complete" onclick="window.opener.__pa_pipMarkComplete()">${svgCheck}</button>
@@ -2403,7 +2410,7 @@ const PlanAssist = () => {
     const isMicro = pipMode === 'micro';
     const isAlt   = pipMode === 'alt';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : isAlt ? 185 : 155;
+    const h = isMicro ? 110 : isAlt ? 190 : 190;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2441,13 +2448,13 @@ const PlanAssist = () => {
       if (isMicro) {
         pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
-          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:'Inter',system-ui,sans-serif;box-sizing:border-box;overflow:hidden;">
+          <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;overflow:hidden;">
             <div style="font-size:10px;font-weight:500;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${titleText}</div>
             <div id="pip-agenda-elapsed" style="font-size:46px;font-weight:700;color:white;font-variant-numeric:tabular-nums;letter-spacing:0;line-height:1;">${elStr}</div>
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
       } else if (isAlt) {
-        // Alt: action/zone title + class dot + progress bar + countdown + 4 icon-only buttons
+        // Alt: same class/title as macro + big countdown + progress bar + 4 icon-only buttons
         const totalSecs = (currentRow?.timeMins || 25) * 60;
         const pct = Math.max(0, Math.min(1, initCountdown / totalSecs));
         const barPct = (pct * 100).toFixed(1);
@@ -2455,11 +2462,11 @@ const PlanAssist = () => {
         const zoneNames = { focus: 'Focus', semi: 'Semi-Collaborative', collab: 'Collaborative' };
         const zoneName = currentRow?.zone ? zoneNames[currentRow.zone] || '' : '';
         const actionTitle = zoneName ? `${actionText} in ${zoneName} Zone` : actionText;
-        const svgPause   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
-        const svgPlay    = `<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5,3 19,12 5,21"/></svg>`;
-        const svgX       = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-        const svgCheck   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`;
-        const svgChev    = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9,18 15,12 9,6"/></svg>`;
+        const svgPause = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
+        const svgPlay  = `<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+        const svgX     = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+        const svgCheck = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`;
+        const svgChev  = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9,18 15,12 9,6"/></svg>`;
         pipWin.document.body.innerHTML = `
           <div class="pip-alt-wrap">
             <div class="pip-alt-class">
@@ -2467,8 +2474,10 @@ const PlanAssist = () => {
               <span>${classLabel}</span>
             </div>
             <div class="pip-alt-title">${actionTitle}</div>
-            <div class="pip-alt-cd${initCountdown <= 0 ? ' flash' : ''}" id="pip-agenda-countdown">${cdStr}</div>
-            <div class="pip-alt-cd-label">row time remaining</div>
+            <div>
+              <div class="pip-alt-cd${initCountdown <= 0 ? ' flash' : ''}" id="pip-agenda-countdown">${cdStr}</div>
+              <div class="pip-alt-cd-label">row time remaining</div>
+            </div>
             <div class="pip-alt-bar-wrap">
               <div class="pip-alt-bar-fill${initCountdown <= 0 ? ' flash' : ''}" id="pip-alt-bar-fill" style="width:${barPct}%"></div>
             </div>
@@ -2481,19 +2490,19 @@ const PlanAssist = () => {
             <div id="pip-agenda-elapsed" style="display:none;">${elStr}</div>
           </div>`;
         pipWin.__pa_totalSecs = totalSecs;
-        pipWin.__pa_barPct = barPct;
       } else {
-        // Macro agenda: class dot + action/zone title + dual timer + 4 icon-only buttons
+        // Agenda Macro: class dot + action/zone title + dual timer + 4 icon-only buttons
         const actionText = currentRow?.action || 'Work on Task';
         const zoneNames = { focus: 'Focus', semi: 'Semi-Collaborative', collab: 'Collaborative' };
         const zoneName = currentRow?.zone ? zoneNames[currentRow.zone] || '' : '';
         const actionTitle = zoneName ? `${actionText} in ${zoneName} Zone` : actionText;
         const hasElapsed = initElapsed > 0;
-        const svgPause   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
-        const svgPlay    = `<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="5,3 19,12 5,21"/></svg>`;
-        const svgX       = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
-        const svgCheck   = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`;
-        const svgChev    = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9,18 15,12 9,6"/></svg>`;
+        const svgPause = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>`;
+        const svgPlay  = `<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21"/></svg>`;
+        const svgX     = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`;
+        const svgCheck = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20,6 9,17 4,12"/></svg>`;
+        const svgChev  = `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9,18 15,12 9,6"/></svg>`;
+
         pipWin.document.body.innerHTML = `
           <div class="pip-card">
             <div class="pip-top">
@@ -2514,7 +2523,7 @@ const PlanAssist = () => {
                 </div>
               </div>
               <div class="pip-btn-row">
-                <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" title="Start / Pause / Resume" onclick="window.opener.__pa_pipAgendaPauseResume()">${hasElapsed ? svgPlay : svgPlay}</button>
+                <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" title="Start / Pause / Resume" onclick="window.opener.__pa_pipAgendaPauseResume()">${hasElapsed ? svgPause : svgPlay}</button>
                 <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" title="${isLast ? 'Finish' : 'Proceed'}" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? svgCheck : svgChev}</button>
                 <button class="pip-btn pip-btn-complete" id="pip-agenda-complete-btn" title="Mark Complete" onclick="window.opener.__pa_pipAgendaMarkComplete()">${svgCheck}</button>
                 <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" title="Save &amp; Exit" onclick="window.opener.__pa_pipAgendaSaveExit()">${svgX}</button>
@@ -2805,7 +2814,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 185 : 155;
+      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 190 : 190;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
