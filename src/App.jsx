@@ -1288,8 +1288,10 @@ const PlanAssist = () => {
           loadBadges(),
         ]);
 
-        // Only navigate to Hub after everything is fully loaded
-        setCurrentPage('hub');
+        // Only navigate to Hub if user hasn't already navigated elsewhere
+        // (the initial page is already 'hub'; navigating here again would yank
+        // the user back if they moved to a different page during the load)
+        setCurrentPage(prev => prev === 'hub' ? 'hub' : prev);
       }
     } catch (error) {
       if (error.message === 'ACCOUNT_BLOCKED') {
@@ -2046,7 +2048,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : 190;
+      const preH = preMode === 'micro' ? 110 : 175;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
@@ -2213,12 +2215,12 @@ const PlanAssist = () => {
     .pip-card { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: ${t.cardBg}; }
     .pip-top { background: linear-gradient(135deg, ${t.grad1}, ${t.grad2}); color: white; padding: 14px 14px 12px; flex: 1; display: flex; flex-direction: column; justify-content: space-between; }
     /* Class row — matches setup text-sm font-medium + w-2.5 h-2.5 dot */
-    .pip-class { font-size: 13px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+    .pip-class { font-size: 13px; font-weight: 500; color: ${t.topSubtext}; margin-bottom: 4px; display: flex; align-items: center; justify-content: center; gap: 6px; }
     .pip-class-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
-    /* Task title — matches setup text-xl font-bold */
-    .pip-title { font-size: 17px; font-weight: 700; line-height: 1.25; margin-bottom: 0; }
+    /* Task title — reduced to match agenda action-title size */
+    .pip-title { font-size: 13px; font-weight: 700; line-height: 1.3; margin-bottom: 0; text-align: center; }
     /* Action/zone subtitle — matches agenda setup italic text-xs below title */
-    .pip-action-title { font-size: 13px; font-weight: 600; line-height: 1.3; font-style: italic; color: rgba(255,255,255,0.88); margin-bottom: 0; }
+    .pip-action-title { font-size: 13px; font-weight: 600; line-height: 1.3; font-style: italic; color: rgba(255,255,255,0.88); margin-bottom: 0; text-align: center; }
     /* Timer — matches setup text-6xl font-bold tabular-nums: 60px 700 no letter-spacing */
     .pip-timer { font-size: 52px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; line-height: 1; text-align: center; margin: 6px 0 2px; }
     .pip-timer-label { font-size: 11px; color: ${t.topSubtext}; text-align: center; margin-bottom: 0; }
@@ -2256,7 +2258,7 @@ const PlanAssist = () => {
     .pip-alt-class { font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.65); display: flex; align-items: center; gap: 6px; text-align: center; }
     .pip-alt-class-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
     /* Alt title — same as macro .pip-action-title */
-    .pip-alt-title { font-size: 13px; font-weight: 600; line-height: 1.3; font-style: italic; color: rgba(255,255,255,0.88); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pip-alt-title { font-size: 13px; font-weight: 600; line-height: 1.3; font-style: italic; color: rgba(255,255,255,0.88); text-align: center; max-width: 100%; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     /* Alt countdown — big, matches .pip-timer weight/style */
     .pip-alt-cd { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; color: white; line-height: 1; text-align: center; }
     .pip-alt-cd.flash { color: #fca5a5; animation: pa-pulse 1s infinite; }
@@ -2279,7 +2281,7 @@ const PlanAssist = () => {
     .pip-alt-btn-exit:hover:not(:disabled) { background: ${t.exitHover}; }
   `;
 
-  // ── Keep all PiP callbacks  // ── Keep all PiP callbacks fresh on every render ─────────────────────────
+  // ── Keep all PiP callbacks fresh on every render ─────────────────────────
   // The PiP window calls back into the main window via window.__pa_* globals.
   // These must ALWAYS reference the latest React state/functions, not a stale
   // closure captured at launch time. A useEffect with no deps runs after every
@@ -2309,12 +2311,12 @@ const PlanAssist = () => {
     window.__pa_pipAgendaSaveExit = () => agendaSaveAndExit();
     window.__pa_pipAgendaProceed = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 190 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 175 }); } catch(e){}
       agendaSaveAndProceed(nextPip);
     };
     window.__pa_pipAgendaMarkComplete = () => {
       let nextPip = null;
-      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 190 }); } catch(e){}
+      try { nextPip = window.documentPictureInPicture?.requestWindow({ width: 300, height: 175 }); } catch(e){}
       agendaMarkComplete(nextPip);
     };
     window.__pa_pipAgendaOpenWorkspace = () => openWorkspace(window.__pa_pipAgendaTask, 'agenda');
@@ -2332,7 +2334,7 @@ const PlanAssist = () => {
 
     const isMicro = pipMode === 'micro';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : 190;
+    const h = isMicro ? 110 : 175;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2410,7 +2412,7 @@ const PlanAssist = () => {
     const isMicro = pipMode === 'micro';
     const isAlt   = pipMode === 'alt';
     const w = isMicro ? 220 : 300;
-    const h = isMicro ? 110 : isAlt ? 190 : 190;
+    const h = isMicro ? 110 : isAlt ? 190 : 175;
 
     const winPromise = pipPromise || window.documentPictureInPicture.requestWindow({ width: w, height: h });
 
@@ -2523,7 +2525,7 @@ const PlanAssist = () => {
                 </div>
               </div>
               <div class="pip-btn-row">
-                <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" title="Start / Pause / Resume" onclick="window.opener.__pa_pipAgendaPauseResume()">${hasElapsed ? svgPause : svgPlay}</button>
+                <button class="pip-btn pip-btn-pause" id="pip-agenda-pause-btn" title="Start / Pause / Resume" onclick="window.opener.__pa_pipAgendaPauseResume()">${svgPlay}</button>
                 <button class="pip-btn pip-btn-proceed" id="pip-agenda-proceed-btn" title="${isLast ? 'Finish' : 'Proceed'}" onclick="window.opener.__pa_pipAgendaProceed()">${isLast ? svgCheck : svgChev}</button>
                 <button class="pip-btn pip-btn-complete" id="pip-agenda-complete-btn" title="Mark Complete" onclick="window.opener.__pa_pipAgendaMarkComplete()">${svgCheck}</button>
                 <button class="pip-btn pip-btn-exit" id="pip-agenda-exit-btn" title="Save &amp; Exit" onclick="window.opener.__pa_pipAgendaSaveExit()">${svgX}</button>
@@ -2814,7 +2816,7 @@ const PlanAssist = () => {
     if (typeof window.documentPictureInPicture !== 'undefined') {
       const preMode = pipPopupMode || 'micro';
       const preW = preMode === 'micro' ? 220 : 300;
-      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 190 : 190;
+      const preH = preMode === 'micro' ? 110 : preMode === 'alt' ? 190 : 175;
       try { earlyPipRequest = window.documentPictureInPicture.requestWindow({ width: preW, height: preH }); }
       catch(e) { earlyPipRequest = null; }
     }
