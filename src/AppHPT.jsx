@@ -919,10 +919,11 @@ export default function AppHPT({ onBack }) {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
-      {/* Top nav bar — identical structure/sizing/style to PlanAssist */}
+      {/* Top nav bar — identical structure to PlanAssist */}
       <nav className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
-          {/* Logo — same w-10 h-10 tile as PlanAssist, H badge differentiates */}
+
+          {/* LEFT: logo + name — identical to PlanAssist logo block */}
           <div className="flex items-center gap-3">
             <div className="relative w-10 h-10">
               <div className="w-10 h-10 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-lg flex items-center justify-center">
@@ -934,11 +935,11 @@ export default function AppHPT({ onBack }) {
             </div>
             <div>
               <h1 className="text-xl font-bold text-gray-900">PlanAssist</h1>
-              <p className="text-sm text-purple-600 font-medium">HPT Mode</p>
+              <p className="text-sm text-gray-600">HPT Mode</p>
             </div>
           </div>
 
-          {/* Nav buttons — same px-4 py-2 rounded-lg gap-2 pattern as PlanAssist */}
+          {/* RIGHT: nav buttons + logout — identical pattern to PlanAssist right side */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setCurrentPage('hub')}
@@ -962,13 +963,6 @@ export default function AppHPT({ onBack }) {
             </button>
           </div>
 
-          {/* Right: teacher name — mirrors the student name shown in PlanAssist nav */}
-          <div className="flex items-center gap-3">
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">{hptUser.name}</h1>
-              <p className="text-sm text-gray-600">HPT Staff</p>
-            </div>
-          </div>
         </div>
       </nav>
 
