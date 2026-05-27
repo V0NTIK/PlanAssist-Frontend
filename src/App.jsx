@@ -562,6 +562,7 @@ const PlanAssist = () => {
   const [adminHelpContent, setAdminHelpContent] = useState('');
   const [adminHelpSaving, setAdminHelpSaving] = useState(false);
   const [adminHptUsers, setAdminHptUsers] = useState([]);
+  const [adminSelectedHptUser, setAdminSelectedHptUser] = useState(null);
   const [hptLoading, setHptLoading] = useState(false);
   const [showAddHptUser, setShowAddHptUser] = useState(false);
   const [hptNewName, setHptNewName] = useState('');
@@ -3376,6 +3377,7 @@ const PlanAssist = () => {
       await apiCall(`/admin/hpt-users/${id}`, 'DELETE');
       setAdminHptUsers(prev => prev.filter(u => u.id !== id));
       setHptDeleteConfirm(null);
+      setAdminSelectedHptUser(prev => prev?.id === id ? null : prev);
     } catch (err) { alert('Failed to delete HPT user: ' + err.message); }
   };
 
@@ -10306,7 +10308,7 @@ const PlanAssist = () => {
                 { id: 'users', label: 'Users', icon: UserCheck },
                 { id: 'announcements', label: 'Banners', icon: Bell },
                 { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
-                { id: 'hpt', label: 'HPT Control', icon: Shield },
+                { id: 'hpt', label: 'HPT Control', icon: BookOpen },
                 { id: 'audit', label: 'Audit Log', icon: FileText },
                 { id: 'feedback', label: 'Feedback', icon: MessageSquare },
                 { id: 'help', label: 'Help Page', icon: HelpCircle },
@@ -10884,7 +10886,7 @@ const PlanAssist = () => {
 
                   {!hptLoading && adminHptUsers.length === 0 && (
                     <div className="text-center py-10">
-                      <Shield className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                      <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-2" />
                       <p className="text-gray-400 text-sm">No HPT users yet. Add the first one.</p>
                     </div>
                   )}
@@ -10896,16 +10898,22 @@ const PlanAssist = () => {
                         {adminHptUsers.map((u, i) => (
                           <div
                             key={u.id}
-                            className={`flex items-center justify-between px-4 py-3 ${i > 0 ? 'border-t border-gray-100' : ''} hover:bg-gray-50`}
+                            onClick={() => setAdminSelectedHptUser(u)}
+                            className={`flex items-center justify-between px-4 py-3 cursor-pointer ${i > 0 ? 'border-t border-gray-100' : ''} ${adminSelectedHptUser?.id === u.id ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
                           >
-                            <div>
-                              <p className="font-semibold text-gray-800 text-sm">{u.name}</p>
-                              <p className="text-xs text-gray-400 mt-0.5">
-                                {u.studio_count} studio{u.studio_count !== 1 ? 's' : ''} · Added {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                              </p>
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
+                                <span className="text-white text-xs font-bold">{u.name.charAt(0).toUpperCase()}</span>
+                              </div>
+                              <div>
+                                <p className="font-semibold text-gray-800 text-sm">{u.name}</p>
+                                <p className="text-xs text-gray-400 mt-0.5">
+                                  {u.studio_count} studio{u.studio_count !== 1 ? 's' : ''}
+                                </p>
+                              </div>
                             </div>
                             <button
-                              onClick={() => setHptDeleteConfirm(u)}
+                              onClick={e => { e.stopPropagation(); setHptDeleteConfirm(u); }}
                               className="text-red-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50"
                               title="Delete HPT user"
                             >
@@ -10915,17 +10923,60 @@ const PlanAssist = () => {
                         ))}
                       </div>
 
-                      {/* Right: instructions */}
-                      <div className="lg:col-span-3 bg-purple-50 rounded-xl p-5 border border-purple-100">
-                        <div className="flex items-center gap-2 mb-3">
-                          <Shield className="w-5 h-5 text-purple-600" />
-                          <h4 className="font-semibold text-purple-900">About HPT Mode</h4>
-                        </div>
-                        <div className="space-y-2 text-sm text-purple-800">
-                          <p>HPT users log in at the teacher portal using their generated passcode. They have access to <strong>HPT Mode</strong> — a separate interface for monitoring student Studios.</p>
-                          <p>HPT users cannot access student accounts or modify student data. They can only view student performance data through Studios they manage.</p>
-                          <p>Passcodes are hashed and cannot be recovered — if a teacher forgets theirs, delete and re-add them.</p>
-                        </div>
+                      {/* Right: selected user detail, or About info */}
+                      <div className="lg:col-span-3">
+                        {adminSelectedHptUser ? (
+                          <div className="bg-white rounded-xl border border-gray-200 p-5 h-full">
+                            <div className="flex items-start justify-between mb-4">
+                              <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0">
+                                  <span className="text-white text-lg font-bold">{adminSelectedHptUser.name.charAt(0).toUpperCase()}</span>
+                                </div>
+                                <div>
+                                  <h4 className="font-bold text-gray-900 text-base">{adminSelectedHptUser.name}</h4>
+                                  <p className="text-sm text-purple-600 font-medium">HPT Staff</p>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setAdminSelectedHptUser(null)}
+                                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 mb-4">
+                              <div className="bg-gray-50 rounded-xl p-3">
+                                <p className="text-2xl font-bold text-gray-900">{adminSelectedHptUser.studio_count}</p>
+                                <p className="text-xs text-gray-500 mt-0.5">Studio{adminSelectedHptUser.studio_count !== 1 ? 's' : ''} created</p>
+                              </div>
+                              <div className="bg-gray-50 rounded-xl p-3">
+                                <p className="text-sm font-semibold text-gray-700">{new Date(adminSelectedHptUser.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
+                                <p className="text-xs text-gray-500 mt-0.5">Date added</p>
+                              </div>
+                            </div>
+                            <div className="border-t border-gray-100 pt-4 flex items-center justify-between">
+                              <p className="text-xs text-gray-400">HPT ID: {adminSelectedHptUser.id}</p>
+                              <button
+                                onClick={() => setHptDeleteConfirm(adminSelectedHptUser)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" /> Remove User
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="bg-gray-50 rounded-xl border border-gray-200 p-5 h-full flex flex-col">
+                            <div className="flex items-center gap-2 mb-3">
+                              <Info className="w-4 h-4 text-gray-400" />
+                              <h4 className={`font-semibold text-sm ${colorTheme === 'dark' ? 'text-gray-300' : colorTheme === 'cool' ? 'text-green-300' : colorTheme === 'warm' ? 'text-pink-700' : 'text-gray-600'}`}>Select a user to see details</h4>
+                            </div>
+                            <p className="text-sm text-gray-400 leading-relaxed">Click any HPT user in the list to view their details here — including when they were added, how many Studios they manage, and quick actions.</p>
+                            <div className="mt-4 pt-4 border-t border-gray-200 space-y-2 text-xs text-gray-400">
+                              <p>💡 HPT users log in via the Teacher portal using their generated passcode.</p>
+                              <p>🔒 Passcodes are hashed — they can't be recovered. Delete and re-add if lost.</p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   )}
