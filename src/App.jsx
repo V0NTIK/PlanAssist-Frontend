@@ -2,7 +2,8 @@
 // App.jsx - PART 1: Imports and State
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare } from 'lucide-react';
+import AppHPT from './AppHPT';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -417,6 +418,52 @@ const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall, clas
   );
 };
 
+// ── JoinStudioWidget — used in Account > Studios pane ────────────────────────
+const JoinStudioWidget = ({ onJoined, apiCall }) => {
+  const [key, setKey] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  const handleJoin = async () => {
+    if (!key.trim()) return;
+    setLoading(true); setMsg(''); setError('');
+    try {
+      const data = await apiCall('/studios/join', 'POST', { studioKey: key.trim().toUpperCase() });
+      setMsg(`Joined "${data.studioName}"!`);
+      setKey('');
+      if (onJoined) onJoined();
+    } catch (e) {
+      setError(e.message || 'Invalid Studio Key');
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <input
+          value={key}
+          onChange={e => setKey(e.target.value.toUpperCase())}
+          onKeyDown={e => e.key === 'Enter' && handleJoin()}
+          placeholder="Studio Key (e.g. AB3X9Z)"
+          maxLength={8}
+          className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm font-mono focus:ring-2 focus:ring-purple-500 uppercase"
+        />
+        <button
+          onClick={handleJoin}
+          disabled={loading || !key.trim()}
+          className="px-4 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700 disabled:opacity-50"
+        >
+          {loading ? '…' : 'Join'}
+        </button>
+      </div>
+      {msg && <p className="text-xs text-green-600 font-medium">{msg}</p>}
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <p className="text-xs text-gray-400">Your teacher will provide you with the Studio Key. You cannot leave a Studio once joined.</p>
+    </div>
+  );
+};
+
 const PlanAssist = () => {
   // Auth state
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -514,6 +561,13 @@ const PlanAssist = () => {
   const [editingUser, setEditingUser] = useState(null);
   const [adminHelpContent, setAdminHelpContent] = useState('');
   const [adminHelpSaving, setAdminHelpSaving] = useState(false);
+  const [adminHptUsers, setAdminHptUsers] = useState([]);
+  const [hptLoading, setHptLoading] = useState(false);
+  const [showAddHptUser, setShowAddHptUser] = useState(false);
+  const [hptNewName, setHptNewName] = useState('');
+  const [hptNewPasscode, setHptNewPasscode] = useState('');
+  const [hptAddLoading, setHptAddLoading] = useState(false);
+  const [hptDeleteConfirm, setHptDeleteConfirm] = useState(null);
   // Account page state
   const [accountTab, setAccountTab] = useState('settings');
   const [settingsSubTab, setSettingsSubTab] = useState('other');
@@ -775,6 +829,10 @@ const PlanAssist = () => {
     averageAccuracy: 0,
     streak: 0
   });
+  const [hubStatModal, setHubStatModal] = useState(null); // 'today' | 'week' | 'studytime' | 'accuracy'
+  const [hptMode, setHptMode] = useState(false);
+  const [studioBanners, setStudioBanners] = useState([]); // active HPT studio banners for the student
+  const [myStudios, setMyStudios] = useState([]);          // student's studios
 
   // Calculate selected periods from campus (DST-aware).
   // Prefers tzPeriods from the server (computed at request time, UTC-based DST)
@@ -3282,6 +3340,45 @@ const PlanAssist = () => {
     } catch (err) { console.error(err); }
   };
 
+  const loadAdminHptUsers = async () => {
+    setHptLoading(true);
+    try {
+      const data = await apiCall('/admin/hpt-users', 'GET');
+      setAdminHptUsers(data || []);
+    } catch (err) { console.error(err); }
+    finally { setHptLoading(false); }
+  };
+
+  const generateHptPasscode = (name) => {
+    if (!name.trim()) return '';
+    const lastName = name.trim().split(/\s+/).pop();
+    const nums = Math.floor(100 + Math.random() * 900);
+    const symbols = ['!', '@', '#', '$', '%', '&', '*'];
+    const sym = symbols[Math.floor(Math.random() * symbols.length)];
+    return `${lastName}${nums}${sym}`;
+  };
+
+  const handleAddHptUser = async () => {
+    if (!hptNewName.trim() || !hptNewPasscode.trim()) return;
+    setHptAddLoading(true);
+    try {
+      const newUser = await apiCall('/admin/hpt-users', 'POST', { name: hptNewName.trim(), passcode: hptNewPasscode });
+      setAdminHptUsers(prev => [...prev, newUser]);
+      setShowAddHptUser(false);
+      setHptNewName('');
+      setHptNewPasscode('');
+    } catch (err) { alert('Failed to create HPT user: ' + err.message); }
+    finally { setHptAddLoading(false); }
+  };
+
+  const handleDeleteHptUser = async (id) => {
+    try {
+      await apiCall(`/admin/hpt-users/${id}`, 'DELETE');
+      setAdminHptUsers(prev => prev.filter(u => u.id !== id));
+      setHptDeleteConfirm(null);
+    } catch (err) { alert('Failed to delete HPT user: ' + err.message); }
+  };
+
   const adminBanUser = async (userId, reason) => {
     try {
       await apiCall(`/admin/users/${userId}/ban`, 'POST', { reason });
@@ -5198,6 +5295,27 @@ const PlanAssist = () => {
     }
   };
 
+  const loadStudioBanners = async () => {
+    try {
+      const data = await apiCall('/studios/hub-banners', 'GET');
+      setStudioBanners(Array.isArray(data) ? data : []);
+    } catch (e) { /* silently ignore */ }
+  };
+
+  const loadMyStudios = async () => {
+    try {
+      const data = await apiCall('/studios/mine', 'GET');
+      setMyStudios(Array.isArray(data) ? data : []);
+    } catch (e) { /* silently ignore */ }
+  };
+
+  const dismissStudioBanner = async (bannerId) => {
+    try {
+      await apiCall(`/studios/banners/${bannerId}/dismiss`, 'POST');
+      setStudioBanners(prev => prev.filter(b => b.id !== bannerId));
+    } catch (e) { /* silently ignore */ }
+  };
+
   const calculateHubStats = () => {
     if (!completionHistory || completionHistory.length === 0) {
       setHubStats({
@@ -5271,6 +5389,8 @@ const PlanAssist = () => {
       loadCourses();
       loadGradeImpact();
       loadGoals();
+      loadStudioBanners();
+      loadMyStudios();
       
       // Delay initial feed/leaderboard load by 2s to let the server warm up
       // (Render free tier spins down after inactivity)
@@ -5386,6 +5506,11 @@ const PlanAssist = () => {
     }
   }, [accountSetup.campus]);
 
+  // ── HPT Mode: render teacher interface instead of student UI ─────────────
+  if (hptMode) {
+    return <AppHPT onBack={() => setHptMode(false)} />;
+  }
+
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex items-center justify-center p-6" data-planassist-theme={colorTheme}>
@@ -5396,6 +5521,12 @@ const PlanAssist = () => {
             </div>
             <h1 className="text-3xl font-bold text-gray-900 mb-2">PlanAssist</h1>
             <p className="text-lg font-semibold text-purple-600">OneSchool Global Study Planner</p>
+            <button
+              onClick={() => setHptMode(true)}
+              className="mt-2 text-sm text-gray-400 hover:text-purple-600 underline underline-offset-2 transition-colors"
+            >
+              Teacher? Click Here
+            </button>
           </div>
           <div className="flex gap-2 mb-6 bg-gray-100 p-1 rounded-lg">
             <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 rounded-md font-medium transition-colors ${authMode === 'login' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>Login</button>
@@ -5550,7 +5681,7 @@ const PlanAssist = () => {
                 <Play className="w-5 h-5" />
                 {(() => {
                   const tmrw = new Date(); tmrw.setHours(0,0,0,0); tmrw.setDate(tmrw.getDate()+1);
-                  const n = tasks.filter(t => !t.completed && !t.deleted && isCourseEnabled(t) && t.dueDate && t.dueDate < tmrw).length;
+                  const n = tasks.filter(t => !t.completed && !t.deleted && isCourseEnabled(t) && t.dueDate && t.dueDate < tmrw && !(t.class || '').toLowerCase().includes('homeroom')).length;
                   return n > 0 ? (
                     <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
                       {n > 99 ? '99+' : n}
@@ -5743,6 +5874,27 @@ const PlanAssist = () => {
               <X className="w-4 h-4" />
             </button>
           )}
+        </div>
+      ))}
+
+      {/* ── Studio Banners (HPT) ──────────────────────────────────────────── */}
+      {studioBanners.map(b => (
+        <div
+          key={b.id}
+          className="w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium z-30"
+          style={{ backgroundColor: b.studio_color || '#7C3AED', color: '#fff' }}
+        >
+          <div className="flex items-center gap-2">
+            <Bell className="w-4 h-4 flex-shrink-0 opacity-80" />
+            <span className="opacity-70 font-semibold">{b.studio_name}:</span>
+            <span>{b.message}</span>
+          </div>
+          <button
+            onClick={() => dismissStudioBanner(b.id)}
+            className="ml-4 flex-shrink-0 opacity-70 hover:opacity-100"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       ))}
 
@@ -5956,7 +6108,7 @@ const PlanAssist = () => {
 
             {/* Enhanced Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-blue-100">
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-blue-100 cursor-pointer hover:border-blue-300 hover:shadow-lg transition-all" onClick={() => setHubStatModal('today')}>
                 <div className="flex items-center justify-between mb-2">
                   <Check className="w-6 h-6 text-blue-600" />
                   <span className="text-3xl font-bold text-gray-900">{hubStats.tasksCompletedToday}</span>
@@ -5964,7 +6116,7 @@ const PlanAssist = () => {
                 <p className="text-sm text-gray-600 font-medium">Today</p>
               </div>
               
-              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-purple-100">
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-purple-100 cursor-pointer hover:border-purple-300 hover:shadow-lg transition-all" onClick={() => setHubStatModal('week')}>
                 <div className="flex items-center justify-between mb-2">
                   <Calendar className="w-6 h-6 text-purple-600" />
                   <span className="text-3xl font-bold text-gray-900">{hubStats.tasksCompletedWeek}</span>
@@ -5972,7 +6124,7 @@ const PlanAssist = () => {
                 <p className="text-sm text-gray-600 font-medium">This Week</p>
               </div>
               
-              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-amber-100">
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-amber-100 cursor-pointer hover:border-amber-300 hover:shadow-lg transition-all" onClick={() => setHubStatModal('studytime')}>
                 <div className="flex items-center justify-between mb-2">
                   <Clock className="w-6 h-6 text-amber-600" />
                   <span className="text-3xl font-bold text-gray-900">{Math.floor(hubStats.totalStudyTime / 60)}h</span>
@@ -5980,7 +6132,7 @@ const PlanAssist = () => {
                 <p className="text-sm text-gray-600 font-medium">Study Time</p>
               </div>
               
-              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-green-100">
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-green-100 cursor-pointer hover:border-green-300 hover:shadow-lg transition-all" onClick={() => setHubStatModal('accuracy')}>
                 <div className="flex items-center justify-between mb-2">
                   <Target className="w-6 h-6 text-green-600" />
                   <span className="text-3xl font-bold text-gray-900">{hubStats.averageAccuracy}%</span>
@@ -5988,7 +6140,7 @@ const PlanAssist = () => {
                 <p className="text-sm text-gray-600 font-medium">Accuracy</p>
               </div>
               
-              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-orange-100">
+              <div className="bg-white rounded-xl p-6 shadow-md border-2 border-orange-100 cursor-pointer hover:border-orange-300 hover:shadow-lg transition-all" onClick={() => { setCurrentPage('account'); setAccountTab('streak'); }}>
                 <div className="flex items-center justify-between mb-2">
                   <Zap className="w-6 h-6 text-orange-600" />
                   <span className="text-3xl font-bold text-gray-900">{hubStats.streak}</span>
@@ -8844,6 +8996,7 @@ const PlanAssist = () => {
                     { id: 'streak', label: 'Streak', icon: Zap },
                     { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
+                    ...(user?.isAdmin ? [{ id: 'studios', label: 'Studios', icon: Users }] : []),
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
@@ -9375,6 +9528,14 @@ const PlanAssist = () => {
                               className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
                               <Send className="w-4 h-4" /> Submit Feedback or Bug Report
                             </button>
+                          </div>
+                          {/* Refresh for Updates */}
+                          <div className="border-t pt-4">
+                            <button onClick={() => { window.location.reload(true); }}
+                              className="w-full bg-gray-50 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-100 flex items-center justify-center gap-2 text-sm border border-gray-200">
+                              <RefreshCw className="w-4 h-4" /> Refresh for Updates
+                            </button>
+                            <p className="text-xs text-gray-400 mt-1.5 text-center">Forces a hard reload to pick up any new app updates.</p>
                           </div>
                         </div>
                       )}
@@ -10057,6 +10218,55 @@ const PlanAssist = () => {
                   );
                 })()}
 
+                {/* ── STUDIOS TAB (admin only during testing) ── */}
+                {accountTab === 'studios' && user?.isAdmin && (() => {
+                  return (
+                    <div className="space-y-6">
+                      <div>
+                        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
+                        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Enter a Studio Key to join a key-based Studio.</p>
+                      </div>
+
+                      {/* Join by key */}
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
+                        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
+                      </div>
+
+                      {/* My Studios list */}
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
+                        {myStudios.length === 0 ? (
+                          <div className="text-center py-8">
+                            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {myStudios.map(studio => (
+                              <div key={studio.id} className="flex items-center gap-4 p-4 rounded-xl border border-gray-100 hover:bg-gray-50">
+                                <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
+                                    {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
+                                  </p>
+                                </div>
+                                {studio.activeBanner && !studio.activeBanner.dismissed && (
+                                  <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-600 font-medium px-2.5 py-1 rounded-full flex-shrink-0">
+                                    <Bell className="w-3 h-3" /> Active banner
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
@@ -10096,6 +10306,7 @@ const PlanAssist = () => {
                 { id: 'users', label: 'Users', icon: UserCheck },
                 { id: 'announcements', label: 'Banners', icon: Bell },
                 { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
+                { id: 'hpt', label: 'HPT Control', icon: Shield },
                 { id: 'audit', label: 'Audit Log', icon: FileText },
                 { id: 'feedback', label: 'Feedback', icon: MessageSquare },
                 { id: 'help', label: 'Help Page', icon: HelpCircle },
@@ -10110,6 +10321,7 @@ const PlanAssist = () => {
                     if (id === 'announcements') loadAdminAnnouncements();
                     if (id === 'feedback') loadAdminFeedback();
                     if (id === 'help') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); }
+                    if (id === 'hpt') loadAdminHptUsers();
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
                 >
@@ -10647,6 +10859,164 @@ const PlanAssist = () => {
               </div>
             )}
 
+            {/* ── HPT CONTROL ── */}
+            {adminSection === 'hpt' && (
+              <div className="space-y-6">
+                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                  <div className="flex items-center justify-between mb-5">
+                    <div>
+                      <h3 className="font-bold text-gray-900 text-lg">HPT Users</h3>
+                      <p className="text-sm text-gray-500 mt-0.5">High Performing Team — teacher/staff accounts for HPT Mode.</p>
+                    </div>
+                    <button
+                      onClick={() => { setShowAddHptUser(true); setHptNewName(''); setHptNewPasscode(''); }}
+                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700"
+                    >
+                      <Plus className="w-4 h-4" /> Add HPT User
+                    </button>
+                  </div>
+
+                  {hptLoading && (
+                    <div className="flex items-center justify-center py-10">
+                      <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                    </div>
+                  )}
+
+                  {!hptLoading && adminHptUsers.length === 0 && (
+                    <div className="text-center py-10">
+                      <Shield className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-gray-400 text-sm">No HPT users yet. Add the first one.</p>
+                    </div>
+                  )}
+
+                  {!hptLoading && adminHptUsers.length > 0 && (
+                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                      {/* Left: user list */}
+                      <div className="lg:col-span-2 border border-gray-200 rounded-xl overflow-hidden">
+                        {adminHptUsers.map((u, i) => (
+                          <div
+                            key={u.id}
+                            className={`flex items-center justify-between px-4 py-3 ${i > 0 ? 'border-t border-gray-100' : ''} hover:bg-gray-50`}
+                          >
+                            <div>
+                              <p className="font-semibold text-gray-800 text-sm">{u.name}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                {u.studio_count} studio{u.studio_count !== 1 ? 's' : ''} · Added {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                              </p>
+                            </div>
+                            <button
+                              onClick={() => setHptDeleteConfirm(u)}
+                              className="text-red-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50"
+                              title="Delete HPT user"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Right: instructions */}
+                      <div className="lg:col-span-3 bg-purple-50 rounded-xl p-5 border border-purple-100">
+                        <div className="flex items-center gap-2 mb-3">
+                          <Shield className="w-5 h-5 text-purple-600" />
+                          <h4 className="font-semibold text-purple-900">About HPT Mode</h4>
+                        </div>
+                        <div className="space-y-2 text-sm text-purple-800">
+                          <p>HPT users log in at the teacher portal using their generated passcode. They have access to <strong>HPT Mode</strong> — a separate interface for monitoring student Studios.</p>
+                          <p>HPT users cannot access student accounts or modify student data. They can only view student performance data through Studios they manage.</p>
+                          <p>Passcodes are hashed and cannot be recovered — if a teacher forgets theirs, delete and re-add them.</p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Add HPT User modal */}
+                {showAddHptUser && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
+                      <div className="flex items-center justify-between mb-5">
+                        <h3 className="text-lg font-bold text-gray-900">Add HPT User</h3>
+                        <button onClick={() => setShowAddHptUser(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                      </div>
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">Teacher's Full Name</label>
+                          <input
+                            value={hptNewName}
+                            onChange={e => {
+                              setHptNewName(e.target.value);
+                              if (e.target.value.trim()) {
+                                setHptNewPasscode(generateHptPasscode(e.target.value));
+                              } else {
+                                setHptNewPasscode('');
+                              }
+                            }}
+                            placeholder="e.g. Sarah Thompson"
+                            className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-purple-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">Generated Passcode</label>
+                          <div className="flex gap-2">
+                            <input
+                              value={hptNewPasscode}
+                              readOnly
+                              className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono bg-gray-50 text-gray-700"
+                              placeholder="Fill in name first…"
+                            />
+                            <button
+                              onClick={() => hptNewName.trim() && setHptNewPasscode(generateHptPasscode(hptNewName))}
+                              disabled={!hptNewName.trim()}
+                              className="px-3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-sm font-medium disabled:opacity-40"
+                              title="Regenerate"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                            </button>
+                            {hptNewPasscode && (
+                              <button
+                                onClick={() => navigator.clipboard.writeText(hptNewPasscode)}
+                                className="px-3 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-xl text-sm"
+                                title="Copy passcode"
+                              >
+                                <Copy className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-400 mt-1.5">Auto-generated from last name + 3 digits + symbol. Copy and share with the teacher before saving — it cannot be recovered after.</p>
+                        </div>
+                      </div>
+                      <div className="flex gap-3 mt-6">
+                        <button onClick={() => setShowAddHptUser(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200">Cancel</button>
+                        <button
+                          onClick={handleAddHptUser}
+                          disabled={hptAddLoading || !hptNewName.trim() || !hptNewPasscode.trim()}
+                          className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
+                        >
+                          {hptAddLoading ? 'Adding…' : 'Add HPT User'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Delete confirm */}
+                {hptDeleteConfirm && (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
+                      <Trash2 className="w-10 h-10 text-red-500 mx-auto mb-3" />
+                      <h3 className="text-lg font-bold text-gray-900 mb-2">Delete {hptDeleteConfirm.name}?</h3>
+                      <p className="text-sm text-gray-500 mb-5">This will remove their HPT access and delete all Studios they created. This cannot be undone.</p>
+                      <div className="flex gap-3">
+                        <button onClick={() => setHptDeleteConfirm(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium">Cancel</button>
+                        <button onClick={() => handleDeleteHptUser(hptDeleteConfirm.id)} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700">Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* ── AUDIT LOG ── */}
             {adminSection === 'audit' && (
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -10916,6 +11286,136 @@ const PlanAssist = () => {
                   </>
                 )}
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Hub Stat Detail Modal */}
+      {hubStatModal && (() => {
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const weekStart = new Date(now);
+        const dayOfWeek = weekStart.getDay();
+        const diff = weekStart.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+        weekStart.setDate(diff);
+        weekStart.setHours(0, 0, 0, 0);
+
+        const todayTasks = completionHistory.filter(t => t.date >= todayStart);
+        const weekTasks = completionHistory.filter(t => t.date >= weekStart);
+        const tasksWithBoth = completionHistory.filter(t => t.estimatedTime > 0 && t.actualTime > 0);
+
+        let title = '', color = '', icon = null, content = null;
+
+        if (hubStatModal === 'today') {
+          title = 'Completed Today';
+          color = 'blue';
+          icon = <Check className="w-5 h-5 text-blue-600" />;
+          content = todayTasks.length === 0
+            ? <p className="text-gray-500 text-sm">No tasks completed yet today. Get one done!</p>
+            : <ul className="space-y-2">
+                {todayTasks.map((t, i) => (
+                  <li key={i} className="flex items-center justify-between gap-3 bg-blue-50 rounded-lg px-3 py-2">
+                    <span className="text-sm text-gray-800 font-medium">{t.taskTitle}</span>
+                    {t.actualTime > 0 && <span className="text-xs text-gray-500 flex-shrink-0">{t.actualTime} min</span>}
+                  </li>
+                ))}
+              </ul>;
+        } else if (hubStatModal === 'week') {
+          title = 'Completed This Week';
+          color = 'purple';
+          icon = <Calendar className="w-5 h-5 text-purple-600" />;
+          content = weekTasks.length === 0
+            ? <p className="text-gray-500 text-sm">No tasks completed this week yet.</p>
+            : <>
+                <p className="text-xs text-gray-500 mb-3">{weekTasks.length} task{weekTasks.length !== 1 ? 's' : ''} completed since Monday</p>
+                <ul className="space-y-2 max-h-64 overflow-y-auto">
+                  {weekTasks.map((t, i) => (
+                    <li key={i} className="flex items-center justify-between gap-3 bg-purple-50 rounded-lg px-3 py-2">
+                      <div className="min-w-0">
+                        <span className="text-sm text-gray-800 font-medium block truncate">{t.taskTitle}</span>
+                        <span className="text-xs text-gray-400">{t.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+                      </div>
+                      {t.actualTime > 0 && <span className="text-xs text-gray-500 flex-shrink-0">{t.actualTime} min</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>;
+        } else if (hubStatModal === 'studytime') {
+          const totalMins = completionHistory.reduce((s, t) => s + (t.actualTime || 0), 0);
+          const hours = Math.floor(totalMins / 60);
+          const mins = totalMins % 60;
+          const todayMins = todayTasks.reduce((s, t) => s + (t.actualTime || 0), 0);
+          const weekMins = weekTasks.reduce((s, t) => s + (t.actualTime || 0), 0);
+          title = 'Study Time';
+          color = 'amber';
+          icon = <Clock className="w-5 h-5 text-amber-600" />;
+          content = <>
+            <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="bg-amber-50 rounded-lg p-3 text-center">
+                <p className="text-xl font-bold text-amber-700">{todayMins}m</p>
+                <p className="text-xs text-gray-500 mt-0.5">Today</p>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-3 text-center">
+                <p className="text-xl font-bold text-amber-700">{weekMins >= 60 ? `${Math.floor(weekMins/60)}h ${weekMins%60}m` : `${weekMins}m`}</p>
+                <p className="text-xs text-gray-500 mt-0.5">This Week</p>
+              </div>
+              <div className="bg-amber-50 rounded-lg p-3 text-center">
+                <p className="text-xl font-bold text-amber-700">{hours > 0 ? `${hours}h ${mins}m` : `${mins}m`}</p>
+                <p className="text-xs text-gray-500 mt-0.5">All Time</p>
+              </div>
+            </div>
+            <p className="text-xs text-gray-400">Only tasks with a logged actual time are counted. Sessions and Agendas both contribute.</p>
+          </>;
+        } else if (hubStatModal === 'accuracy') {
+          title = 'Time Estimation Accuracy';
+          color = 'green';
+          icon = <Target className="w-5 h-5 text-green-600" />;
+          const recentWithBoth = tasksWithBoth.slice(-10).reverse();
+          content = tasksWithBoth.length === 0
+            ? <p className="text-gray-500 text-sm">No data yet — accuracy is calculated once you have tasks with both an estimated and actual time.</p>
+            : <>
+                <p className="text-xs text-gray-500 mb-3">How close your time estimates were to your actual time. 100% = perfect match. Based on {tasksWithBoth.length} task{tasksWithBoth.length !== 1 ? 's' : ''}.</p>
+                <ul className="space-y-2 max-h-56 overflow-y-auto">
+                  {recentWithBoth.map((t, i) => {
+                    const ratio = Math.min(t.estimatedTime / t.actualTime, t.actualTime / t.estimatedTime);
+                    const acc = Math.round(ratio * 100);
+                    const bar = acc >= 80 ? 'bg-green-400' : acc >= 60 ? 'bg-yellow-400' : 'bg-red-400';
+                    return (
+                      <li key={i} className="bg-green-50 rounded-lg px-3 py-2">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-gray-700 font-medium truncate max-w-[70%]">{t.taskTitle}</span>
+                          <span className="text-xs font-bold text-gray-700">{acc}%</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                            <div className={`h-1.5 rounded-full ${bar}`} style={{ width: `${acc}%` }} />
+                          </div>
+                          <span className="text-xs text-gray-400 flex-shrink-0">est {t.estimatedTime}m / actual {t.actualTime}m</span>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+                {tasksWithBoth.length > 10 && <p className="text-xs text-gray-400 mt-2 text-right">Showing 10 most recent</p>}
+              </>;
+        }
+
+        const borderColor = { blue: 'border-blue-200', purple: 'border-purple-200', amber: 'border-amber-200', green: 'border-green-200' }[color];
+
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setHubStatModal(null)}>
+            <div className={`bg-white rounded-2xl shadow-2xl max-w-md w-full border-2 ${borderColor}`} onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 pt-5 pb-3 border-b border-gray-100">
+                <div className="flex items-center gap-2">
+                  {icon}
+                  <h3 className="text-lg font-bold text-gray-900">{title}</h3>
+                </div>
+                <button onClick={() => setHubStatModal(null)} className="text-gray-400 hover:text-gray-600 rounded-lg p-1 hover:bg-gray-100">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="px-5 py-4">{content}</div>
             </div>
           </div>
         );
