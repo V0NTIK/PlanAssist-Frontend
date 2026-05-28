@@ -5624,7 +5624,7 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' || currentPage === 'calendar' ? 'h-screen overflow-hidden' : 'min-h-screen overflow-y-scroll'}`} data-theme={colorTheme} data-planassist-theme={colorTheme}>
+    <div className="bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen" data-theme={colorTheme} data-planassist-theme={colorTheme}>
 
       {/* ── Session Expired Modal ── */}
       {sessionExpired && (
@@ -5650,7 +5650,7 @@ const PlanAssist = () => {
         </div>
       )}
 
-      <nav className="bg-white border-b border-gray-200 px-6 py-4">
+      <nav className="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-20">
         {/* Insignia keyframes injected here so gradient-text insignias always render correctly */}
         <style>{INSIGNIA_KEYFRAMES}</style>
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -6479,7 +6479,7 @@ const PlanAssist = () => {
           </div>
         )}
         {currentPage === 'tasks' && (
-          <div className="flex h-[calc(100vh-80px)] overflow-hidden">
+          <div className="flex h-[calc(100vh-73px)] overflow-hidden">
             {/* Main Task List */}
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
@@ -8255,7 +8255,7 @@ const PlanAssist = () => {
 
 
           return (
-            <div className="flex flex-col h-[calc(100vh-80px)] bg-gradient-to-br from-gray-50 to-blue-50">
+            <div className="flex flex-col h-[calc(100vh-73px)] bg-gradient-to-br from-gray-50 to-blue-50">
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
