@@ -4,8 +4,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen, LogOut, Home, Users, X, Plus, Trash2, Bell, Share2,
-  Info, RefreshCw, Check, ChevronDown, ChevronRight, Search,
-  AlertCircle, Copy, Eye, Zap, Target, BarChart3,
+  Info, RefreshCw, Check, ChevronDown, ChevronRight, ChevronUp, Search,
+  AlertCircle, Copy, Zap, Target, BarChart3, Activity, Clock,
+  TrendingUp, TrendingDown, AlertTriangle, Eye, Monitor, Award,
 } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
@@ -505,7 +506,7 @@ function SetupCourseId({ token, onPreview, onClose }) {
 // STUDIOS PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function StudiosPage({ token, hptUser }) {
+function StudiosPage({ token, hptUser, onStudiosChange }) {
   const [studios, setStudios] = useState([]);
   const [loading, setLoading] = useState(true);
   const [allHptUsers, setAllHptUsers] = useState([]);
@@ -525,9 +526,10 @@ function StudiosPage({ token, hptUser }) {
       ]);
       setStudios(studiosData);
       setAllHptUsers(hptData);
+      if (onStudiosChange) onStudiosChange(studiosData);
     } catch (e) { console.error('Studios load error:', e.message); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [token, onStudiosChange]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -809,6 +811,728 @@ function HubPage({ hptUser }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SHARED: STUDIO SELECTOR
+// Minimalistic pill-style selector used on Monitor and Marks pages
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StudioSelector({ studios, selectedId, onSelect }) {
+  if (!studios || studios.length === 0) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-gray-400">
+        <Users className="w-4 h-4" />
+        No Studios yet — create one on the Studios page.
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide mr-1">Studio:</span>
+      {studios.map(s => (
+        <button
+          key={s.id}
+          onClick={() => onSelect(s.id)}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border ${
+            selectedId === s.id
+              ? 'text-white border-transparent shadow-sm'
+              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+          }`}
+          style={selectedId === s.id ? { backgroundColor: s.color || '#7C3AED', borderColor: s.color || '#7C3AED' } : {}}
+        >
+          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: selectedId === s.id ? 'rgba(255,255,255,0.7)' : (s.color || '#7C3AED') }} />
+          {s.name}
+          <span className={`text-xs ${selectedId === s.id ? 'text-white opacity-70' : 'text-gray-400'}`}>
+            ({(s.members || []).length})
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MONITOR PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MonitorPage({ token, studios }) {
+  const [selectedStudioId, setSelectedStudioId] = useState(studios[0]?.id || null);
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [lastRefresh, setLastRefresh] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
+  const [autoRefresh, setAutoRefresh] = useState(true);
+
+  const load = React.useCallback(async (studioId) => {
+    if (!studioId) return;
+    setLoading(true);
+    try {
+      const d = await apiCall(`/hpt/studios/${studioId}/monitor`, 'GET', null, token);
+      setData(Array.isArray(d) ? d : []);
+      setLastRefresh(new Date());
+    } catch (e) { console.error('Monitor load error:', e.message); }
+    finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => {
+    if (selectedStudioId) load(selectedStudioId);
+  }, [selectedStudioId, load]);
+
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    if (!autoRefresh || !selectedStudioId) return;
+    const interval = setInterval(() => load(selectedStudioId), 30000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, selectedStudioId, load]);
+
+  const selectedStudio = studios.find(s => s.id === selectedStudioId);
+  const activeCount = data.filter(s => s.isActive).length;
+  const studioColor = selectedStudio?.color || '#7C3AED';
+
+  const formatMins = (m) => {
+    if (!m) return '0m';
+    const h = Math.floor(m / 60), mins = m % 60;
+    return h > 0 ? `${h}h ${mins}m` : `${mins}m`;
+  };
+
+  const timeSinceHeartbeat = (heartbeat) => {
+    if (!heartbeat) return null;
+    const secs = Math.floor((Date.now() - new Date(heartbeat).getTime()) / 1000);
+    if (secs < 60) return `${secs}s ago`;
+    return `${Math.floor(secs / 60)}m ago`;
+  };
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Monitor</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Live student activity — updates every 30 seconds</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setAutoRefresh(v => !v)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border ${
+              autoRefresh ? 'bg-green-50 text-green-700 border-green-200' : 'bg-gray-50 text-gray-500 border-gray-200'
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full ${autoRefresh ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+            {autoRefresh ? 'Live' : 'Paused'}
+          </button>
+          <button
+            onClick={() => selectedStudioId && load(selectedStudioId)}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-lg border border-gray-200"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Studio selector */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-5 py-4 mb-5">
+        <StudioSelector studios={studios} selectedId={selectedStudioId} onSelect={id => { setSelectedStudioId(id); setExpandedId(null); }} />
+      </div>
+
+      {/* Summary bar */}
+      {selectedStudioId && !loading && data.length > 0 && (
+        <div className="grid grid-cols-3 gap-3 mb-5">
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: studioColor + '20' }}>
+              <Activity className="w-5 h-5" style={{ color: studioColor }} />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{activeCount}</p>
+              <p className="text-xs text-gray-500">Currently Active</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+            <div className="w-9 h-9 bg-blue-50 rounded-lg flex items-center justify-center">
+              <Check className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{data.reduce((s, d) => s + d.todayCompletions.count, 0)}</p>
+              <p className="text-xs text-gray-500">Tasks Done Today</p>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+            <div className="w-9 h-9 bg-amber-50 rounded-lg flex items-center justify-center">
+              <Clock className="w-5 h-5 text-amber-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-900">{formatMins(data.reduce((s, d) => s + d.todayCompletions.totalMins, 0))}</p>
+              <p className="text-xs text-gray-500">Total Study Time</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex items-center justify-center py-16">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-7 h-7 border-[3px] rounded-full animate-spin" style={{ borderColor: studioColor + '40', borderTopColor: studioColor }} />
+            <p className="text-sm text-gray-400">Loading student activity…</p>
+          </div>
+        </div>
+      )}
+
+      {/* Empty */}
+      {!loading && selectedStudioId && data.length === 0 && (
+        <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
+          <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">No students found in this Studio.</p>
+        </div>
+      )}
+
+      {/* No studio selected */}
+      {!selectedStudioId && (
+        <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
+          <Monitor className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">Select a Studio above to start monitoring.</p>
+        </div>
+      )}
+
+      {/* Student rows */}
+      {!loading && data.length > 0 && (
+        <div className="space-y-2">
+          {data
+            .sort((a, b) => (b.isActive ? 1 : 0) - (a.isActive ? 1 : 0) || a.user.name.localeCompare(b.user.name))
+            .map(student => {
+              const isExpanded = expandedId === student.user.id;
+              const est = student.activeTask
+                ? (student.activeTask.user_estimated_time || student.activeTask.estimated_time || 0)
+                : 0;
+              const accum = student.activeTask?.accumulated_time || 0;
+              const progress = est > 0 ? Math.min(100, Math.round((accum / est) * 100)) : null;
+
+              return (
+                <div
+                  key={student.user.id}
+                  className={`bg-white rounded-2xl border shadow-sm transition-all ${isExpanded ? 'border-gray-300' : 'border-gray-100'}`}
+                >
+                  {/* Collapsed row */}
+                  <button
+                    className="w-full text-left px-5 py-4 flex items-center gap-4"
+                    onClick={() => setExpandedId(isExpanded ? null : student.user.id)}
+                  >
+                    {/* Active indicator */}
+                    <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${student.isActive ? 'bg-green-400 shadow-sm shadow-green-300 animate-pulse' : 'bg-gray-200'}`} />
+
+                    {/* Name + grade */}
+                    <div className="w-40 flex-shrink-0">
+                      <p className="font-semibold text-gray-900 text-sm truncate">{student.user.name}</p>
+                      <p className="text-xs text-gray-400">Grade {student.user.grade || '—'}</p>
+                    </div>
+
+                    {/* Status pill */}
+                    <div className="w-24 flex-shrink-0">
+                      {student.isActive ? (
+                        <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full border border-green-200">
+                          <Activity className="w-3 h-3" /> Active
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 bg-gray-50 text-gray-400 text-xs font-medium px-2.5 py-1 rounded-full border border-gray-200">
+                          Idle
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Current task */}
+                    <div className="flex-1 min-w-0">
+                      {student.isActive && student.activeTask ? (
+                        <div>
+                          <p className="text-sm text-gray-800 font-medium truncate">{student.activeTask.title}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <p className="text-xs text-gray-400 truncate">{student.activeTask.class}</p>
+                            {progress !== null && (
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                <div className="w-16 bg-gray-100 rounded-full h-1">
+                                  <div className="h-1 rounded-full bg-green-400 transition-all" style={{ width: `${progress}%` }} />
+                                </div>
+                                <span className="text-xs text-gray-400">{progress}%</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-400 italic">No active session</p>
+                      )}
+                    </div>
+
+                    {/* Time logged + urgent */}
+                    <div className="flex items-center gap-4 flex-shrink-0 mr-2">
+                      <div className="text-right">
+                        <p className="text-sm font-semibold text-gray-700">{student.todayCompletions.count} done</p>
+                        <p className="text-xs text-gray-400">{formatMins(student.todayCompletions.totalMins)} today</p>
+                      </div>
+                      {student.urgentTasks.length > 0 && (
+                        <span className="flex items-center gap-1 bg-red-50 text-red-600 text-xs font-semibold px-2 py-1 rounded-full border border-red-200">
+                          <AlertTriangle className="w-3 h-3" />
+                          {student.urgentTasks.length}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Expand chevron */}
+                    <div className="flex-shrink-0 text-gray-300">
+                      {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    </div>
+                  </button>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div className="border-t border-gray-100 px-5 pb-5 pt-4 grid grid-cols-1 md:grid-cols-3 gap-5">
+
+                      {/* Active session detail */}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Active Session</p>
+                        {student.isActive && student.activeTask ? (
+                          <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
+                            <p className="font-semibold text-gray-900 text-sm">{student.activeTask.title}</p>
+                            <p className="text-xs text-gray-500">{student.activeTask.class}</p>
+                            <div className="grid grid-cols-2 gap-2 mt-2">
+                              <div className="bg-white rounded-lg p-2 text-center">
+                                <p className="text-base font-bold text-gray-900">{formatMins(accum)}</p>
+                                <p className="text-xs text-gray-400">Logged</p>
+                              </div>
+                              <div className="bg-white rounded-lg p-2 text-center">
+                                <p className="text-base font-bold text-gray-900">{formatMins(est)}</p>
+                                <p className="text-xs text-gray-400">Estimated</p>
+                              </div>
+                            </div>
+                            {progress !== null && (
+                              <div>
+                                <div className="flex items-center justify-between mb-1">
+                                  <span className="text-xs text-gray-500">Progress</span>
+                                  <span className="text-xs font-semibold text-green-700">{progress}%</span>
+                                </div>
+                                <div className="w-full bg-gray-200 rounded-full h-2">
+                                  <div className="h-2 rounded-full bg-green-400" style={{ width: `${progress}%` }} />
+                                </div>
+                              </div>
+                            )}
+                            <p className="text-xs text-gray-400">
+                              Due: {student.activeTask.deadline_date
+                                ? new Date(student.activeTask.deadline_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                : '—'}
+                              {student.activeTask.session_heartbeat &&
+                                <span className="ml-2 text-green-600">● {timeSinceHeartbeat(student.activeTask.session_heartbeat)}</span>}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 text-center">
+                            <p className="text-sm text-gray-400">No active session</p>
+                            {student.user.lastSync && (
+                              <p className="text-xs text-gray-300 mt-1">
+                                Last sync: {new Date(student.user.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Today's priorities */}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                          Today's Priorities ({student.priorities.length})
+                        </p>
+                        {student.priorities.length === 0 ? (
+                          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 text-center">
+                            <p className="text-sm text-gray-400">No priorities set today</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {student.priorities.map((t, i) => (
+                              <div key={t.id} className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-xs ${
+                                t.completed ? 'bg-gray-50 opacity-60' : 'bg-white border border-gray-100'
+                              }`}>
+                                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5 ${
+                                  t.completed ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'
+                                }`}>{t.completed ? '✓' : i + 1}</span>
+                                <div className="min-w-0">
+                                  <p className={`font-medium truncate ${t.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.title}</p>
+                                  <p className="text-gray-400 truncate">{t.class}</p>
+                                </div>
+                                <span className="flex-shrink-0 text-gray-400 ml-auto">
+                                  {formatMins(t.user_estimated_time || t.estimated_time)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Urgent tasks */}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                          Urgent / Overdue ({student.urgentTasks.length})
+                        </p>
+                        {student.urgentTasks.length === 0 ? (
+                          <div className="bg-green-50 rounded-xl p-4 border border-green-200 text-center">
+                            <Check className="w-5 h-5 text-green-500 mx-auto mb-1" />
+                            <p className="text-sm text-green-700 font-medium">All caught up!</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                            {student.urgentTasks.map(t => {
+                              const due = new Date(t.deadline_date + 'T00:00:00');
+                              const today = new Date(); today.setHours(0,0,0,0);
+                              const overdue = due < today;
+                              return (
+                                <div key={t.id} className={`flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs border ${
+                                  overdue ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
+                                }`}>
+                                  <AlertTriangle className={`w-3.5 h-3.5 flex-shrink-0 mt-0.5 ${overdue ? 'text-red-500' : 'text-amber-500'}`} />
+                                  <div className="min-w-0 flex-1">
+                                    <p className={`font-medium truncate ${overdue ? 'text-red-800' : 'text-amber-800'}`}>{t.title}</p>
+                                    <p className={`truncate ${overdue ? 'text-red-500' : 'text-amber-500'}`}>
+                                      {t.class} · Due {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                      {overdue && <span className="font-semibold"> (OVERDUE)</span>}
+                                    </p>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          }
+        </div>
+      )}
+
+      {lastRefresh && (
+        <p className="text-xs text-gray-400 text-right mt-3">
+          Last updated {lastRefresh.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', second: '2-digit' })}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARKS PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function gradeScoreBg(score) {
+  if (score == null) return 'bg-gray-100 text-gray-400';
+  if (score >= 80) return 'bg-green-100 text-green-700';
+  if (score >= 65) return 'bg-amber-100 text-amber-700';
+  return 'bg-red-100 text-red-700';
+}
+
+function MarksPage({ token, studios }) {
+  const [selectedStudioId, setSelectedStudioId] = useState(studios[0]?.id || null);
+  const [data, setData] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
+  const [sortBy, setSortBy] = useState('name'); // 'name' | 'score_asc' | 'score_desc'
+
+  const load = React.useCallback(async (studioId) => {
+    if (!studioId) return;
+    setLoading(true);
+    try {
+      const d = await apiCall(`/hpt/studios/${studioId}/marks`, 'GET', null, token);
+      setData(Array.isArray(d) ? d : []);
+    } catch (e) { console.error('Marks load error:', e.message); }
+    finally { setLoading(false); }
+  }, [token]);
+
+  useEffect(() => {
+    if (selectedStudioId) load(selectedStudioId);
+  }, [selectedStudioId, load]);
+
+  const selectedStudio = studios.find(s => s.id === selectedStudioId);
+  const studioColor = selectedStudio?.color || '#7C3AED';
+
+  // Calculate an average overall score per student across all courses
+  const avgScore = (courses) => {
+    const valid = courses.filter(c => c.final_score != null);
+    if (valid.length === 0) return null;
+    return Math.round(valid.reduce((s, c) => s + parseFloat(c.final_score), 0) / valid.length);
+  };
+
+  const sorted = [...data].sort((a, b) => {
+    if (sortBy === 'name') return a.user.name.localeCompare(b.user.name);
+    const aAvg = avgScore(a.courses) ?? -1;
+    const bAvg = avgScore(b.courses) ?? -1;
+    return sortBy === 'score_desc' ? bAvg - aAvg : aAvg - bAvg;
+  });
+
+  return (
+    <div className="p-6 max-w-6xl mx-auto">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-5">
+        <div>
+          <h2 className="text-2xl font-bold text-gray-900">Marks</h2>
+          <p className="text-sm text-gray-500 mt-0.5">Student grade data pulled from Canvas</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500 font-medium">Sort:</span>
+          {[['name','Name'],['score_desc','Best First'],['score_asc','Lowest First']].map(([k,l]) => (
+            <button
+              key={k}
+              onClick={() => setSortBy(k)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${
+                sortBy === k ? 'text-white border-transparent' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'
+              }`}
+              style={sortBy === k ? { backgroundColor: studioColor, borderColor: studioColor } : {}}
+            >
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Studio selector */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 px-5 py-4 mb-5">
+        <StudioSelector studios={studios} selectedId={selectedStudioId} onSelect={id => { setSelectedStudioId(id); setExpandedId(null); }} />
+      </div>
+
+      {/* Summary bar */}
+      {!loading && data.length > 0 && (() => {
+        const studentsWithData = data.filter(s => avgScore(s.courses) != null);
+        const classAvg = studentsWithData.length > 0
+          ? Math.round(studentsWithData.reduce((s, d) => s + avgScore(d.courses), 0) / studentsWithData.length)
+          : null;
+        const totalMissing = data.reduce((s, d) => s + d.missingCount, 0);
+        const totalLate = data.reduce((s, d) => s + d.lateCount, 0);
+        return (
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ backgroundColor: studioColor + '20' }}>
+                <Award className="w-5 h-5" style={{ color: studioColor }} />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{classAvg != null ? `${classAvg}%` : '—'}</p>
+                <p className="text-xs text-gray-500">Class Average</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+              <div className="w-9 h-9 bg-red-50 rounded-lg flex items-center justify-center">
+                <AlertTriangle className="w-5 h-5 text-red-500" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{totalMissing}</p>
+                <p className="text-xs text-gray-500">Missing Across Studio</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">
+              <div className="w-9 h-9 bg-amber-50 rounded-lg flex items-center justify-center">
+                <Clock className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-gray-900">{totalLate}</p>
+                <p className="text-xs text-gray-500">Late Across Studio</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex items-center justify-center py-16">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-7 h-7 border-[3px] rounded-full animate-spin" style={{ borderColor: studioColor + '40', borderTopColor: studioColor }} />
+            <p className="text-sm text-gray-400">Loading grade data…</p>
+          </div>
+        </div>
+      )}
+
+      {/* Empty */}
+      {!loading && selectedStudioId && data.length === 0 && (
+        <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
+          <Users className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">No students found in this Studio.</p>
+        </div>
+      )}
+
+      {!selectedStudioId && (
+        <div className="text-center py-16 bg-white rounded-2xl border border-gray-100">
+          <BarChart3 className="w-10 h-10 text-gray-300 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">Select a Studio above to view marks.</p>
+        </div>
+      )}
+
+      {/* Student rows */}
+      {!loading && sorted.length > 0 && (
+        <div className="space-y-2">
+          {sorted.map(student => {
+            const isExpanded = expandedId === student.user.id;
+            const sAvg = avgScore(student.courses);
+
+            return (
+              <div
+                key={student.user.id}
+                className={`bg-white rounded-2xl border shadow-sm transition-all ${isExpanded ? 'border-gray-300' : 'border-gray-100'}`}
+              >
+                {/* Collapsed row */}
+                <button
+                  className="w-full text-left px-5 py-4 flex items-center gap-4"
+                  onClick={() => setExpandedId(isExpanded ? null : student.user.id)}
+                >
+                  {/* Name */}
+                  <div className="w-44 flex-shrink-0">
+                    <p className="font-semibold text-gray-900 text-sm">{student.user.name}</p>
+                    <p className="text-xs text-gray-400">Grade {student.user.grade || '—'}</p>
+                  </div>
+
+                  {/* Overall avg */}
+                  <div className="flex-shrink-0">
+                    <span className={`inline-block text-sm font-bold px-3 py-1 rounded-lg ${gradeScoreBg(sAvg)}`}>
+                      {sAvg != null ? `${sAvg}%` : '—'}
+                    </span>
+                    <p className="text-xs text-gray-400 mt-0.5 text-center">Overall avg</p>
+                  </div>
+
+                  {/* Course pills — up to 4 visible */}
+                  <div className="flex-1 flex items-center gap-1.5 flex-wrap min-w-0 overflow-hidden">
+                    {student.courses.slice(0, 5).map(c => (
+                      <span
+                        key={c.id}
+                        className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-lg flex-shrink-0 ${gradeScoreBg(c.current_period_score)}`}
+                        title={c.name}
+                      >
+                        <span className="max-w-[80px] truncate">{c.course_code || c.name}</span>
+                        {c.current_period_score != null && <span className="font-bold">{Math.round(c.current_period_score)}%</span>}
+                      </span>
+                    ))}
+                    {student.courses.length > 5 && (
+                      <span className="text-xs text-gray-400">+{student.courses.length - 5} more</span>
+                    )}
+                  </div>
+
+                  {/* Missing/Late badges */}
+                  <div className="flex items-center gap-2 flex-shrink-0 mr-2">
+                    {student.missingCount > 0 && (
+                      <span className="flex items-center gap-1 bg-red-50 text-red-600 text-xs font-semibold px-2 py-1 rounded-full border border-red-200">
+                        <AlertTriangle className="w-3 h-3" /> {student.missingCount} missing
+                      </span>
+                    )}
+                    {student.lateCount > 0 && (
+                      <span className="flex items-center gap-1 bg-amber-50 text-amber-600 text-xs font-semibold px-2 py-1 rounded-full border border-amber-200">
+                        <Clock className="w-3 h-3" /> {student.lateCount} late
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Chevron */}
+                  <div className="flex-shrink-0 text-gray-300">
+                    {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
+                </button>
+
+                {/* Expanded */}
+                {isExpanded && (
+                  <div className="border-t border-gray-100 px-5 pb-5 pt-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+                      {/* Course table */}
+                      <div>
+                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">All Courses</p>
+                        <div className="border border-gray-200 rounded-xl overflow-hidden">
+                          <table className="w-full text-sm">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Course</th>
+                                <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Period</th>
+                                <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Year</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {student.courses.map((c, i) => (
+                                <tr key={c.id} className={i > 0 ? 'border-t border-gray-100' : ''}>
+                                  <td className="px-3 py-2">
+                                    <p className="font-medium text-gray-800 text-xs truncate max-w-[160px]">{c.name}</p>
+                                    {c.course_code && <p className="text-xs text-gray-400">{c.course_code}</p>}
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${gradeScoreBg(c.current_period_score)}`}>
+                                      {c.current_period_score != null ? `${Math.round(c.current_period_score)}%` : '—'}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2 text-center">
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${gradeScoreBg(c.final_score)}`}>
+                                      {c.final_score != null ? `${Math.round(c.final_score)}%` : '—'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                              {student.courses.length === 0 && (
+                                <tr><td colSpan={3} className="px-3 py-4 text-center text-xs text-gray-400">No course data available</td></tr>
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+
+                      {/* Recent grades + missing/late */}
+                      <div className="space-y-4">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Recent Submissions</p>
+                          {student.recentGrades.length === 0 ? (
+                            <p className="text-xs text-gray-400 bg-gray-50 rounded-xl p-3 border border-gray-200">No recent graded submissions</p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                              {student.recentGrades.map((g, i) => {
+                                const pct = g.points_possible > 0 ? Math.round((g.score / g.points_possible) * 100) : null;
+                                return (
+                                  <div key={i} className="flex items-center justify-between gap-2 bg-white border border-gray-100 rounded-lg px-3 py-2">
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-medium text-gray-800 truncate">{g.assignment_title}</p>
+                                      <p className="text-xs text-gray-400 truncate">{g.course_name}</p>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 flex-shrink-0">
+                                      <span className={`text-xs font-bold px-2 py-0.5 rounded ${gradeScoreBg(pct)}`}>
+                                        {g.score != null ? `${g.score}/${g.points_possible}` : g.grade || '—'}
+                                        {pct != null && <span className="ml-1 opacity-70">({pct}%)</span>}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {(student.missingCount > 0 || student.lateCount > 0) && (
+                          <div className="flex gap-3">
+                            {student.missingCount > 0 && (
+                              <div className="flex-1 bg-red-50 border border-red-200 rounded-xl p-3 text-center">
+                                <p className="text-xl font-bold text-red-700">{student.missingCount}</p>
+                                <p className="text-xs text-red-500">Missing</p>
+                              </div>
+                            )}
+                            {student.lateCount > 0 && (
+                              <div className="flex-1 bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                                <p className="text-xl font-bold text-amber-700">{student.lateCount}</p>
+                                <p className="text-xs text-amber-500">Late</p>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // HPT LOGIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -897,6 +1621,7 @@ export default function AppHPT({ onBack }) {
   });
   const [token, setToken] = useState(() => localStorage.getItem('planassist-hpt-token') || null);
   const [currentPage, setCurrentPage] = useState('hub');
+  const [studios, setStudios] = useState([]);
 
   const handleLogin = (data) => {
     const { token: t, ...user } = data;
@@ -913,9 +1638,24 @@ export default function AppHPT({ onBack }) {
     localStorage.removeItem('planassist-hpt-user');
   };
 
+  // Load studios once on login so Monitor and Marks can use them without re-fetching
+  useEffect(() => {
+    if (!token) return;
+    apiCall('/hpt/studios', 'GET', null, token)
+      .then(d => setStudios(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [token]);
+
   if (!hptUser || !token) {
     return <HPTLoginPage onLogin={handleLogin} onBack={onBack} />;
   }
+
+  const NAV_ITEMS = [
+    { id: 'hub',      label: 'Hub',      icon: Home },
+    { id: 'studios',  label: 'Studios',  icon: Users },
+    { id: 'monitor',  label: 'Monitor',  icon: Monitor },
+    { id: 'marks',    label: 'Marks',    icon: BarChart3 },
+  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
@@ -934,27 +1674,26 @@ export default function AppHPT({ onBack }) {
               </div>
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900">PlanAssist</h1>
-              <p className="text-sm text-gray-600">HPT Mode</p>
+              <div className="flex items-center gap-2">
+                <h1 className="text-xl font-bold text-gray-900">PlanAssist</h1>
+                <span className="text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">HPT Mode</span>
+              </div>
+              <p className="text-sm text-gray-600">{hptUser.name}</p>
             </div>
           </div>
 
-          {/* RIGHT: nav buttons + logout — identical pattern to PlanAssist right side */}
+          {/* RIGHT: nav buttons + logout */}
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setCurrentPage('hub')}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
-            >
-              <Home className="w-5 h-5" />
-              <span className="font-medium">Hub</span>
-            </button>
-            <button
-              onClick={() => setCurrentPage('studios')}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'studios' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
-            >
-              <Users className="w-5 h-5" />
-              <span className="font-medium">Studios</span>
-            </button>
+            {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => setCurrentPage(id)}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === id ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="font-medium">{label}</span>
+              </button>
+            ))}
             <button
               onClick={handleLogout}
               className="px-4 py-2 rounded-lg flex items-center gap-2 text-red-600 hover:bg-red-50"
@@ -968,8 +1707,10 @@ export default function AppHPT({ onBack }) {
 
       {/* Page content */}
       <main className="flex-1 overflow-y-auto">
-        {currentPage === 'hub' && <HubPage hptUser={hptUser} />}
-        {currentPage === 'studios' && <StudiosPage token={token} hptUser={hptUser} />}
+        {currentPage === 'hub'     && <HubPage hptUser={hptUser} />}
+        {currentPage === 'studios' && <StudiosPage token={token} hptUser={hptUser} onStudiosChange={setStudios} />}
+        {currentPage === 'monitor' && <MonitorPage token={token} studios={studios} />}
+        {currentPage === 'marks'   && <MarksPage   token={token} studios={studios} />}
       </main>
     </div>
   );
