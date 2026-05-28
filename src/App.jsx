@@ -1854,27 +1854,31 @@ const PlanAssist = () => {
       master.gain.value = 0.35;
       master.connect(ctx.destination);
 
-      // Two notes: a rising major third (E5 → G#5) for a cheerful "done" feel
+      // Two notes: a rising major third (E5 → G#5) for a cheerful "done" feel.
+      // Longer durations and a gentler exponential decay prevent the cut-off feel.
       const notes = [
-        { freq: 659.25, start: 0,    dur: 0.18 },  // E5
-        { freq: 830.61, start: 0.14, dur: 0.28 },  // G#5
+        { freq: 659.25, start: 0,    dur: 0.55 },  // E5  — rings for 0.55s
+        { freq: 830.61, start: 0.16, dur: 0.75 },  // G#5 — rings for 0.75s
       ];
       notes.forEach(({ freq, start, dur }) => {
         const osc  = ctx.createOscillator();
         const gain = ctx.createGain();
-        osc.type      = 'sine';
+        osc.type = 'sine';
         osc.frequency.value = freq;
+        // Attack: ramp up quickly
         gain.gain.setValueAtTime(0, ctx.currentTime + start);
-        gain.gain.linearRampToValueAtTime(0.9, ctx.currentTime + start + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+        gain.gain.linearRampToValueAtTime(0.9, ctx.currentTime + start + 0.012);
+        // Decay: gentle exponential tail so the note fades naturally
+        gain.gain.setTargetAtTime(0.001, ctx.currentTime + start + 0.012, dur * 0.45);
         osc.connect(gain);
         gain.connect(master);
         osc.start(ctx.currentTime + start);
-        osc.stop(ctx.currentTime + start + dur + 0.05);
+        // Stop well after the decay so the tail isn't clipped
+        osc.stop(ctx.currentTime + start + dur + 0.2);
       });
 
-      // Close context after the sound finishes
-      setTimeout(() => ctx.close(), 700);
+      // Close context after the full sound has finished
+      setTimeout(() => ctx.close(), 1400);
     } catch (e) { /* AudioContext unavailable — fail silently */ }
   };
 
@@ -5620,7 +5624,7 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' ? 'h-screen overflow-hidden' : 'min-h-screen'}`} data-theme={colorTheme} data-planassist-theme={colorTheme}>
+    <div className={`bg-gradient-to-br from-gray-50 to-blue-50 ${currentPage === 'tasks' || currentPage === 'calendar' ? 'h-screen overflow-hidden' : 'min-h-screen overflow-y-scroll'}`} data-theme={colorTheme} data-planassist-theme={colorTheme}>
 
       {/* ── Session Expired Modal ── */}
       {sessionExpired && (
@@ -9137,14 +9141,6 @@ const PlanAssist = () => {
                       </div>
                     </div>
 
-                    {/* Feedback */}
-                    <div className="border-t pt-4">
-                      <button onClick={() => setShowFeedbackForm(true)}
-                        className="w-full bg-blue-50 text-blue-700 py-2.5 rounded-xl font-medium hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
-                        <Send className="w-4 h-4" /> Submit Feedback or Bug Report
-                      </button>
-                    </div>
-
                     <button
                       onClick={saveAccountSetup}
                       disabled={settingsSaving || !accountSetup.grade || !accountSetup.canvasApiToken || !accountSetup.campus || !VALID_CAMPUSES.includes(accountSetup.campus)}
@@ -9523,13 +9519,6 @@ const PlanAssist = () => {
                             {accountSetup.campus && !VALID_CAMPUSES.includes(accountSetup.campus) && (
                               <p className="text-xs text-red-500 mt-1">Please select a valid campus from the list.</p>
                             )}
-                          </div>
-                          {/* Feedback */}
-                          <div className="border-t pt-4">
-                            <button onClick={() => setShowFeedbackForm(true)}
-                              className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
-                              <Send className="w-4 h-4" /> Submit Feedback or Bug Report
-                            </button>
                           </div>
                           {/* Refresh for Updates */}
                           <div className="border-t pt-4">
@@ -10281,6 +10270,12 @@ const PlanAssist = () => {
                     ) : (
                       <p className="text-gray-400 text-sm text-center py-8">No help content has been added yet. Check back later.</p>
                     )}
+                    <div className="border-t mt-6 pt-5">
+                      <button onClick={() => setShowFeedbackForm(true)}
+                        className="w-full bg-blue-50 text-blue-700 py-3 rounded-xl font-semibold hover:bg-blue-100 flex items-center justify-center gap-2 text-sm">
+                        <Send className="w-4 h-4" /> Submit Feedback or Bug Report
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -11079,14 +11074,18 @@ const PlanAssist = () => {
                   {adminAuditLog.length === 0 && <p className="text-gray-400 text-sm">No actions recorded yet</p>}
                   {adminAuditLog.map(entry => {
                     const actionLabels = {
-                      CREATE_ANNOUNCEMENT: '📢 Created Announcement',
-                      DEACTIVATE_ANNOUNCEMENT: '🔕 Deactivated Announcement',
-                      EDIT_USER: '✏️ Edited User',
-                      BAN_USER: '🚫 Banned User',
-                      UNBAN_USER: '✅ Unbanned User',
-                      CLEAR_CANVAS_TOKEN: '🔑 Cleared Canvas Token',
-                      DELETE_TASK: '🗑️ Deleted Task',
-                      UPDATE_HELP: '📖 Updated Help Page',
+                      CREATE_ANNOUNCEMENT:    '📢 Created Announcement',
+                      DEACTIVATE_ANNOUNCEMENT:'🔕 Deactivated Announcement',
+                      EDIT_USER:              '✏️ Edited User',
+                      BAN_USER:               '🚫 Banned User',
+                      UNBAN_USER:             '✅ Unbanned User',
+                      CLEAR_CANVAS_TOKEN:     '🔑 Cleared Canvas Token',
+                      DELETE_TASK:            '🗑️ Deleted Task',
+                      UPDATE_HELP:            '📖 Updated Help Page',
+                      GRANT_STREAK_SHIELD:    '🛡️ Granted Streak Shield',
+                      GRANT_SHIELDS_ALL:      '🛡️ Granted Shields to All',
+                      hpt_user_created:       '📚 Created HPT User',
+                      hpt_user_deleted:       '📚 Deleted HPT User',
                     };
                     const details = typeof entry.details === 'string' ? JSON.parse(entry.details) : (entry.details || {});
                     const detailKeys = Object.keys(details);
@@ -11097,6 +11096,8 @@ const PlanAssist = () => {
                           if (k === 'content_length') return `${details[k]} chars`;
                           if (k === 'reason') return `reason: ${details[k]}`;
                           if (k === 'type') return `type: ${details[k]}`;
+                          if (k === 'users_affected') return `${details[k]} users affected`;
+                          if (k === 'name') return `name: ${details[k]}`;
                           return null;
                         }).filter(Boolean).join(', ')
                       : null;
