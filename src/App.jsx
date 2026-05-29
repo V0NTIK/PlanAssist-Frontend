@@ -581,7 +581,14 @@ const PlanAssist = () => {
   const [editingActualTimeVal, setEditingActualTimeVal] = useState('');
   const [activityFilter, setActivityFilter] = useState('grades');
   const [activitySearch, setActivitySearch] = useState('');
-  // Activity sub-tab data
+  // Unified activity data from DB (populated after Activity Refresh)
+  const [activityData, setActivityData] = useState({
+    grades: [], announcements: [], discussions: [], messages: [],
+    insignia: [], badges: [], studios: [],
+  });
+  const [activityDataLoading, setActivityDataLoading] = useState(false); // DB read in progress
+  const [activityRefreshLoading, setActivityRefreshLoading] = useState(false); // Canvas refresh in progress
+  // Legacy state kept for backward-compat with existing grade sync spinner
   const [gradesItems, setGradesItems] = useState([]);
   const [gradesLoading, setGradesLoading] = useState(false);
   const [announcementItems, setAnnouncementItems] = useState([]);
@@ -592,6 +599,8 @@ const PlanAssist = () => {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityPollingRef, setActivityPollingRef] = useState(null);
   const [gradeMiniSyncRef, setGradeMiniSyncRef] = useState(null);
+  // Notification sidebar tabs
+  const [notifTab, setNotifTab] = useState('alerts'); // 'alerts' | 'updates'
   const [helpContent, setHelpContent] = useState('');
 
   const [isSavingEnhance, setIsSavingEnhance] = useState(false);
@@ -1364,23 +1373,29 @@ const PlanAssist = () => {
         }
 
         // Await all Hub data in parallel — feed, leaderboard, history, streak, insignia —
-        // so the Hub page renders fully populated on first show. authLoading stays true
-        // throughout, keeping the login button in its loading state until everything is ready.
+        // AND the activity refresh. The Hub does not show until the refresh is complete
+        // so notifications and grade data are ready on first render.
         await Promise.allSettled([
           loadCompletionFeed(),
           loadLeaderboard(),
           loadCompletionHistory(),
           loadInsignia(),
           loadBadges(),
+          runActivityRefresh(),   // awaited — Hub waits for this before showing
           loadNotifications(),
           loadNotifPrefs(),
         ]);
-        // Trigger activity refresh async — don't block login flow
-        triggerActivityRefresh();
+        // After refresh is done, load activity pane data from DB (non-blocking)
+        loadActivityData();
+
+        // Set up 15-minute activity refresh interval for this session
+        const refreshInterval = setInterval(() => {
+          runActivityRefresh().then(() => loadActivityData()).catch(() => {});
+        }, 15 * 60 * 1000);
+        // Store interval ref so logout can clear it
+        window._planassist_activityInterval = refreshInterval;
 
         // Only navigate to Hub if user hasn't already navigated elsewhere
-        // (the initial page is already 'hub'; navigating here again would yank
-        // the user back if they moved to a different page during the load)
         setCurrentPage(prev => prev === 'hub' ? 'hub' : prev);
       }
     } catch (error) {
@@ -1425,6 +1440,11 @@ const PlanAssist = () => {
   };
 
   const handleLogout = () => {
+    // Clear the 15-minute activity refresh interval
+    if (window._planassist_activityInterval) {
+      clearInterval(window._planassist_activityInterval);
+      window._planassist_activityInterval = null;
+    }
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('campus');
@@ -1556,43 +1576,54 @@ const PlanAssist = () => {
     }
   };
 
-  const loadCanvasGrades = async () => {
-    setGradesLoading(true);
+  // ── Activity Refresh: runs Canvas calls and writes to DB (grade_history, canvas_activity)
+  // This is AWAITED at login and every 15 minutes. Also called when Activity pane opens.
+  const runActivityRefresh = async () => {
+    setActivityRefreshLoading(true);
+    setGradeSyncLoading(true); // reuse existing spinner for Activity pane overlay
     try {
-      const data = await apiCall('/canvas/grades');
-      setGradesItems(Array.isArray(data) ? data : []);
-    } catch (err) { console.error('Failed to load grades:', err); }
-    finally { setGradesLoading(false); }
+      await apiCall('/activity/refresh', 'POST');
+    } catch (e) {
+      console.warn('[Activity Refresh] failed:', e.message);
+    } finally {
+      setActivityRefreshLoading(false);
+      setGradeSyncLoading(false);
+    }
   };
 
-  const loadCanvasAnnouncements = async () => {
-    setAnnouncementsLoading(true);
+  // ── Load Activity pane data from DB (no Canvas calls — reads grade_history, canvas_activity etc.)
+  const loadActivityData = async () => {
+    setActivityDataLoading(true);
     try {
-      const data = await apiCall('/canvas/announcements');
-      setAnnouncementItems(Array.isArray(data) ? data : []);
-    } catch (err) { console.error('Failed to load announcements:', err); }
-    finally { setAnnouncementsLoading(false); }
+      const data = await apiCall('/activity/data', 'GET');
+      setActivityData({
+        grades:        data.grades        || [],
+        announcements: data.announcements || [],
+        discussions:   data.discussions   || [],
+        messages:      data.messages      || [],
+        insignia:      data.insignia      || [],
+        badges:        data.badges        || [],
+        studios:       data.studios       || [],
+      });
+      // Keep legacy arrays in sync so existing grade-sort code still works
+      setGradesItems(data.grades || []);
+      setAnnouncementItems(data.announcements || []);
+      setDiscussionItems(data.discussions || []);
+      setActivityItems((data.messages || []).map(m => ({ ...m, type: 'Message' })));
+    } catch (e) {
+      console.warn('[Activity Data] load failed:', e.message);
+    } finally {
+      setActivityDataLoading(false);
+      setGradesLoading(false);
+    }
   };
 
-  const loadCanvasDiscussions = async () => {
-    setDiscussionsLoading(true);
-    try {
-      const data = await apiCall('/canvas/discussions');
-      setDiscussionItems(Array.isArray(data) ? data : []);
-    } catch (err) { console.error('Failed to load discussions:', err); }
-    finally { setDiscussionsLoading(false); }
-  };
-
-  const loadActivityStream = async () => {
-    setActivityLoading(true);
-    try {
-      const data = await apiCall('/canvas/activity');
-      setActivityItems(Array.isArray(data) ? data : []);
-    } catch (err) { console.error('Failed to load activity stream:', err); }
-    finally { setActivityLoading(false); }
-  };
-
-  // runGradeMiniSync removed — replaced by runGradeSync (POST /canvas/grade-sync)
+  // ── Legacy kept for backward-compat call sites ──────────────────────────────
+  const loadCanvasGrades = loadActivityData;
+  const loadCanvasAnnouncements = async () => {};
+  const loadCanvasDiscussions = async () => {};
+  const loadActivityStream = async () => {};
+  const triggerActivityRefresh = runActivityRefresh;
 
   const loadHelpContent = async () => {
     try {
@@ -1670,21 +1701,17 @@ const PlanAssist = () => {
     setActivitySearch('');
     if (tab === 'grades') {
       setActivityFilter('grades');
-      // Trigger Grade Sync (shows spinner over Activity pane) then load supporting data
-      runGradeSync();
-      loadCanvasAnnouncements();
-      loadCanvasDiscussions();
-      loadActivityStream();
-      triggerActivityRefresh();
+      // When Activity pane opens: run a fresh refresh then load data from DB
+      runActivityRefresh().then(() => loadActivityData());
       loadNotifications();
-      // 5-min polling for activity stream while tab is open
-      const actInterval = setInterval(loadActivityStream, 300000);
+      // 5-min polling for activity data while tab is open
+      const actInterval = setInterval(loadActivityData, 300000);
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return actInterval; });
     } else {
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return null; });
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
-    if (tab === 'goals') runCourseSync(false); // Course Sync with spinner
+    if (tab === 'goals') runCourseSync(false);
     if (tab === 'streak') {
       loadStreakData();
     }
@@ -2025,15 +2052,9 @@ const PlanAssist = () => {
 
   // ── GRADE SYNC ────────────────────────────────────────────────────────────
   const runGradeSync = async () => {
-    setGradeSyncLoading(true);
-    try {
-      await apiCall('/canvas/grade-sync', 'POST', {});
-      await loadCanvasGrades();
-    } catch (err) {
-      console.error('[Grade Sync] Failed:', err.message);
-    } finally {
-      setGradeSyncLoading(false);
-    }
+    // Now delegates to runActivityRefresh, which handles grade sync + all Canvas calls
+    await runActivityRefresh();
+    await loadActivityData();
   };
 
 
@@ -3883,156 +3904,115 @@ const PlanAssist = () => {
   };
 
   const playWhiteNoise = (type) => {
-    // Stop any existing audio context
+    // Stop any existing audio
     if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
       whiteNoiseAudio.context.close();
     }
 
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const master = ctx.createGain();
-    master.gain.value = whiteNoiseVolume * 0.6;
-    master.connect(ctx.destination);
-
-    // ── Shared noise buffer helper ──────────────────────────────────────────
-    // Generates a 4-second looping noise source with the requested colour.
-    const makeNoise = (color = 'pink') => {
-      const bufSecs = 4;
-      const buf = ctx.createBuffer(2, bufSecs * ctx.sampleRate, ctx.sampleRate);
-      for (let ch = 0; ch < 2; ch++) {
-        const data = buf.getChannelData(ch);
-        if (color === 'white') {
-          for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
-        } else if (color === 'pink') {
-          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-          for (let i = 0; i < data.length; i++) {
-            const w = Math.random() * 2 - 1;
-            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
-            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
-            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
-            data[i] = (b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
-          }
-        } else { // brown
-          let last = 0;
-          for (let i = 0; i < data.length; i++) {
-            const w = Math.random() * 2 - 1;
-            data[i] = (last + 0.02 * w) / 1.02; last = data[i]; data[i] *= 3.5;
-          }
+    // Use Web Audio API to generate sounds (no external URLs needed!)
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    
+    let oscillator, gainNode, filter;
+    
+    switch(type) {
+      case 'whitenoise':
+        // Pure white noise using buffer
+        const bufferSize = 2 * audioContext.sampleRate;
+        const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < bufferSize; i++) {
+          output[i] = Math.random() * 2 - 1;
         }
-      }
-      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
-      return src;
-    };
-
-    // ── Simple reverb via convolver ─────────────────────────────────────────
-    const makeReverb = (decaySecs = 1.5) => {
-      const conv = ctx.createConvolver();
-      const len = ctx.sampleRate * decaySecs;
-      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
-      for (let ch = 0; ch < 2; ch++) {
-        const d = ir.getChannelData(ch);
-        for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2);
-      }
-      conv.buffer = ir;
-      return conv;
-    };
-
-    // ── LFO helper — creates slow amplitude or pitch wobble ─────────────────
-    const makeLFO = (freq, minVal, maxVal) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.value = freq;
-      gain.gain.value = (maxVal - minVal) / 2;
-      osc.connect(gain);
-      osc.start();
-      return { osc, gain, offset: (minVal + maxVal) / 2 };
-    };
-
-    let nodes = [];
-
-    switch (type) {
-      case 'rain': {
-        // Layered pink noise through a mid-freq bandpass to simulate rainfall
-        // + high-frequency shimmer for droplet texture + LFO intensity swell
-        const noise = makeNoise('pink');
-        const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1200; bp.Q.value=0.4;
-        const shimmerNoise = makeNoise('white');
-        const shimmerBP = ctx.createBiquadFilter(); shimmerBP.type='highpass'; shimmerBP.frequency.value=6000;
-        const shimmerGain = ctx.createGain(); shimmerGain.gain.value = 0.08;
-        const lfo = makeLFO(0.07, 0.55, 1.0);
-        const lfoGain = ctx.createGain(); lfoGain.gain.value = lfo.offset;
-        lfo.gain.connect(lfoGain.gain);
-        const rev = makeReverb(0.8);
-        noise.connect(bp); bp.connect(lfoGain); lfoGain.connect(rev); rev.connect(master);
-        shimmerNoise.connect(shimmerBP); shimmerBP.connect(shimmerGain); shimmerGain.connect(master);
-        noise.start(); shimmerNoise.start(); lfo.osc.start && void 0; // already started
-        nodes = [noise, shimmerNoise, lfo.osc];
+        const whiteNoise = audioContext.createBufferSource();
+        whiteNoise.buffer = noiseBuffer;
+        whiteNoise.loop = true;
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = whiteNoiseVolume * 0.3;
+        whiteNoise.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        whiteNoise.start(0);
+        
+        setWhiteNoiseAudio({
+          context: audioContext,
+          gainNode: gainNode
+        });
         break;
-      }
-      case 'ocean': {
-        // Deep brown noise base + slow LFO wave swell + low-pitched harmonic
-        // sine tones that slowly drift, plus reverb for space
-        const noise = makeNoise('brown');
-        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=400; lp.Q.value=0.7;
-        const lfo = makeLFO(0.05, 0.3, 1.0);
-        const lfoGain = ctx.createGain(); lfoGain.gain.value = lfo.offset;
-        lfo.gain.connect(lfoGain.gain);
-        const rev = makeReverb(2.5);
-        // Subtle rumbling sub-sine
-        const sub = ctx.createOscillator(); sub.type='sine'; sub.frequency.value = 42;
-        const subGain = ctx.createGain(); subGain.gain.setValueAtTime(0, ctx.currentTime);
-        subGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 2);
-        // Slow LFO on sub pitch for wave feel
-        const subLFO = ctx.createOscillator(); subLFO.type='sine'; subLFO.frequency.value=0.04;
-        const subLFOGain = ctx.createGain(); subLFOGain.gain.value=8;
-        subLFO.connect(subLFOGain); subLFOGain.connect(sub.frequency);
-        noise.connect(lp); lp.connect(lfoGain); lfoGain.connect(rev); rev.connect(master);
-        sub.connect(subGain); subGain.connect(master);
-        noise.start(); sub.start(); subLFO.start();
-        nodes = [noise, sub, subLFO];
+        
+      case 'rain':
+      case 'pink':
+        // Pink noise (softer, more balanced than white)
+        const pinkBufferSize = 2 * audioContext.sampleRate;
+        const pinkBuffer = audioContext.createBuffer(1, pinkBufferSize, audioContext.sampleRate);
+        const pinkOutput = pinkBuffer.getChannelData(0);
+        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+        for (let i = 0; i < pinkBufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          b0 = 0.99886 * b0 + white * 0.0555179;
+          b1 = 0.99332 * b1 + white * 0.0750759;
+          b2 = 0.96900 * b2 + white * 0.1538520;
+          b3 = 0.86650 * b3 + white * 0.3104856;
+          b4 = 0.55000 * b4 + white * 0.5329522;
+          b5 = -0.7616 * b5 - white * 0.0168980;
+          pinkOutput[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
+          b6 = white * 0.115926;
+        }
+        const pinkNoise = audioContext.createBufferSource();
+        pinkNoise.buffer = pinkBuffer;
+        pinkNoise.loop = true;
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = whiteNoiseVolume * 0.35;
+        pinkNoise.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        pinkNoise.start(0);
+        
+        setWhiteNoiseAudio({
+          context: audioContext,
+          gainNode: gainNode
+        });
         break;
-      }
-      case 'brown': {
-        // Rich brown noise + gentle low-pass shaping + soft reverb tail
-        // More musical than plain brown — like a warm room hum
-        const noise = makeNoise('brown');
-        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900;
-        const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=60;
-        const rev = makeReverb(1.2);
-        const lfo = makeLFO(0.12, 0.7, 1.0);
-        const lfoGain = ctx.createGain(); lfoGain.gain.value = lfo.offset;
-        lfo.gain.connect(lfoGain.gain);
-        noise.connect(hp); hp.connect(lp); lp.connect(lfoGain); lfoGain.connect(rev); rev.connect(master);
-        noise.start();
-        nodes = [noise, lfo.osc];
+        
+      case 'ocean':
+      case 'brown':
+        // Brown noise (deep, bass-heavy rumble)
+        const brownBufferSize = 2 * audioContext.sampleRate;
+        const brownBuffer = audioContext.createBuffer(1, brownBufferSize, audioContext.sampleRate);
+        const brownOutput = brownBuffer.getChannelData(0);
+        let lastOut = 0;
+        for (let i = 0; i < brownBufferSize; i++) {
+          const white = Math.random() * 2 - 1;
+          brownOutput[i] = (lastOut + (0.02 * white)) / 1.02;
+          lastOut = brownOutput[i];
+          brownOutput[i] *= 3.5;
+        }
+        const brownNoise = audioContext.createBufferSource();
+        brownNoise.buffer = brownBuffer;
+        brownNoise.loop = true;
+        gainNode = audioContext.createGain();
+        gainNode.gain.value = whiteNoiseVolume * 0.4;
+        
+        // Add extra low-pass filtering for ocean (deeper)
+        if (type === 'ocean') {
+          filter = audioContext.createBiquadFilter();
+          filter.type = 'lowpass';
+          filter.frequency.value = 300; // Very low for deep ocean rumble
+          filter.Q.value = 0.5;
+          
+          brownNoise.connect(filter);
+          filter.connect(gainNode);
+        } else {
+          brownNoise.connect(gainNode);
+        }
+        
+        gainNode.connect(audioContext.destination);
+        brownNoise.start(0);
+        
+        setWhiteNoiseAudio({
+          context: audioContext,
+          gainNode: gainNode
+        });
         break;
-      }
-      case 'pink': {
-        // Clean pink noise — balanced and calm, minimal processing
-        const noise = makeNoise('pink');
-        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=8000;
-        const rev = makeReverb(0.6);
-        noise.connect(lp); lp.connect(rev); rev.connect(master);
-        noise.start();
-        nodes = [noise];
-        break;
-      }
-      case 'whitenoise': {
-        // White noise with a gentle low-pass to take the edge off harsh frequencies
-        const noise = makeNoise('white');
-        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=10000;
-        noise.connect(lp); lp.connect(master);
-        noise.start();
-        nodes = [noise];
-        break;
-      }
-      default: {
-        const noise = makeNoise('pink');
-        noise.connect(master); noise.start();
-        nodes = [noise];
-      }
     }
-
-    setWhiteNoiseAudio({ context: ctx, gainNode: master, nodes });
+    
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
@@ -4040,7 +4020,8 @@ const PlanAssist = () => {
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
     if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
-      whiteNoiseAudio.gainNode.gain.value = volume * 0.6;
+      // Adjust gain node volume
+      whiteNoiseAudio.gainNode.gain.value = volume * 0.4;
     }
   };
 
@@ -4340,13 +4321,12 @@ const PlanAssist = () => {
       system: `
         :root { color-scheme: light; }
         [data-planassist-theme="system"] { --pa-bg-page: #f0f4ff; --pa-bg-page2: #eff6ff; }
-        /* Scrollbar — always render at screen edge; stable gutter prevents layout shift */
+        /* Scrollbar */
         [data-planassist-theme="system"] ::-webkit-scrollbar { width: 7px; height: 7px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-track { background: #f1f5f9; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
         [data-planassist-theme="system"] * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
-        [data-planassist-theme="system"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards (Activity/Goals/Marks pane spinners) */
         [data-planassist-theme="system"] .pa-sync-overlay { background: rgba(255,255,255,0.82); }
         [data-planassist-theme="system"] .pa-sync-card { background: #ffffff; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
@@ -4362,7 +4342,6 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb { background: #f48fb1; border-radius: 4px; }
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb:hover { background: #c2185b; }
         [data-planassist-theme="warm"] * { scrollbar-color: #f48fb1 #fce4ec; scrollbar-width: thin; }
-        [data-planassist-theme="warm"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="warm"] .pa-sync-overlay { background: rgba(255,240,245,0.88); }
         [data-planassist-theme="warm"] .pa-sync-card { background: #fff5f8; box-shadow: 0 8px 32px rgba(194,24,91,0.15); }
@@ -4521,7 +4500,6 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb { background: #2e7d32; border-radius: 4px; }
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb:hover { background: #43a047; }
         [data-planassist-theme="cool"] * { scrollbar-color: #2e7d32 #0a0f0a; scrollbar-width: thin; }
-        [data-planassist-theme="cool"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="cool"] .pa-sync-overlay { background: rgba(10,15,10,0.82); }
         [data-planassist-theme="cool"] .pa-sync-card { background: #192218; box-shadow: 0 8px 32px rgba(0,0,0,0.50); }
@@ -4713,7 +4691,6 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb { background: #3d3d6b; border-radius: 4px; }
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #7c4dff; }
         [data-planassist-theme="dark"] * { scrollbar-color: #3d3d6b #0d0d14; scrollbar-width: thin; }
-        [data-planassist-theme="dark"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="dark"] .pa-sync-overlay { background: rgba(13,13,20,0.82); }
         [data-planassist-theme="dark"] .pa-sync-card { background: #13131f; box-shadow: 0 8px 32px rgba(0,0,0,0.60); }
@@ -5428,16 +5405,8 @@ const PlanAssist = () => {
   const openNotifSidebar = () => {
     if (currentSessionTask || agendaRunning) return;
     setNotifSidebarOpen(true);
-    // Load immediately to show cached data, trigger refresh in background,
-    // then reload again after a short delay to pick up anything the refresh wrote
+    setNotifTab('alerts');
     loadNotifications();
-    triggerActivityRefresh();
-    setTimeout(() => loadNotifications(), 4000);
-  };
-
-  const triggerActivityRefresh = async () => {
-    try { await apiCall('/activity/refresh', 'POST'); }
-    catch (e) { /* silently ignore */ }
   };
 
   const handleAddCustomCourse = async () => {
@@ -5914,28 +5883,34 @@ const PlanAssist = () => {
               </button>
             </div>
 
+            {/* Tab selector */}
+            <div className={`flex border-b flex-shrink-0 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-white'}`}>
+              {[['alerts','Alerts'],['updates','Updates']].map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => setNotifTab(key)}
+                  className={`flex-1 py-2.5 text-xs font-bold transition-colors border-b-2 ${
+                    notifTab === key
+                      ? (colorTheme === 'dark' || colorTheme === 'cool' ? 'border-purple-400 text-purple-300' : 'border-purple-600 text-purple-700')
+                      : (colorTheme === 'dark' || colorTheme === 'cool' ? 'border-transparent text-gray-500 hover:text-gray-300' : 'border-transparent text-gray-400 hover:text-gray-600')
+                  }`}
+                >
+                  {label}
+                  {key === 'alerts' && notifUnreadCount > 0 && (
+                    <span className="ml-1.5 bg-purple-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{notifUnreadCount}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
             {/* Notification list */}
             <div className="flex-1 overflow-y-auto scrollbar-stable">
               {notifLoading ? (
                 <div className="flex items-center justify-center py-16">
                   <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
                 </div>
-              ) : notifications.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
-                  <BellOff className={`w-10 h-10 mb-3 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-300'}`} />
-                  <p className={`text-sm font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-400'}`}>No notifications yet</p>
-                  <p className={`text-xs mt-1 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>Grade updates, achievements, announcements and more will appear here.</p>
-                </div>
               ) : (() => {
-                // ── Type config ────────────────────────────────────────────
-                const typeConfig = (type) => ({
-                  grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600'  },
-                  announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600'   },
-                  discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600' },
-                  message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600' },
-                  insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600'  },
-                  badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600' },
-                }[type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500' });
+                const dark = colorTheme === 'dark' || colorTheme === 'cool';
 
                 const timeAgo = (ts) => {
                   if (!ts) return '';
@@ -5950,7 +5925,15 @@ const PlanAssist = () => {
                   return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 };
 
-                // ── Dismiss a single item ──────────────────────────────────
+                const typeConfig = (type) => ({
+                  grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600'  },
+                  announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600'   },
+                  discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600' },
+                  message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600' },
+                  insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600'  },
+                  badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600' },
+                }[type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500' });
+
                 const dismissOne = async (id, e) => {
                   e.stopPropagation();
                   try { await apiCall(`/notifications/${id}/read`, 'PATCH'); } catch (_) {}
@@ -5958,7 +5941,6 @@ const PlanAssist = () => {
                   setNotifUnreadCount(prev => Math.max(0, prev - 1));
                 };
 
-                // ── Grade-specific sub-label ───────────────────────────────
                 const gradeSubLabel = (n) => {
                   if (n.type !== 'grade') return null;
                   const pct = n.score != null && n.points_possible > 0
@@ -5969,33 +5951,27 @@ const PlanAssist = () => {
                   return null;
                 };
 
-                // ── Render one notification row ────────────────────────────
-                const renderNotif = (n) => {
+                const renderRow = (n) => {
                   const cfg = typeConfig(n.type);
                   const isUnread = n.is_unread;
-                  const dark = colorTheme === 'dark' || colorTheme === 'cool';
                   return (
                     <div
                       key={n.id}
                       className={`group px-4 py-3 flex items-start gap-3 transition-colors relative
                         ${isUnread ? (dark ? 'bg-purple-900 bg-opacity-25' : 'bg-purple-50') : ''}
-                        ${n.link_url ? 'cursor-pointer hover:bg-opacity-40' : ''}`}
+                        ${n.link_url ? 'cursor-pointer' : ''}`}
                       onClick={() => n.link_url && window.open(n.link_url, '_blank')}
                     >
                       <span className="text-lg flex-shrink-0 mt-0.5">{cfg.icon}</span>
                       <div className="flex-1 min-w-0">
-                        <p className={`text-sm font-semibold leading-snug
-                          ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
+                        <p className={`text-sm font-semibold leading-snug ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
                           {n.title}
                         </p>
-                        {/* Body: for grades show course name; for canvas items show body */}
                         {n.body && (
-                          <p className={`text-xs mt-0.5 leading-relaxed line-clamp-2
-                            ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
+                          <p className={`text-xs mt-0.5 leading-relaxed line-clamp-2 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
                             {n.body}
                           </p>
                         )}
-                        {/* Canvas activity: course name */}
                         {n.course_name_extra && (
                           <p className={`text-xs mt-0.5 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>{n.course_name_extra}</p>
                         )}
@@ -6006,12 +5982,8 @@ const PlanAssist = () => {
                         </div>
                       </div>
                       {isUnread && (
-                        <button
-                          onClick={(e) => dismissOne(n.id, e)}
-                          title="Mark as read"
-                          className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded
-                            ${dark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
-                        >
+                        <button onClick={(e) => dismissOne(n.id, e)} title="Mark as read"
+                          className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${dark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}>
                           <X className="w-3.5 h-3.5" />
                         </button>
                       )}
@@ -6019,45 +5991,83 @@ const PlanAssist = () => {
                   );
                 };
 
-                const unread = notifications.filter(n => n.is_unread);
-                const read   = notifications.filter(n => !n.is_unread);
+                // ── ALERTS TAB: unread grades, insignia, badges, studio joins ──
+                if (notifTab === 'alerts') {
+                  const alertItems = notifications.filter(n => n.is_unread &&
+                    ['grade','insignia','badge'].includes(n.type)
+                  );
+                  // Studio joins come from activityData.studios — show as static entries
+                  const studioAlerts = (activityData.studios || []).map(s => ({
+                    id: `studio_${s.id}`,
+                    type: 'studio',
+                    title: `You're in ${s.name}`,
+                    body: s.teacher_name ? `Teacher: ${s.teacher_name}` : null,
+                    is_unread: false,
+                    link_url: null,
+                    event_time: s.joined_at,
+                  }));
 
-                return (
-                  <div>
-                    {unread.length > 0 && (
-                      <>
-                        <div className={`px-4 py-2 flex items-center justify-between sticky top-0 z-10
-                          ${colorTheme === 'dark' || colorTheme === 'cool' ? 'bg-gray-800 border-b border-gray-700' : 'bg-gray-50 border-b border-gray-200'}`}>
-                          <span className={`text-[11px] font-bold uppercase tracking-widest
-                            ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500'}`}>
-                            New · {unread.length}
-                          </span>
-                          <button onClick={markAllNotifsRead}
-                            className={`text-[11px] font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
-                            Mark all read
-                          </button>
-                        </div>
-                        <div className={`divide-y ${colorTheme === 'dark' || colorTheme === 'cool' ? 'divide-gray-800' : 'divide-purple-100'}`}>
-                          {unread.map(n => renderNotif(n))}
-                        </div>
-                      </>
-                    )}
-                    {read.length > 0 && (
-                      <>
-                        <div className={`px-4 py-2 sticky top-0 z-10
-                          ${colorTheme === 'dark' || colorTheme === 'cool' ? 'bg-gray-800 border-b border-t border-gray-700' : 'bg-gray-50 border-b border-t border-gray-200'}`}>
-                          <span className={`text-[11px] font-bold uppercase tracking-widest
-                            ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-500' : 'text-gray-400'}`}>
-                            Earlier
-                          </span>
-                        </div>
-                        <div className={`divide-y ${colorTheme === 'dark' || colorTheme === 'cool' ? 'divide-gray-800' : 'divide-gray-100'}`}>
-                          {read.map(n => renderNotif(n))}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                );
+                  if (alertItems.length === 0 && studioAlerts.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                        <BellOff className={`w-10 h-10 mb-3 ${dark ? 'text-gray-600' : 'text-gray-300'}`} />
+                        <p className={`text-sm font-medium ${dark ? 'text-gray-400' : 'text-gray-400'}`}>No alerts</p>
+                        <p className={`text-xs mt-1 ${dark ? 'text-gray-600' : 'text-gray-400'}`}>New grades, badges, and studio joins will appear here.</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div>
+                      {alertItems.length > 0 && (
+                        <>
+                          <div className={`px-4 py-2 flex items-center justify-between sticky top-0 z-10 ${dark ? 'bg-gray-800 border-b border-gray-700' : 'bg-gray-50 border-b border-gray-200'}`}>
+                            <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Unread · {alertItems.length}</span>
+                            <button onClick={markAllNotifsRead} className={`text-[11px] font-medium ${dark ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
+                              Mark all read
+                            </button>
+                          </div>
+                          <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-purple-100'}`}>
+                            {alertItems.map(n => renderRow(n))}
+                          </div>
+                        </>
+                      )}
+                      {studioAlerts.length > 0 && (
+                        <>
+                          <div className={`px-4 py-2 sticky top-0 z-10 ${dark ? 'bg-gray-800 border-b border-t border-gray-700' : 'bg-gray-50 border-b border-t border-gray-200'}`}>
+                            <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Studios</span>
+                          </div>
+                          <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-gray-100'}`}>
+                            {studioAlerts.map(n => renderRow({ ...n, type: 'studio', is_unread: false }))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                }
+
+                // ── UPDATES TAB: announcements, discussions, messages sorted by event_time ──
+                if (notifTab === 'updates') {
+                  const updateItems = notifications.filter(n =>
+                    ['announcement','discussion','message'].includes(n.type)
+                  ).sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
+
+                  if (updateItems.length === 0) {
+                    return (
+                      <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                        <BellOff className={`w-10 h-10 mb-3 ${dark ? 'text-gray-600' : 'text-gray-300'}`} />
+                        <p className={`text-sm font-medium ${dark ? 'text-gray-400' : 'text-gray-400'}`}>No updates yet</p>
+                        <p className={`text-xs mt-1 ${dark ? 'text-gray-600' : 'text-gray-400'}`}>Announcements, discussions, and messages from Canvas appear here.</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-gray-100'}`}>
+                      {updateItems.map(n => renderRow(n))}
+                    </div>
+                  );
+                }
+
+                return null;
               })()}
             </div>
 
@@ -6398,7 +6408,7 @@ const PlanAssist = () => {
       )}
       <div>
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-7xl mx-auto p-6 space-y-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -7343,7 +7353,7 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="h-[calc(100vh-73px)] overflow-y-auto bg-gray-50 scrollbar-stable">
+            <div className="h-full bg-gray-50">
               {/* Header bar */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
                 <div>
@@ -7937,7 +7947,6 @@ const PlanAssist = () => {
 
                 {currentPage === 'agendas' && (() => {
                   return (
-                    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
@@ -8287,7 +8296,6 @@ const PlanAssist = () => {
                           })}
                         </div>
                       )}
-                    </div>
                     </div>
                   );
                 })()}
@@ -8833,7 +8841,6 @@ const PlanAssist = () => {
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
-            <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
             <div className="max-w-3xl mx-auto p-6">
               {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
@@ -9063,7 +9070,6 @@ const PlanAssist = () => {
                 );
               })()}
             </div>
-            </div>
           );
         })()}
 
@@ -9071,7 +9077,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6 relative">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
                 <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.40)' }}>
@@ -9322,7 +9328,7 @@ const PlanAssist = () => {
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -9968,53 +9974,60 @@ const PlanAssist = () => {
                     { key: 'announcements', label: '📢 Announcements' },
                     { key: 'discussions',   label: '💬 Discussions' },
                     { key: 'messages',      label: '✉️ Messages' },
-                    { key: 'resolutions',   label: '✅ Resolutions' },
+                    { key: 'achievements',  label: '🏆 Achievements' },
+                    { key: 'studios',       label: '📚 Studios' },
                   ];
 
-                  const isLoading = activityFilter === 'grades' ? gradesLoading
-                    : activityFilter === 'announcements' ? announcementsLoading
-                    : activityFilter === 'discussions' ? discussionsLoading
-                    : activityFilter === 'resolutions' ? resolvedLoading
-                    : activityLoading;
+                  const isRefreshing = activityRefreshLoading;
+                  const isLoading    = activityDataLoading;
 
-                  // Filter items by search query
                   const searchLower = activitySearch.toLowerCase();
                   const filterBySearch = (arr, keys) => !searchLower ? arr : arr.filter(item =>
                     keys.some(k => (item[k] || '').toLowerCase().includes(searchLower))
                   );
 
-                  const gradesFiltered = filterBySearch(gradesItems, ['assignmentName', 'courseName']);
-                  const announcementsFiltered = filterBySearch(announcementItems, ['title', 'body', 'courseName']);
-                  const discussionsFiltered = filterBySearch(discussionItems, ['title', 'body', 'courseName']);
-                  const messagesFiltered = filterBySearch(
-                    activityItems.filter(i => i.type === 'Message' || i.type === 'Conversation'),
-                    ['title', 'body']
-                  );
-                  const resolutionsFiltered = filterBySearch(resolvedTasks, ['title', 'class']);
+                  const { grades, announcements, discussions, messages, insignia, badges, studios } = activityData;
+                  const gradesFiltered        = filterBySearch(grades,        ['assignmentName','courseName']);
+                  const announcementsFiltered = filterBySearch(announcements, ['title','body','courseName']);
+                  const discussionsFiltered   = filterBySearch(discussions,   ['title','body','courseName']);
+                  const messagesFiltered      = filterBySearch(messages,      ['title','body']);
+
+                  const INSIGNIA_THRESHOLDS_LABELS = [
+                    [1,'Beginner'],[5,'Explorer'],[10,'Consistent'],[20,'Dedicated'],
+                    [30,'Focused'],[50,'Advanced'],[75,'Expert'],[100,'Master'],
+                  ];
 
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative">
-                      {gradeSyncLoading && (
+                      {/* Refresh overlay — shown during Activity Refresh (Canvas calls) */}
+                      {isRefreshing && (
                         <div className="pa-sync-overlay absolute inset-0 z-20 flex items-center justify-center rounded-2xl" style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}>
                           <div className="pa-sync-card flex flex-col items-center gap-3 px-6 py-4 rounded-xl">
                             <div className="w-10 h-10 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                            <p className="pa-sync-text text-sm font-semibold">Refreshing grades…</p>
+                            <p className="pa-sync-text text-sm font-semibold">Refreshing activity…</p>
+                            <p className="pa-sync-text text-xs opacity-70">Fetching grades, announcements &amp; more</p>
                           </div>
                         </div>
                       )}
                       <div className="flex items-center justify-between mb-4">
                         <h2 className="text-lg font-bold text-gray-900">Activity</h2>
-                        {isLoading && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
+                        <div className="flex items-center gap-2">
+                          {isLoading && !isRefreshing && <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />}
+                          <button
+                            onClick={() => runActivityRefresh().then(() => loadActivityData())}
+                            disabled={isRefreshing}
+                            className="text-xs text-gray-400 hover:text-purple-600 flex items-center gap-1 disabled:opacity-40"
+                            title="Refresh activity data"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                          </button>
+                        </div>
                       </div>
 
                       {/* Filter pills */}
                       <div className="flex flex-wrap gap-2 mb-4">
                         {FILTERS.map(f => (
-                          <button key={f.key} onClick={() => {
-                            setActivityFilter(f.key);
-                            setActivitySearch('');
-                            if (f.key === 'resolutions') loadResolvedTasks('', resolvedSort);
-                          }}
+                          <button key={f.key} onClick={() => { setActivityFilter(f.key); setActivitySearch(''); }}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                               activityFilter === f.key ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}>
@@ -10023,25 +10036,24 @@ const PlanAssist = () => {
                         ))}
                       </div>
 
-                      {/* Search bar — all tabs */}
-                      <div className="relative mb-4">
-                        <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-                        <input value={activitySearch}
-                          onChange={(e) => {
-                            setActivitySearch(e.target.value);
-                            if (activityFilter === 'resolutions') loadResolvedTasks(e.target.value, resolvedSort);
-                          }}
-                          placeholder={`Search ${activityFilter}…`}
-                          className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500" />
-                      </div>
+                      {/* Search bar */}
+                      {['grades','announcements','discussions','messages'].includes(activityFilter) && (
+                        <div className="relative mb-4">
+                          <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                          <input value={activitySearch}
+                            onChange={(e) => setActivitySearch(e.target.value)}
+                            placeholder={`Search ${activityFilter}…`}
+                            className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500" />
+                        </div>
+                      )}
 
                       {/* ── Grades ── */}
                       {activityFilter === 'grades' && (
                         <div>
-                          {gradesLoading && gradesItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">Loading grades...</p>
+                          {isLoading && grades.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading grades…</p>
                           ) : gradesFiltered.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">{gradesItems.length === 0 ? 'No graded assignments found yet. Grades appear here after a Sync detects a score change.' : 'No results.'}</p>
+                            <p className="text-gray-400 text-sm text-center py-8">{grades.length === 0 ? 'No graded assignments found yet. Run a Sync to pull grades.' : 'No results.'}</p>
                           ) : (
                             <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                               {gradesFiltered.map(item => {
@@ -10057,22 +10069,22 @@ const PlanAssist = () => {
                                 const pctColor = pct == null ? 'text-gray-500' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
                                 const gradedDate = item.gradedAt ? new Date(item.gradedAt).toLocaleDateString() : null;
                                 return (
-                                  <div key={item.id} className="flex items-start gap-4 p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                                    <div className="flex-1 min-w-0">
-                                      {item.htmlUrl ? (
-                                        <a href={item.htmlUrl} target="_blank" rel="noreferrer"
-                                          className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                          {item.assignmentName}
-                                        </a>
-                                      ) : (
-                                        <p className="font-medium text-sm text-gray-900 truncate">{item.assignmentName}</p>
-                                      )}
-                                      {item.courseName && <p className="text-xs text-gray-400 mt-0.5 truncate">{item.courseName}</p>}
-                                      {gradedDate && <p className="text-xs text-gray-300 mt-0.5">Graded {gradedDate}</p>}
-                                    </div>
-                                    <div className="flex-shrink-0 text-right">
-                                      <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
-                                      {pct != null && <p className="text-xs text-gray-400">{pct}%</p>}
+                                  <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        {item.htmlUrl ? (
+                                          <a href={item.htmlUrl} target="_blank" rel="noreferrer"
+                                            className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">{item.assignmentName}</a>
+                                        ) : (
+                                          <p className="font-medium text-sm text-gray-900 truncate">{item.assignmentName}</p>
+                                        )}
+                                        {item.courseName && <p className="text-xs text-purple-500 font-medium mt-0.5">{item.courseName}</p>}
+                                        {gradedDate && <p className="text-xs text-gray-300 mt-1">Graded {gradedDate}</p>}
+                                      </div>
+                                      <div className="text-right flex-shrink-0">
+                                        <p className={`text-sm font-bold ${pctColor}`}>{scoreDisplay}</p>
+                                        {pct != null && !isPassFail && <p className={`text-xs font-semibold ${pctColor}`}>{pct}%</p>}
+                                      </div>
                                     </div>
                                   </div>
                                 );
@@ -10085,23 +10097,27 @@ const PlanAssist = () => {
                       {/* ── Announcements ── */}
                       {activityFilter === 'announcements' && (
                         <div>
-                          {announcementsLoading && announcementItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">Loading announcements...</p>
+                          {isLoading && announcements.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading announcements…</p>
                           ) : announcementsFiltered.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No results.</p>
+                            <p className="text-gray-400 text-sm text-center py-8">No announcements found.</p>
                           ) : (
                             <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                               {announcementsFiltered.map(item => (
                                 <div key={item.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                                  {item.htmlUrl ? (
-                                    <a href={item.htmlUrl} target="_blank" rel="noreferrer"
-                                      className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block">{item.title}</a>
-                                  ) : (
-                                    <p className="font-medium text-sm text-gray-900">{item.title}</p>
-                                  )}
-                                  {item.courseName && <p className="text-xs text-purple-500 font-medium mt-0.5">{item.courseName}</p>}
-                                  {item.body && <p className="text-xs text-gray-500 mt-1.5 leading-relaxed line-clamp-3">{item.body}</p>}
-                                  {item.postedAt && <p className="text-xs text-gray-300 mt-1.5">{new Date(item.postedAt).toLocaleDateString()}</p>}
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                      {item.htmlUrl ? (
+                                        <a href={item.htmlUrl} target="_blank" rel="noreferrer"
+                                          className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">{item.title}</a>
+                                      ) : (
+                                        <p className="font-medium text-sm text-gray-900 truncate">{item.title}</p>
+                                      )}
+                                      {item.courseName && <p className="text-xs text-purple-500 font-medium mt-0.5">{item.courseName}</p>}
+                                      {item.body && <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{item.body}</p>}
+                                      {item.postedAt && <p className="text-xs text-gray-300 mt-1">{new Date(item.postedAt).toLocaleDateString()}</p>}
+                                    </div>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -10112,10 +10128,10 @@ const PlanAssist = () => {
                       {/* ── Discussions ── */}
                       {activityFilter === 'discussions' && (
                         <div>
-                          {discussionsLoading && discussionItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">Loading discussions...</p>
+                          {isLoading && discussions.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading discussions…</p>
                           ) : discussionsFiltered.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No results.</p>
+                            <p className="text-gray-400 text-sm text-center py-8">No discussions found.</p>
                           ) : (
                             <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                               {discussionsFiltered.map(item => (
@@ -10132,9 +10148,6 @@ const PlanAssist = () => {
                                       {item.body && <p className="text-xs text-gray-500 mt-1.5 line-clamp-2">{item.body}</p>}
                                       {item.lastReplyAt && <p className="text-xs text-gray-300 mt-1">Last reply {new Date(item.lastReplyAt).toLocaleDateString()}</p>}
                                     </div>
-                                    {item.unreadCount > 0 && (
-                                      <span className="flex-shrink-0 bg-purple-100 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full">{item.unreadCount} new</span>
-                                    )}
                                   </div>
                                 </div>
                               ))}
@@ -10146,10 +10159,10 @@ const PlanAssist = () => {
                       {/* ── Messages ── */}
                       {activityFilter === 'messages' && (
                         <div>
-                          {activityLoading && activityItems.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">Loading messages...</p>
+                          {isLoading && messages.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">Loading messages…</p>
                           ) : messagesFiltered.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No results.</p>
+                            <p className="text-gray-400 text-sm text-center py-8">No messages found.</p>
                           ) : (
                             <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                               {messagesFiltered.map(item => (
@@ -10160,7 +10173,7 @@ const PlanAssist = () => {
                                   ) : (
                                     <p className="font-medium text-sm text-gray-900 truncate">{item.title || 'Message'}</p>
                                   )}
-                                  {item.body && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.body.replace(/<[^>]*>/g, '')}</p>}
+                                  {item.body && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{item.body}</p>}
                                   {item.updatedAt && <p className="text-xs text-gray-300 mt-1">{new Date(item.updatedAt).toLocaleDateString()}</p>}
                                 </div>
                               ))}
@@ -10169,89 +10182,77 @@ const PlanAssist = () => {
                         </div>
                       )}
 
-                      {/* ── Resolutions ── */}
-                      {activityFilter === 'resolutions' && (
-                        <div>
-                          <div className="flex items-center gap-3 mb-4">
-                            <p className="text-sm text-gray-500 flex-1">Completed and dismissed tasks. Restore any task to send it back to your Task List.</p>
-                            <select value={resolvedSort}
-                              onChange={(e) => { setResolvedSort(e.target.value); loadResolvedTasks(activitySearch, e.target.value); }}
-                              className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 flex-shrink-0">
-                              <option value="created_at">Sort: Sync Date</option>
-                              <option value="deadline">Sort: Deadline</option>
-                            </select>
-                          </div>
-                          {resolvedLoading ? (
-                            <div className="flex items-center justify-center py-12">
-                              <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                            </div>
-                          ) : resolutionsFiltered.length === 0 ? (
-                            <p className="text-gray-400 text-sm text-center py-8">No resolved tasks found.</p>
-                          ) : (
-                            <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
-                              {resolutionsFiltered.map(task => {
-                                const deadlineStr = (() => {
-                                  if (!task.deadline_date) return null;
-                                  const dp = task.deadline_date.includes('T') ? task.deadline_date.split('T')[0] : task.deadline_date;
-                                  const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
-                                  return d.toLocaleDateString();
-                                })();
-                                const isCompleted = task.completed === true || task.completed === 'true';
-                                const statusLabel = isCompleted ? 'Completed' : 'Dismissed';
-                                const statusColor = isCompleted ? 'text-green-600' : 'text-gray-400';
-                                const dotColor = isCompleted ? 'bg-green-400' : 'bg-gray-300';
-                                const hasSession = task.session_actual_time != null;
-                                return (
-                                  <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                                    <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColor}`} />
-                                    <div className="flex-1 min-w-0">
-                                      <a href={task.url} target="_blank" rel="noreferrer"
-                                        className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
-                                        {task.title}{task.segment ? ` · ${task.segment}` : ''}
-                                      </a>
-                                      <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                        <span className="text-xs text-gray-400">{task.class}</span>
-                                        {deadlineStr && <><span className="text-xs text-gray-300">·</span><span className="text-xs text-gray-400">Due {deadlineStr}</span></>}
-                                        <span className="text-xs text-gray-300">·</span>
-                                        <span className={`text-xs font-medium ${statusColor}`}>
-                                          {statusLabel}
-                                        </span>
-                                      </div>
-                                      {hasSession && (
-                                        <div className="flex items-center gap-2 mt-1.5">
-                                          <Clock className="w-3 h-3 text-gray-300" />
-                                          {editingActualTime === task.id ? (
-                                            <div className="flex items-center gap-1">
-                                              <input type="number" value={editingActualTimeVal} min="0"
-                                                onChange={(e) => setEditingActualTimeVal(e.target.value)}
-                                                className="w-16 px-2 py-0.5 border border-purple-300 rounded text-xs focus:ring-1 focus:ring-purple-500" />
-                                              <span className="text-xs text-gray-400">min</span>
-                                              <button onClick={() => saveActualTime(task.id, editingActualTimeVal)}
-                                                className="text-xs text-green-600 font-medium hover:text-green-700 px-1">Save</button>
-                                              <button onClick={() => setEditingActualTime(null)}
-                                                className="text-xs text-gray-400 hover:text-gray-600 px-1">×</button>
-                                            </div>
-                                          ) : (
-                                            <button onClick={() => { setEditingActualTime(task.id); setEditingActualTimeVal(String(task.session_actual_time)); }}
-                                              className="text-xs text-gray-400 hover:text-purple-600 transition-colors">
-                                              {task.session_actual_time} min <span className="text-gray-300">(tap to edit)</span>
-                                            </button>
-                                          )}
+                      {/* ── Achievements ── */}
+                      {activityFilter === 'achievements' && (
+                        <div className="space-y-4">
+                          {/* Insignia */}
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🎖️ Insignia</p>
+                            {insignia.length === 0 ? (
+                              <p className="text-gray-400 text-sm text-center py-4">No Insignia unlocked yet. Complete tasks to earn them!</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {INSIGNIA_THRESHOLDS_LABELS.map(([threshold, label]) => {
+                                  const unlocked = insignia.find(i => i.label === label);
+                                  return (
+                                    <div key={label} className={`flex items-center justify-between p-3 rounded-xl border ${unlocked ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200 opacity-50'}`}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-lg">{unlocked ? '🎖️' : '🔒'}</span>
+                                        <div>
+                                          <p className={`text-sm font-semibold ${unlocked ? 'text-amber-800' : 'text-gray-500'}`}>{label}</p>
+                                          <p className="text-xs text-gray-400">{threshold} completion day{threshold !== 1 ? 's' : ''}</p>
                                         </div>
-                                      )}
-                                      {task.completed_at && (
-                                        <p className="text-xs text-gray-300 mt-0.5">
-                                          {statusLabel} {new Date(task.completed_at).toLocaleDateString()}
-                                        </p>
+                                      </div>
+                                      {unlocked?.unlocked_at && (
+                                        <p className="text-xs text-amber-600">{new Date(unlocked.unlocked_at).toLocaleDateString()}</p>
                                       )}
                                     </div>
-                                    <button onClick={() => restoreTask(task.id)}
-                                      className="flex-shrink-0 text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 font-medium transition-colors">
-                                      Restore
-                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                          {/* Badges */}
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🏆 Badges</p>
+                            {badges.length === 0 ? (
+                              <p className="text-gray-400 text-sm text-center py-4">No badges earned yet.</p>
+                            ) : (
+                              <div className="space-y-2">
+                                {badges.map(b => (
+                                  <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border bg-yellow-50 border-yellow-200">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-lg">🏆</span>
+                                      <p className="text-sm font-semibold text-yellow-800 capitalize">{b.badge_key.replace(/_/g, ' ')}</p>
+                                    </div>
+                                    {b.awarded_at && <p className="text-xs text-yellow-600">{new Date(b.awarded_at).toLocaleDateString()}</p>}
                                   </div>
-                                );
-                              })}
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* ── Studios ── */}
+                      {activityFilter === 'studios' && (
+                        <div>
+                          {studios.length === 0 ? (
+                            <p className="text-gray-400 text-sm text-center py-8">You haven't joined any Studios yet. Enter a Studio Key in Account Settings to join one.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {studios.map(s => (
+                                <div key={s.id} className="flex items-center gap-3 p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: s.color || '#7c3aed' }} />
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{s.name}</p>
+                                    {s.teacher_name && <p className="text-xs text-gray-400">Teacher: {s.teacher_name}</p>}
+                                  </div>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${s.setup_type === 'course' ? 'bg-blue-50 text-blue-600' : 'bg-amber-50 text-amber-600'}`}>
+                                    {s.setup_type === 'course' ? 'Course' : 'Key'}
+                                  </span>
+                                </div>
+                              ))}
                             </div>
                           )}
                         </div>
@@ -10260,7 +10261,7 @@ const PlanAssist = () => {
                   );
                 })()}
 
-                {/* ── GOALS TAB ── */}
+                {/* ── GOALS TAB ── */}}
                 {accountTab === 'goals' && (
                   <div className="relative">
                     {courseSyncLoading && (
@@ -10713,7 +10714,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
@@ -12477,11 +12478,11 @@ const PlanAssist = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'rain',       label: '🌧️ Rainfall',    desc: 'Layered pink noise with droplet shimmer' },
-                            { id: 'ocean',      label: '🌊 Ocean Waves',  desc: 'Deep swells with sub-bass rumble' },
-                            { id: 'brown',      label: '🎵 Brown Noise',  desc: 'Warm low-end hum with reverb' },
-                            { id: 'pink',       label: '💗 Pink Noise',   desc: 'Balanced, smooth, wide-spectrum' },
-                            { id: 'whitenoise', label: '📻 White Noise',  desc: 'Full-spectrum static' }
+                            { id: 'rain', label: '🌧️ Soft Rain', desc: 'Gentle pink noise' },
+                            { id: 'ocean', label: '🌊 Deep Rumble', desc: 'Low frequency hum' },
+                            { id: 'brown', label: '🎵 Brown Noise', desc: 'Deep, smooth tone' },
+                            { id: 'pink', label: '💗 Pink Noise', desc: 'Balanced, calming' },
+                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Pure static' }
                           ].map(sound => (
                             <button
                               key={sound.id}
