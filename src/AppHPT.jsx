@@ -786,25 +786,404 @@ function StudiosPage({ token, hptUser, onStudiosChange }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HUB PAGE (placeholder)
+// HUB PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function HubPage({ hptUser }) {
-  return (
-    <div className="p-6 max-w-5xl mx-auto">
-      <div className="flex items-center gap-3 mb-8">
-        <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-2xl flex items-center justify-center">
-          <Home className="w-6 h-6 text-white" />
-        </div>
-        <div>
-          <h2 className="text-2xl font-bold text-gray-900">Hub</h2>
-          <p className="text-sm text-gray-500">Welcome back, {hptUser.name}</p>
+function HubPage({ hptUser, token, studios, onNavigate }) {
+  const [hubData, setHubData] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [statModal, setStatModal] = React.useState(null); // 'today'|'week'|'studytime'|'accuracy'|'streak'
+
+  const load = React.useCallback(async () => {
+    try {
+      const d = await apiCall('/hpt/hub', 'GET', null, token);
+      setHubData(d);
+    } catch (e) { console.error('[HPT HUB] load error:', e.message); }
+    finally { setLoading(false); }
+  }, [token]);
+
+  React.useEffect(() => { load(); }, [load]);
+
+  // Auto-refresh feed/stats every 30 seconds
+  React.useEffect(() => {
+    const iv = setInterval(load, 30000);
+    return () => clearInterval(iv);
+  }, [load]);
+
+  const stats = hubData?.stats || { tasksToday: 0, tasksWeek: 0, totalStudyMins: 0, accuracy: 0, streak: 0 };
+  const feed = hubData?.feed || [];
+  const leaderboard = hubData?.leaderboard || [];
+  const goalSnapshot = hubData?.goalSnapshot || null;
+  const inProgress = hubData?.inProgress || 0;
+  const studentCount = hubData?.studentCount || 0;
+
+  const formatStudyTime = (mins) => {
+    if (!mins) return '0h';
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h` : `${m}m`;
+  };
+
+  const timeAgo = (ts) => {
+    const diff = Date.now() - new Date(ts).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
+  };
+
+  const medals = ['🥇', '🥈', '🥉'];
+
+  // Stat modal content
+  const renderStatModal = () => {
+    if (!statModal) return null;
+    const configs = {
+      today: {
+        title: 'Tasks Completed Today',
+        value: stats.tasksToday,
+        suffix: stats.tasksToday === 1 ? 'task' : 'tasks',
+        icon: <Check className="w-8 h-8 text-blue-600" />,
+        color: 'blue',
+        analysis: stats.tasksToday === 0
+          ? `None of your ${studentCount} connected students have completed a task yet today.`
+          : stats.tasksToday >= 10
+          ? `Great output — ${stats.tasksToday} tasks done today across your ${studentCount} students. Keep the momentum going into tomorrow.`
+          : `${stats.tasksToday} task${stats.tasksToday !== 1 ? 's' : ''} completed today across ${studentCount} student${studentCount !== 1 ? 's' : ''}. An average of ${(stats.tasksToday / Math.max(studentCount, 1)).toFixed(1)} tasks per student.`,
+      },
+      week: {
+        title: 'Tasks This Week',
+        value: stats.tasksWeek,
+        suffix: 'tasks',
+        icon: <BarChart3 className="w-8 h-8 text-purple-600" />,
+        color: 'purple',
+        analysis: stats.tasksWeek === 0
+          ? `No completions logged this week yet across your ${studentCount} students.`
+          : `${stats.tasksWeek} tasks completed this week by ${studentCount} student${studentCount !== 1 ? 's' : ''}. That's ${(stats.tasksWeek / Math.max(studentCount, 1)).toFixed(1)} tasks per student on average.`,
+      },
+      studytime: {
+        title: 'Total Study Time',
+        value: formatStudyTime(stats.totalStudyMins),
+        suffix: 'all time',
+        icon: <Clock className="w-8 h-8 text-amber-600" />,
+        color: 'amber',
+        analysis: `${stats.totalStudyMins >= 60 ? `${Math.floor(stats.totalStudyMins / 60)}h ${stats.totalStudyMins % 60}m` : `${stats.totalStudyMins}m`} of total session time logged across all ${studentCount} connected students. This counts completed session and agenda time from PlanAssist tracking.`,
+      },
+      accuracy: {
+        title: 'Time Estimate Accuracy',
+        value: `${stats.accuracy}%`,
+        suffix: 'avg accuracy',
+        icon: <Target className="w-8 h-8 text-green-600" />,
+        color: 'green',
+        analysis: stats.accuracy === 0
+          ? `No sessions with both estimated and actual time logged yet.`
+          : stats.accuracy >= 80
+          ? `Strong accuracy at ${stats.accuracy}% — your students' time estimates are closely matching actual effort.`
+          : stats.accuracy >= 60
+          ? `Moderate accuracy at ${stats.accuracy}%. Students are getting better at estimating, but there's room to improve.`
+          : `Accuracy is ${stats.accuracy}% — students may be significantly under or over-estimating task time. Encourage more session use to build better self-awareness.`,
+      },
+      streak: {
+        title: 'Group Streak',
+        value: stats.streak,
+        suffix: stats.streak === 1 ? 'weekday' : 'weekdays',
+        icon: <Zap className="w-8 h-8 text-orange-600" />,
+        color: 'orange',
+        analysis: stats.streak === 0
+          ? `No active streak. The streak counts consecutive weekdays (Mon–Fri) where at least one of your connected students completed a task.`
+          : `${stats.streak}-day consecutive weekday streak across your ${studentCount} students. This counts each weekday where at least one student completed a task in PlanAssist. Streak shields are not counted.`,
+      },
+    };
+    const cfg = configs[statModal];
+    if (!cfg) return null;
+    const borderColor = { blue: 'border-blue-200', purple: 'border-purple-200', amber: 'border-amber-200', green: 'border-green-200', orange: 'border-orange-200' }[cfg.color];
+    const bgColor = { blue: 'bg-blue-50', purple: 'bg-purple-50', amber: 'bg-amber-50', green: 'bg-green-50', orange: 'bg-orange-50' }[cfg.color];
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-4" onClick={() => setStatModal(null)}>
+        <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6" onClick={e => e.stopPropagation()}>
+          <div className="flex items-center justify-between mb-5">
+            <div className="flex items-center gap-3">
+              {cfg.icon}
+              <h3 className="text-lg font-bold text-gray-900">{cfg.title}</h3>
+            </div>
+            <button onClick={() => setStatModal(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+          </div>
+          <div className={`${bgColor} ${borderColor} border-2 rounded-xl p-5 text-center mb-4`}>
+            <p className="text-5xl font-bold text-gray-900 mb-1">{cfg.value}</p>
+            <p className="text-sm text-gray-500">{cfg.suffix}</p>
+          </div>
+          <p className="text-sm text-gray-600 leading-relaxed">{cfg.analysis}</p>
+          <p className="text-xs text-gray-400 mt-3">Aggregated across all {studentCount} connected student{studentCount !== 1 ? 's' : ''} in all your Studios.</p>
         </div>
       </div>
-      <div className="bg-white rounded-2xl border-2 border-dashed border-gray-200 p-16 text-center">
-        <Target className="w-12 h-12 text-gray-300 mx-auto mb-4" />
-        <h3 className="text-lg font-semibold text-gray-400 mb-2">Hub Coming Soon</h3>
-        <p className="text-sm text-gray-400">This area will show your studio overview, student activity summaries, and more.</p>
+    );
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-32">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-10 h-10 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-gray-400">Loading Hub…</p>
+        </div>
+      </div>
+    );
+  }
+
+  const firstName = hptUser.name?.split(' ')[0] || 'Teacher';
+
+  // Insight for header
+  const insights = [];
+  if (stats.tasksToday > 0) insights.push(`🔥 ${stats.tasksToday} task${stats.tasksToday !== 1 ? 's' : ''} done today across your students — good momentum!`);
+  if (stats.streak >= 3) insights.push(`⚡ ${stats.streak}-day group streak! Your students are staying consistent.`);
+  if (stats.tasksWeek >= 10) insights.push(`📈 ${stats.tasksWeek} tasks this week — your class is in a strong rhythm.`);
+  if (stats.accuracy >= 80) insights.push(`🎯 ${stats.accuracy}% time accuracy — students are estimating well.`);
+  if (stats.accuracy > 0 && stats.accuracy < 50) insights.push(`⏱ Time accuracy is at ${stats.accuracy}% — encourage more timed sessions to build self-awareness.`);
+  if (studentCount === 0) insights.push('💡 No students connected yet — create a Studio and share the key or course ID.');
+  else if (insights.length === 0) insights.push(`💡 ${studentCount} student${studentCount !== 1 ? 's' : ''} connected across your Studios.`);
+  const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
+
+  return (
+    <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-7xl mx-auto p-6 space-y-6">
+
+      {renderStatModal()}
+
+      {/* Welcome Header */}
+      <div className="bg-gradient-to-r from-yellow-500 to-purple-600 text-white rounded-xl p-8 shadow-lg">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Welcome back, {firstName}!</h1>
+            <p className="text-yellow-100">Here's how your students are doing today</p>
+          </div>
+          <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
+            <p className="text-xs text-yellow-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
+            <p className="text-sm text-white leading-relaxed">{insight}</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Stats Grid — identical layout to student Hub */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div className="bg-white rounded-xl p-6 shadow-md border-2 border-blue-100 cursor-pointer hover:border-blue-300 hover:shadow-lg transition-all" onClick={() => setStatModal('today')}>
+          <div className="flex items-center justify-between mb-2">
+            <Check className="w-6 h-6 text-blue-600" />
+            <span className="text-3xl font-bold text-gray-900">{stats.tasksToday}</span>
+          </div>
+          <p className="text-sm text-gray-600 font-medium">Today</p>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-md border-2 border-purple-100 cursor-pointer hover:border-purple-300 hover:shadow-lg transition-all" onClick={() => setStatModal('week')}>
+          <div className="flex items-center justify-between mb-2">
+            <BarChart3 className="w-6 h-6 text-purple-600" />
+            <span className="text-3xl font-bold text-gray-900">{stats.tasksWeek}</span>
+          </div>
+          <p className="text-sm text-gray-600 font-medium">This Week</p>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-md border-2 border-amber-100 cursor-pointer hover:border-amber-300 hover:shadow-lg transition-all" onClick={() => setStatModal('studytime')}>
+          <div className="flex items-center justify-between mb-2">
+            <Clock className="w-6 h-6 text-amber-600" />
+            <span className="text-3xl font-bold text-gray-900">{formatStudyTime(stats.totalStudyMins)}</span>
+          </div>
+          <p className="text-sm text-gray-600 font-medium">Study Time</p>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-md border-2 border-green-100 cursor-pointer hover:border-green-300 hover:shadow-lg transition-all" onClick={() => setStatModal('accuracy')}>
+          <div className="flex items-center justify-between mb-2">
+            <Target className="w-6 h-6 text-green-600" />
+            <span className="text-3xl font-bold text-gray-900">{stats.accuracy}%</span>
+          </div>
+          <p className="text-sm text-gray-600 font-medium">Accuracy</p>
+        </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-md border-2 border-orange-100 cursor-pointer hover:border-orange-300 hover:shadow-lg transition-all" onClick={() => setStatModal('streak')}>
+          <div className="flex items-center justify-between mb-2">
+            <Zap className="w-6 h-6 text-orange-600" />
+            <span className="text-3xl font-bold text-gray-900">{stats.streak}</span>
+          </div>
+          <p className="text-sm text-gray-600 font-medium">Day Streak</p>
+        </div>
+      </div>
+
+      {/* Main Content Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        {/* Left Column */}
+        <div className="lg:col-span-2 space-y-6">
+
+          {/* Goal Snapshot — ALWAYS shown, never Next Up */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Target className="w-5 h-5 text-purple-600" />
+              <h2 className="text-xl font-bold text-gray-900">Goal Snapshot</h2>
+              <span className="text-xs text-gray-400 ml-auto">Rotates every 5 min</span>
+            </div>
+            {goalSnapshot ? (() => {
+              const current = parseFloat(goalSnapshot.current_period_score);
+              const target = parseFloat(goalSnapshot.target_score);
+              const pct = Math.min(100, Math.max(0, (current / target) * 100));
+              const gap = (target - current).toFixed(1);
+              const isHit = current >= target;
+              const color = goalSnapshot.color || '#7c3aed';
+              return (
+                <div>
+                  <p className="text-xs text-gray-400 mb-3">
+                    From <span className="font-semibold text-gray-700">{goalSnapshot.user_name}</span>
+                    {goalSnapshot.user_grade && <span className="text-gray-400"> · Grade {goalSnapshot.user_grade}</span>}
+                  </p>
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <p className="font-semibold text-gray-900">{goalSnapshot.course_name}</p>
+                      {goalSnapshot.grading_period_title && <p className="text-xs text-gray-400 mt-0.5">{goalSnapshot.grading_period_title}</p>}
+                    </div>
+                    <span className={`text-sm font-bold px-3 py-1 rounded-full flex-shrink-0 ml-3 ${isHit ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                      {isHit ? '✓ Goal Hit!' : `${gap}% to go`}
+                    </span>
+                  </div>
+                  <div className="relative h-5 bg-gray-100 rounded-full overflow-hidden mb-2">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{
+                        width: `${pct}%`,
+                        background: isHit
+                          ? 'linear-gradient(90deg, #10b981, #059669)'
+                          : `linear-gradient(90deg, ${color}, ${color}bb)`,
+                        transition: 'width 1.2s cubic-bezier(0.4,0,0.2,1)',
+                      }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-gray-500 mb-2">
+                    <span>Current: <strong className="text-gray-800">{current.toFixed(1)}%</strong></span>
+                    <span>Target: <strong className="text-gray-800">{target}%</strong></span>
+                  </div>
+                  {!isHit && (
+                    <p className="text-xs text-gray-400 italic">
+                      {parseFloat(gap) < 2 ? '🔥 So close — one strong assessment could do it.' :
+                       parseFloat(gap) < 5 ? '📈 Within reach — consistent sessions will close this.' :
+                       '💪 A focused stretch of work can close this gap.'}
+                    </p>
+                  )}
+                </div>
+              );
+            })() : (
+              <div className="text-center py-8">
+                <Target className="w-12 h-12 text-gray-200 mx-auto mb-3" />
+                <p className="text-gray-400 text-sm font-medium">No Goal Snapshots yet</p>
+                <p className="text-xs text-gray-400 mt-1">Students must set Goals in PlanAssist for snapshots to appear here.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Live Activity Feed */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Activity className="w-5 h-5 text-green-600" />
+              <h2 className="text-xl font-bold text-gray-900">Live Activity</h2>
+              <span className="ml-auto text-xs text-gray-500">Updates every 30s</span>
+            </div>
+            <div className="space-y-3 max-h-80 overflow-y-auto">
+              {feed.length > 0 ? feed.map((item, i) => (
+                <div key={item.id || i} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                    <Check className="w-4 h-4 text-white" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-900">
+                      <span className="font-semibold">{item.user_name}</span>
+                      {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
+                      {' '}<span className="text-gray-600">completed</span>{' '}
+                      <span className="font-medium text-purple-600 break-words">{item.task_title}</span>
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">{item.task_class} · {timeAgo(item.completed_at)}</p>
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center py-8 text-gray-500">
+                  <Activity className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                  <p>No recent activity</p>
+                  <p className="text-xs mt-1 text-gray-400">Student completions will appear here</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              onClick={() => onNavigate('monitor')}
+              className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-green-200"
+            >
+              <Monitor className="w-10 h-10 text-green-600 mb-3" />
+              <h3 className="text-lg font-bold text-gray-900 mb-1">Start Monitoring</h3>
+              <p className="text-sm text-gray-600">Live student session view</p>
+            </button>
+            <button
+              onClick={() => onNavigate('marks')}
+              className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-blue-200"
+            >
+              <BarChart3 className="w-10 h-10 text-blue-600 mb-3" />
+              <h3 className="text-lg font-bold text-gray-900 mb-1">View Marks</h3>
+              <p className="text-sm text-gray-600">Grade data from Canvas</p>
+            </button>
+          </div>
+        </div>
+
+        {/* Right Column */}
+        <div className="space-y-6">
+
+          {/* Leaderboard — all connected students, all grades */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <div className="flex items-center gap-2 mb-1">
+              <Award className="w-5 h-5 text-yellow-600" />
+              <h2 className="text-xl font-bold text-gray-900">Leaders</h2>
+            </div>
+            <p className="text-xs text-gray-500 mb-4">Weekly tasks · All Studios · Resets Monday</p>
+            <div className="space-y-2 max-h-[280px] overflow-y-auto pr-1">
+              {leaderboard.length > 0 ? leaderboard.map((entry, idx) => (
+                <div key={entry.user_id} className="flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 rounded-lg transition-colors">
+                  <div className="w-8 text-center font-bold text-gray-900 flex-shrink-0">
+                    {idx < 3 ? medals[idx] : `#${idx + 1}`}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-gray-900 truncate">{entry.user_name}</p>
+                    {entry.grade && <p className="text-xs text-gray-400">Grade {entry.grade}</p>}
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-lg font-bold text-gray-900">{entry.tasks_completed}</p>
+                    <p className="text-xs text-gray-500">tasks</p>
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center py-8 text-gray-500">
+                  <Award className="w-12 h-12 mx-auto mb-2 text-gray-300" />
+                  <p>No leaderboard yet</p>
+                  <p className="text-xs mt-1 text-gray-400">Students must complete tasks this week</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* In Progress */}
+          <div className="bg-white rounded-xl shadow-md p-6">
+            <div className="flex items-center gap-2 mb-4">
+              <Clock className="w-5 h-5 text-blue-600" />
+              <h2 className="text-xl font-bold text-gray-900">In Progress</h2>
+            </div>
+            <div className="text-center py-6">
+              <div className="text-5xl font-bold text-gray-900 mb-2">{inProgress}</div>
+              <p className="text-gray-600">tasks with partial time</p>
+              {studentCount > 0 && (
+                <p className="text-xs text-gray-400 mt-1">across {studentCount} student{studentCount !== 1 ? 's' : ''}</p>
+              )}
+            </div>
+            <button
+              onClick={() => onNavigate('monitor')}
+              className="w-full bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-medium transition-colors"
+            >
+              View on Monitor
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1707,7 +2086,7 @@ export default function AppHPT({ onBack }) {
 
       {/* Page content */}
       <main className="flex-1 overflow-y-auto">
-        {currentPage === 'hub'     && <HubPage hptUser={hptUser} />}
+        {currentPage === 'hub'     && <HubPage hptUser={hptUser} token={token} studios={studios} onNavigate={setCurrentPage} />}
         {currentPage === 'studios' && <StudiosPage token={token} hptUser={hptUser} onStudiosChange={setStudios} />}
         {currentPage === 'monitor' && <MonitorPage token={token} studios={studios} />}
         {currentPage === 'marks'   && <MarksPage   token={token} studios={studios} />}
