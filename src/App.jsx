@@ -5384,7 +5384,7 @@ const PlanAssist = () => {
   const openNotifSidebar = () => {
     if (currentSessionTask || agendaRunning) return;
     setNotifSidebarOpen(true);
-    markAllNotifsRead();
+    // No longer auto-marks-all-read — user can dismiss individually or use Mark all read
   };
 
   const triggerActivityRefresh = async () => {
@@ -5847,12 +5847,18 @@ const PlanAssist = () => {
               colorTheme === 'cool' ? 'bg-gray-900 text-green-100' :
               colorTheme === 'warm' ? 'bg-pink-50 text-gray-900' :
               'bg-white text-gray-900'}`}>
+
             {/* Header */}
             <div className={`flex items-center justify-between px-5 py-4 border-b flex-shrink-0
               ${colorTheme === 'dark' || colorTheme === 'cool' ? 'border-gray-700' : 'border-gray-200'}`}>
               <div className="flex items-center gap-2">
                 <Bell className="w-5 h-5 text-purple-500" />
                 <h2 className="text-base font-bold">Notifications</h2>
+                {notifUnreadCount > 0 && (
+                  <span className="text-xs font-bold bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
+                    {notifUnreadCount} new
+                  </span>
+                )}
               </div>
               <button onClick={() => setNotifSidebarOpen(false)}
                 className={`p-1.5 rounded-lg ${colorTheme === 'dark' || colorTheme === 'cool' ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
@@ -5872,52 +5878,137 @@ const PlanAssist = () => {
                   <p className={`text-sm font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-400'}`}>No notifications yet</p>
                   <p className={`text-xs mt-1 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>Grade updates, announcements, achievements and more will appear here.</p>
                 </div>
-              ) : (
-                <div className="divide-y divide-gray-100">
-                  {notifications.map(n => {
-                    const typeConfig = {
-                      grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600' },
-                      announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600' },
-                      discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600' },
-                      message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600' },
-                      insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600' },
-                      badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600' },
-                      studio:       { icon: '📚', label: 'Studio',       color: 'text-purple-600' },
-                    }[n.type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500' };
-                    const timeAgo = (() => {
-                      const diff = Date.now() - new Date(n.created_at).getTime();
-                      const mins = Math.floor(diff / 60000);
-                      if (mins < 1) return 'just now';
-                      if (mins < 60) return `${mins}m ago`;
-                      const hrs = Math.floor(mins / 60);
-                      if (hrs < 24) return `${hrs}h ago`;
-                      return `${Math.floor(hrs / 24)}d ago`;
-                    })();
-                    return (
-                      <div
-                        key={n.id}
-                        className={`px-5 py-3.5 flex items-start gap-3 transition-colors
-                          ${!n.read ? (colorTheme === 'dark' || colorTheme === 'cool' ? 'bg-purple-900 bg-opacity-20' : 'bg-purple-50') : ''}
-                          ${n.link_url ? 'cursor-pointer hover:bg-opacity-80' : ''}`}
-                        onClick={() => n.link_url && window.open(n.link_url, '_blank')}
-                      >
-                        <span className="text-xl flex-shrink-0 mt-0.5">{typeConfig.icon}</span>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <p className={`text-sm font-semibold leading-snug ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-100' : 'text-gray-900'}`}>{n.title}</p>
-                            {!n.read && <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 mt-1.5" />}
-                          </div>
-                          {n.body && <p className={`text-xs mt-0.5 leading-relaxed ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500'}`}>{n.body}</p>}
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`text-[10px] font-semibold uppercase tracking-wide ${typeConfig.color}`}>{typeConfig.label}</span>
-                            <span className={`text-[10px] ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>· {timeAgo}</span>
-                          </div>
+              ) : (() => {
+                const typeConfig = (type) => ({
+                  grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600',  showBody: true  },
+                  announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600',   showBody: false },
+                  discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600', showBody: false },
+                  message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600', showBody: false },
+                  insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600',  showBody: true  },
+                  badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600', showBody: true  },
+                  studio:       { icon: '📚', label: 'Studio',       color: 'text-purple-600', showBody: true  },
+                }[type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500', showBody: true });
+
+                const timeAgo = (created_at) => {
+                  const diff = Date.now() - new Date(created_at).getTime();
+                  const mins = Math.floor(diff / 60000);
+                  if (mins < 1) return 'just now';
+                  if (mins < 60) return `${mins}m ago`;
+                  const hrs = Math.floor(mins / 60);
+                  if (hrs < 24) return `${hrs}h ago`;
+                  const days = Math.floor(hrs / 24);
+                  if (days < 7) return `${days}d ago`;
+                  return new Date(created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                };
+
+                const dismissOne = async (id, e) => {
+                  e.stopPropagation();
+                  try { await apiCall(`/notifications/${id}/read`, 'PATCH'); } catch (err) { /* ignore */ }
+                  setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+                  setNotifUnreadCount(prev => Math.max(0, prev - 1));
+                };
+
+                const renderNotif = (n, showDismiss) => {
+                  const cfg = typeConfig(n.type);
+                  return (
+                    <div
+                      key={n.id}
+                      className={`group px-4 py-3 flex items-start gap-3 transition-colors relative
+                        ${!n.read
+                          ? (colorTheme === 'dark' || colorTheme === 'cool'
+                              ? 'bg-purple-900 bg-opacity-25'
+                              : 'bg-purple-50')
+                          : (colorTheme === 'dark' || colorTheme === 'cool' ? '' : '')}
+                        ${n.link_url ? 'cursor-pointer' : ''}`}
+                      onClick={() => n.link_url && window.open(n.link_url, '_blank')}
+                    >
+                      <span className="text-lg flex-shrink-0 mt-0.5">{cfg.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold leading-snug
+                          ${n.read
+                            ? (colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500')
+                            : (colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-100' : 'text-gray-900')}`}>
+                          {n.title}
+                        </p>
+                        {cfg.showBody && n.body && (
+                          <p className={`text-xs mt-0.5 leading-relaxed
+                            ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-500' : 'text-gray-400'}`}>
+                            {n.body}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`text-[10px] font-semibold uppercase tracking-wide ${n.read ? 'text-gray-400' : cfg.color}`}>{cfg.label}</span>
+                          <span className={`text-[10px] ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>· {timeAgo(n.created_at)}</span>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
+                      {/* X to mark as read — only on unread items */}
+                      {showDismiss && !n.read && (
+                        <button
+                          onClick={(e) => dismissOne(n.id, e)}
+                          title="Mark as read"
+                          className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded
+                            ${colorTheme === 'dark' || colorTheme === 'cool'
+                              ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700'
+                              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                };
+
+                const unread = notifications.filter(n => !n.read);
+                const read   = notifications.filter(n => n.read);
+
+                return (
+                  <div>
+                    {/* Unread section */}
+                    {unread.length > 0 && (
+                      <>
+                        <div className={`px-4 py-2 flex items-center justify-between sticky top-0 z-10
+                          ${colorTheme === 'dark' || colorTheme === 'cool'
+                            ? 'bg-gray-800 border-b border-gray-700'
+                            : 'bg-gray-50 border-b border-gray-200'}`}>
+                          <span className={`text-[11px] font-bold uppercase tracking-widest
+                            ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500'}`}>
+                            New · {unread.length}
+                          </span>
+                          <button
+                            onClick={markAllNotifsRead}
+                            className={`text-[11px] font-medium
+                              ${colorTheme === 'dark' || colorTheme === 'cool'
+                                ? 'text-gray-400 hover:text-gray-200'
+                                : 'text-purple-600 hover:text-purple-800'}`}>
+                            Mark all read
+                          </button>
+                        </div>
+                        <div className={`divide-y ${colorTheme === 'dark' || colorTheme === 'cool' ? 'divide-gray-800' : 'divide-purple-100'}`}>
+                          {unread.map(n => renderNotif(n, true))}
+                        </div>
+                      </>
+                    )}
+
+                    {/* Read section */}
+                    {read.length > 0 && (
+                      <>
+                        <div className={`px-4 py-2 sticky top-0 z-10
+                          ${colorTheme === 'dark' || colorTheme === 'cool'
+                            ? 'bg-gray-800 border-b border-t border-gray-700'
+                            : 'bg-gray-50 border-b border-t border-gray-200'}`}>
+                          <span className={`text-[11px] font-bold uppercase tracking-widest
+                            ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-500' : 'text-gray-400'}`}>
+                            Earlier
+                          </span>
+                        </div>
+                        <div className={`divide-y ${colorTheme === 'dark' || colorTheme === 'cool' ? 'divide-gray-800' : 'divide-gray-100'}`}>
+                          {read.map(n => renderNotif(n, false))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             {/* Footer */}
