@@ -3883,115 +3883,156 @@ const PlanAssist = () => {
   };
 
   const playWhiteNoise = (type) => {
-    // Stop any existing audio
+    // Stop any existing audio context
     if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
       whiteNoiseAudio.context.close();
     }
 
-    // Use Web Audio API to generate sounds (no external URLs needed!)
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
-    let oscillator, gainNode, filter;
-    
-    switch(type) {
-      case 'whitenoise':
-        // Pure white noise using buffer
-        const bufferSize = 2 * audioContext.sampleRate;
-        const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const master = ctx.createGain();
+    master.gain.value = whiteNoiseVolume * 0.6;
+    master.connect(ctx.destination);
+
+    // ── Shared noise buffer helper ──────────────────────────────────────────
+    // Generates a 4-second looping noise source with the requested colour.
+    const makeNoise = (color = 'pink') => {
+      const bufSecs = 4;
+      const buf = ctx.createBuffer(2, bufSecs * ctx.sampleRate, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const data = buf.getChannelData(ch);
+        if (color === 'white') {
+          for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        } else if (color === 'pink') {
+          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+          for (let i = 0; i < data.length; i++) {
+            const w = Math.random() * 2 - 1;
+            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
+            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
+            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
+            data[i] = (b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
+          }
+        } else { // brown
+          let last = 0;
+          for (let i = 0; i < data.length; i++) {
+            const w = Math.random() * 2 - 1;
+            data[i] = (last + 0.02 * w) / 1.02; last = data[i]; data[i] *= 3.5;
+          }
         }
-        const whiteNoise = audioContext.createBufferSource();
-        whiteNoise.buffer = noiseBuffer;
-        whiteNoise.loop = true;
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.3;
-        whiteNoise.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        whiteNoise.start(0);
-        
-        setWhiteNoiseAudio({
-          context: audioContext,
-          gainNode: gainNode
-        });
+      }
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      return src;
+    };
+
+    // ── Simple reverb via convolver ─────────────────────────────────────────
+    const makeReverb = (decaySecs = 1.5) => {
+      const conv = ctx.createConvolver();
+      const len = ctx.sampleRate * decaySecs;
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2);
+      }
+      conv.buffer = ir;
+      return conv;
+    };
+
+    // ── LFO helper — creates slow amplitude or pitch wobble ─────────────────
+    const makeLFO = (freq, minVal, maxVal) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = freq;
+      gain.gain.value = (maxVal - minVal) / 2;
+      osc.connect(gain);
+      osc.start();
+      return { osc, gain, offset: (minVal + maxVal) / 2 };
+    };
+
+    let nodes = [];
+
+    switch (type) {
+      case 'rain': {
+        // Layered pink noise through a mid-freq bandpass to simulate rainfall
+        // + high-frequency shimmer for droplet texture + LFO intensity swell
+        const noise = makeNoise('pink');
+        const bp = ctx.createBiquadFilter(); bp.type='bandpass'; bp.frequency.value=1200; bp.Q.value=0.4;
+        const shimmerNoise = makeNoise('white');
+        const shimmerBP = ctx.createBiquadFilter(); shimmerBP.type='highpass'; shimmerBP.frequency.value=6000;
+        const shimmerGain = ctx.createGain(); shimmerGain.gain.value = 0.08;
+        const lfo = makeLFO(0.07, 0.55, 1.0);
+        const lfoGain = ctx.createGain(); lfoGain.gain.value = lfo.offset;
+        lfo.gain.connect(lfoGain.gain);
+        const rev = makeReverb(0.8);
+        noise.connect(bp); bp.connect(lfoGain); lfoGain.connect(rev); rev.connect(master);
+        shimmerNoise.connect(shimmerBP); shimmerBP.connect(shimmerGain); shimmerGain.connect(master);
+        noise.start(); shimmerNoise.start(); lfo.osc.start && void 0; // already started
+        nodes = [noise, shimmerNoise, lfo.osc];
         break;
-        
-      case 'rain':
-      case 'pink':
-        // Pink noise (softer, more balanced than white)
-        const pinkBufferSize = 2 * audioContext.sampleRate;
-        const pinkBuffer = audioContext.createBuffer(1, pinkBufferSize, audioContext.sampleRate);
-        const pinkOutput = pinkBuffer.getChannelData(0);
-        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-        for (let i = 0; i < pinkBufferSize; i++) {
-          const white = Math.random() * 2 - 1;
-          b0 = 0.99886 * b0 + white * 0.0555179;
-          b1 = 0.99332 * b1 + white * 0.0750759;
-          b2 = 0.96900 * b2 + white * 0.1538520;
-          b3 = 0.86650 * b3 + white * 0.3104856;
-          b4 = 0.55000 * b4 + white * 0.5329522;
-          b5 = -0.7616 * b5 - white * 0.0168980;
-          pinkOutput[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
-          b6 = white * 0.115926;
-        }
-        const pinkNoise = audioContext.createBufferSource();
-        pinkNoise.buffer = pinkBuffer;
-        pinkNoise.loop = true;
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.35;
-        pinkNoise.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        pinkNoise.start(0);
-        
-        setWhiteNoiseAudio({
-          context: audioContext,
-          gainNode: gainNode
-        });
+      }
+      case 'ocean': {
+        // Deep brown noise base + slow LFO wave swell + low-pitched harmonic
+        // sine tones that slowly drift, plus reverb for space
+        const noise = makeNoise('brown');
+        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=400; lp.Q.value=0.7;
+        const lfo = makeLFO(0.05, 0.3, 1.0);
+        const lfoGain = ctx.createGain(); lfoGain.gain.value = lfo.offset;
+        lfo.gain.connect(lfoGain.gain);
+        const rev = makeReverb(2.5);
+        // Subtle rumbling sub-sine
+        const sub = ctx.createOscillator(); sub.type='sine'; sub.frequency.value = 42;
+        const subGain = ctx.createGain(); subGain.gain.setValueAtTime(0, ctx.currentTime);
+        subGain.gain.linearRampToValueAtTime(0.12, ctx.currentTime + 2);
+        // Slow LFO on sub pitch for wave feel
+        const subLFO = ctx.createOscillator(); subLFO.type='sine'; subLFO.frequency.value=0.04;
+        const subLFOGain = ctx.createGain(); subLFOGain.gain.value=8;
+        subLFO.connect(subLFOGain); subLFOGain.connect(sub.frequency);
+        noise.connect(lp); lp.connect(lfoGain); lfoGain.connect(rev); rev.connect(master);
+        sub.connect(subGain); subGain.connect(master);
+        noise.start(); sub.start(); subLFO.start();
+        nodes = [noise, sub, subLFO];
         break;
-        
-      case 'ocean':
-      case 'brown':
-        // Brown noise (deep, bass-heavy rumble)
-        const brownBufferSize = 2 * audioContext.sampleRate;
-        const brownBuffer = audioContext.createBuffer(1, brownBufferSize, audioContext.sampleRate);
-        const brownOutput = brownBuffer.getChannelData(0);
-        let lastOut = 0;
-        for (let i = 0; i < brownBufferSize; i++) {
-          const white = Math.random() * 2 - 1;
-          brownOutput[i] = (lastOut + (0.02 * white)) / 1.02;
-          lastOut = brownOutput[i];
-          brownOutput[i] *= 3.5;
-        }
-        const brownNoise = audioContext.createBufferSource();
-        brownNoise.buffer = brownBuffer;
-        brownNoise.loop = true;
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.4;
-        
-        // Add extra low-pass filtering for ocean (deeper)
-        if (type === 'ocean') {
-          filter = audioContext.createBiquadFilter();
-          filter.type = 'lowpass';
-          filter.frequency.value = 300; // Very low for deep ocean rumble
-          filter.Q.value = 0.5;
-          
-          brownNoise.connect(filter);
-          filter.connect(gainNode);
-        } else {
-          brownNoise.connect(gainNode);
-        }
-        
-        gainNode.connect(audioContext.destination);
-        brownNoise.start(0);
-        
-        setWhiteNoiseAudio({
-          context: audioContext,
-          gainNode: gainNode
-        });
+      }
+      case 'brown': {
+        // Rich brown noise + gentle low-pass shaping + soft reverb tail
+        // More musical than plain brown — like a warm room hum
+        const noise = makeNoise('brown');
+        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=900;
+        const hp = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=60;
+        const rev = makeReverb(1.2);
+        const lfo = makeLFO(0.12, 0.7, 1.0);
+        const lfoGain = ctx.createGain(); lfoGain.gain.value = lfo.offset;
+        lfo.gain.connect(lfoGain.gain);
+        noise.connect(hp); hp.connect(lp); lp.connect(lfoGain); lfoGain.connect(rev); rev.connect(master);
+        noise.start();
+        nodes = [noise, lfo.osc];
         break;
+      }
+      case 'pink': {
+        // Clean pink noise — balanced and calm, minimal processing
+        const noise = makeNoise('pink');
+        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=8000;
+        const rev = makeReverb(0.6);
+        noise.connect(lp); lp.connect(rev); rev.connect(master);
+        noise.start();
+        nodes = [noise];
+        break;
+      }
+      case 'whitenoise': {
+        // White noise with a gentle low-pass to take the edge off harsh frequencies
+        const noise = makeNoise('white');
+        const lp = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=10000;
+        noise.connect(lp); lp.connect(master);
+        noise.start();
+        nodes = [noise];
+        break;
+      }
+      default: {
+        const noise = makeNoise('pink');
+        noise.connect(master); noise.start();
+        nodes = [noise];
+      }
     }
-    
+
+    setWhiteNoiseAudio({ context: ctx, gainNode: master, nodes });
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
@@ -3999,8 +4040,7 @@ const PlanAssist = () => {
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
     if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
-      // Adjust gain node volume
-      whiteNoiseAudio.gainNode.gain.value = volume * 0.4;
+      whiteNoiseAudio.gainNode.gain.value = volume * 0.6;
     }
   };
 
@@ -4300,12 +4340,13 @@ const PlanAssist = () => {
       system: `
         :root { color-scheme: light; }
         [data-planassist-theme="system"] { --pa-bg-page: #f0f4ff; --pa-bg-page2: #eff6ff; }
-        /* Scrollbar */
+        /* Scrollbar — always render at screen edge; stable gutter prevents layout shift */
         [data-planassist-theme="system"] ::-webkit-scrollbar { width: 7px; height: 7px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-track { background: #f1f5f9; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
         [data-planassist-theme="system"] * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+        [data-planassist-theme="system"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards (Activity/Goals/Marks pane spinners) */
         [data-planassist-theme="system"] .pa-sync-overlay { background: rgba(255,255,255,0.82); }
         [data-planassist-theme="system"] .pa-sync-card { background: #ffffff; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
@@ -4321,6 +4362,7 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb { background: #f48fb1; border-radius: 4px; }
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb:hover { background: #c2185b; }
         [data-planassist-theme="warm"] * { scrollbar-color: #f48fb1 #fce4ec; scrollbar-width: thin; }
+        [data-planassist-theme="warm"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="warm"] .pa-sync-overlay { background: rgba(255,240,245,0.88); }
         [data-planassist-theme="warm"] .pa-sync-card { background: #fff5f8; box-shadow: 0 8px 32px rgba(194,24,91,0.15); }
@@ -4479,6 +4521,7 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb { background: #2e7d32; border-radius: 4px; }
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb:hover { background: #43a047; }
         [data-planassist-theme="cool"] * { scrollbar-color: #2e7d32 #0a0f0a; scrollbar-width: thin; }
+        [data-planassist-theme="cool"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="cool"] .pa-sync-overlay { background: rgba(10,15,10,0.82); }
         [data-planassist-theme="cool"] .pa-sync-card { background: #192218; box-shadow: 0 8px 32px rgba(0,0,0,0.50); }
@@ -4670,6 +4713,7 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb { background: #3d3d6b; border-radius: 4px; }
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #7c4dff; }
         [data-planassist-theme="dark"] * { scrollbar-color: #3d3d6b #0d0d14; scrollbar-width: thin; }
+        [data-planassist-theme="dark"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="dark"] .pa-sync-overlay { background: rgba(13,13,20,0.82); }
         [data-planassist-theme="dark"] .pa-sync-card { background: #13131f; box-shadow: 0 8px 32px rgba(0,0,0,0.60); }
@@ -5361,7 +5405,7 @@ const PlanAssist = () => {
     try {
       const data = await apiCall('/notifications', 'GET');
       setNotifications(Array.isArray(data) ? data : []);
-      setNotifUnreadCount((Array.isArray(data) ? data : []).filter(n => !n.read).length);
+      setNotifUnreadCount((Array.isArray(data) ? data : []).filter(n => n.is_unread).length);
     } catch (e) { /* silently ignore */ }
     finally { setNotifLoading(false); }
   };
@@ -5376,7 +5420,7 @@ const PlanAssist = () => {
   const markAllNotifsRead = async () => {
     try {
       await apiCall('/notifications/read-all', 'POST');
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setNotifications(prev => prev.map(n => ({ ...n, is_unread: false })));
       setNotifUnreadCount(0);
     } catch (e) { /* silently ignore */ }
   };
@@ -5871,7 +5915,7 @@ const PlanAssist = () => {
             </div>
 
             {/* Notification list */}
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 overflow-y-auto scrollbar-stable">
               {notifLoading ? (
                 <div className="flex items-center justify-center py-16">
                   <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
@@ -5880,21 +5924,22 @@ const PlanAssist = () => {
                 <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
                   <BellOff className={`w-10 h-10 mb-3 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-300'}`} />
                   <p className={`text-sm font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-400'}`}>No notifications yet</p>
-                  <p className={`text-xs mt-1 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>Grade updates, announcements, achievements and more will appear here.</p>
+                  <p className={`text-xs mt-1 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>Grade updates, achievements, announcements and more will appear here.</p>
                 </div>
               ) : (() => {
+                // ── Type config ────────────────────────────────────────────
                 const typeConfig = (type) => ({
-                  grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600',  showBody: true  },
-                  announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600',   showBody: false },
-                  discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600', showBody: false },
-                  message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600', showBody: false },
-                  insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600',  showBody: true  },
-                  badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600', showBody: true  },
-                  studio:       { icon: '📚', label: 'Studio',       color: 'text-purple-600', showBody: true  },
-                }[type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500', showBody: true });
+                  grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600'  },
+                  announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600'   },
+                  discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600' },
+                  message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600' },
+                  insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600'  },
+                  badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600' },
+                }[type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500' });
 
-                const timeAgo = (created_at) => {
-                  const diff = Date.now() - new Date(created_at).getTime();
+                const timeAgo = (ts) => {
+                  if (!ts) return '';
+                  const diff = Date.now() - new Date(ts).getTime();
                   const mins = Math.floor(diff / 60000);
                   if (mins < 1) return 'just now';
                   if (mins < 60) return `${mins}m ago`;
@@ -5902,58 +5947,70 @@ const PlanAssist = () => {
                   if (hrs < 24) return `${hrs}h ago`;
                   const days = Math.floor(hrs / 24);
                   if (days < 7) return `${days}d ago`;
-                  return new Date(created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
                 };
 
+                // ── Dismiss a single item ──────────────────────────────────
                 const dismissOne = async (id, e) => {
                   e.stopPropagation();
-                  try { await apiCall(`/notifications/${id}/read`, 'PATCH'); } catch (err) { /* ignore */ }
-                  setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+                  try { await apiCall(`/notifications/${id}/read`, 'PATCH'); } catch (_) {}
+                  setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_unread: false } : n));
                   setNotifUnreadCount(prev => Math.max(0, prev - 1));
                 };
 
-                const renderNotif = (n, showDismiss) => {
+                // ── Grade-specific sub-label ───────────────────────────────
+                const gradeSubLabel = (n) => {
+                  if (n.type !== 'grade') return null;
+                  const pct = n.score != null && n.points_possible > 0
+                    ? Math.round((n.score / n.points_possible) * 100) : null;
+                  const pctColor = pct == null ? 'text-gray-400' : pct >= 90 ? 'text-green-600' : pct >= 70 ? 'text-yellow-600' : 'text-red-500';
+                  if (pct != null) return <span className={`text-xs font-bold ${pctColor}`}>{pct}%</span>;
+                  if (n.grade) return <span className="text-xs font-semibold text-gray-500">{n.grade}</span>;
+                  return null;
+                };
+
+                // ── Render one notification row ────────────────────────────
+                const renderNotif = (n) => {
                   const cfg = typeConfig(n.type);
+                  const isUnread = n.is_unread;
+                  const dark = colorTheme === 'dark' || colorTheme === 'cool';
                   return (
                     <div
                       key={n.id}
                       className={`group px-4 py-3 flex items-start gap-3 transition-colors relative
-                        ${!n.read
-                          ? (colorTheme === 'dark' || colorTheme === 'cool'
-                              ? 'bg-purple-900 bg-opacity-25'
-                              : 'bg-purple-50')
-                          : (colorTheme === 'dark' || colorTheme === 'cool' ? '' : '')}
-                        ${n.link_url ? 'cursor-pointer' : ''}`}
+                        ${isUnread ? (dark ? 'bg-purple-900 bg-opacity-25' : 'bg-purple-50') : ''}
+                        ${n.link_url ? 'cursor-pointer hover:bg-opacity-40' : ''}`}
                       onClick={() => n.link_url && window.open(n.link_url, '_blank')}
                     >
                       <span className="text-lg flex-shrink-0 mt-0.5">{cfg.icon}</span>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-semibold leading-snug
-                          ${n.read
-                            ? (colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500')
-                            : (colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-100' : 'text-gray-900')}`}>
+                          ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
                           {n.title}
                         </p>
-                        {cfg.showBody && n.body && (
-                          <p className={`text-xs mt-0.5 leading-relaxed
-                            ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-500' : 'text-gray-400'}`}>
+                        {/* Body: for grades show course name; for canvas items show body */}
+                        {n.body && (
+                          <p className={`text-xs mt-0.5 leading-relaxed line-clamp-2
+                            ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
                             {n.body}
                           </p>
                         )}
+                        {/* Canvas activity: course name */}
+                        {n.course_name_extra && (
+                          <p className={`text-xs mt-0.5 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>{n.course_name_extra}</p>
+                        )}
                         <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`text-[10px] font-semibold uppercase tracking-wide ${n.read ? 'text-gray-400' : cfg.color}`}>{cfg.label}</span>
-                          <span className={`text-[10px] ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>· {timeAgo(n.created_at)}</span>
+                          <span className={`text-[10px] font-semibold uppercase tracking-wide ${!isUnread ? 'text-gray-400' : cfg.color}`}>{cfg.label}</span>
+                          <span className={`text-[10px] ${dark ? 'text-gray-600' : 'text-gray-400'}`}>· {timeAgo(n.event_time)}</span>
+                          {gradeSubLabel(n)}
                         </div>
                       </div>
-                      {/* X to mark as read — only on unread items */}
-                      {showDismiss && !n.read && (
+                      {isUnread && (
                         <button
                           onClick={(e) => dismissOne(n.id, e)}
                           title="Mark as read"
                           className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded
-                            ${colorTheme === 'dark' || colorTheme === 'cool'
-                              ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700'
-                              : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
+                            ${dark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
@@ -5962,51 +6019,40 @@ const PlanAssist = () => {
                   );
                 };
 
-                const unread = notifications.filter(n => !n.read);
-                const read   = notifications.filter(n => n.read);
+                const unread = notifications.filter(n => n.is_unread);
+                const read   = notifications.filter(n => !n.is_unread);
 
                 return (
                   <div>
-                    {/* Unread section */}
                     {unread.length > 0 && (
                       <>
                         <div className={`px-4 py-2 flex items-center justify-between sticky top-0 z-10
-                          ${colorTheme === 'dark' || colorTheme === 'cool'
-                            ? 'bg-gray-800 border-b border-gray-700'
-                            : 'bg-gray-50 border-b border-gray-200'}`}>
+                          ${colorTheme === 'dark' || colorTheme === 'cool' ? 'bg-gray-800 border-b border-gray-700' : 'bg-gray-50 border-b border-gray-200'}`}>
                           <span className={`text-[11px] font-bold uppercase tracking-widest
                             ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500'}`}>
                             New · {unread.length}
                           </span>
-                          <button
-                            onClick={markAllNotifsRead}
-                            className={`text-[11px] font-medium
-                              ${colorTheme === 'dark' || colorTheme === 'cool'
-                                ? 'text-gray-400 hover:text-gray-200'
-                                : 'text-purple-600 hover:text-purple-800'}`}>
+                          <button onClick={markAllNotifsRead}
+                            className={`text-[11px] font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
                             Mark all read
                           </button>
                         </div>
                         <div className={`divide-y ${colorTheme === 'dark' || colorTheme === 'cool' ? 'divide-gray-800' : 'divide-purple-100'}`}>
-                          {unread.map(n => renderNotif(n, true))}
+                          {unread.map(n => renderNotif(n))}
                         </div>
                       </>
                     )}
-
-                    {/* Read section */}
                     {read.length > 0 && (
                       <>
                         <div className={`px-4 py-2 sticky top-0 z-10
-                          ${colorTheme === 'dark' || colorTheme === 'cool'
-                            ? 'bg-gray-800 border-b border-t border-gray-700'
-                            : 'bg-gray-50 border-b border-t border-gray-200'}`}>
+                          ${colorTheme === 'dark' || colorTheme === 'cool' ? 'bg-gray-800 border-b border-t border-gray-700' : 'bg-gray-50 border-b border-t border-gray-200'}`}>
                           <span className={`text-[11px] font-bold uppercase tracking-widest
                             ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-500' : 'text-gray-400'}`}>
                             Earlier
                           </span>
                         </div>
                         <div className={`divide-y ${colorTheme === 'dark' || colorTheme === 'cool' ? 'divide-gray-800' : 'divide-gray-100'}`}>
-                          {read.map(n => renderNotif(n, false))}
+                          {read.map(n => renderNotif(n))}
                         </div>
                       </>
                     )}
@@ -6352,7 +6398,7 @@ const PlanAssist = () => {
       )}
       <div>
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-7xl mx-auto p-6 space-y-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -7297,7 +7343,7 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="h-full bg-gray-50">
+            <div className="h-[calc(100vh-73px)] overflow-y-auto bg-gray-50 scrollbar-stable">
               {/* Header bar */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
                 <div>
@@ -7891,6 +7937,7 @@ const PlanAssist = () => {
 
                 {currentPage === 'agendas' && (() => {
                   return (
+                    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
@@ -8240,6 +8287,7 @@ const PlanAssist = () => {
                           })}
                         </div>
                       )}
+                    </div>
                     </div>
                   );
                 })()}
@@ -8785,6 +8833,7 @@ const PlanAssist = () => {
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
+            <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
             <div className="max-w-3xl mx-auto p-6">
               {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
@@ -9014,6 +9063,7 @@ const PlanAssist = () => {
                 );
               })()}
             </div>
+            </div>
           );
         })()}
 
@@ -9021,7 +9071,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6 relative">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
                 <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.40)' }}>
@@ -9272,7 +9322,7 @@ const PlanAssist = () => {
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -10663,7 +10713,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
@@ -12427,11 +12477,11 @@ const PlanAssist = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'rain', label: '🌧️ Soft Rain', desc: 'Gentle pink noise' },
-                            { id: 'ocean', label: '🌊 Deep Rumble', desc: 'Low frequency hum' },
-                            { id: 'brown', label: '🎵 Brown Noise', desc: 'Deep, smooth tone' },
-                            { id: 'pink', label: '💗 Pink Noise', desc: 'Balanced, calming' },
-                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Pure static' }
+                            { id: 'rain',       label: '🌧️ Rainfall',    desc: 'Layered pink noise with droplet shimmer' },
+                            { id: 'ocean',      label: '🌊 Ocean Waves',  desc: 'Deep swells with sub-bass rumble' },
+                            { id: 'brown',      label: '🎵 Brown Noise',  desc: 'Warm low-end hum with reverb' },
+                            { id: 'pink',       label: '💗 Pink Noise',   desc: 'Balanced, smooth, wide-spectrum' },
+                            { id: 'whitenoise', label: '📻 White Noise',  desc: 'Full-spectrum static' }
                           ].map(sound => (
                             <button
                               key={sound.id}
