@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import AppHPT from './AppHPT';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -536,7 +536,7 @@ const PlanAssist = () => {
   const [isSavingTutorial, setIsSavingTutorial] = useState(false);
   const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
   const [showAddTask, setShowAddTask] = useState(false);
-  const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
+  const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '', course: 'Personal' });
   const [isSavingManualTask, setIsSavingManualTask] = useState(false);
 
   // ── Admin state ───────────────────────────────────────────────────────────
@@ -834,6 +834,33 @@ const PlanAssist = () => {
   const [hptMode, setHptMode] = useState(false);
   const [studioBanners, setStudioBanners] = useState([]); // active HPT studio banners for the student
   const [myStudios, setMyStudios] = useState([]);          // student's studios
+
+  // Notifications sidebar
+  const [notifSidebarOpen, setNotifSidebarOpen] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const [notifUnreadCount, setNotifUnreadCount] = useState(0);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState({
+    notif_grades: true, notif_announcements: true, notif_discussions: true,
+    notif_messages: true, notif_achievements: true, notif_studios: true,
+  });
+
+  // Custom courses
+  const [showAddCourse, setShowAddCourse] = useState(false);
+  const [newCourseName, setNewCourseName] = useState('');
+  const [addingCourse, setAddingCourse] = useState(false);
+
+  // Poll unread notification count every 15 minutes while authenticated
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const interval = setInterval(async () => {
+      try {
+        const data = await apiCall('/notifications/unread-count', 'GET');
+        setNotifUnreadCount(data.count || 0);
+      } catch (e) { /* silently ignore */ }
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated]);
 
   // Calculate selected periods from campus (DST-aware).
   // Prefers tzPeriods from the server (computed at request time, UTC-based DST)
@@ -1345,7 +1372,11 @@ const PlanAssist = () => {
           loadCompletionHistory(),
           loadInsignia(),
           loadBadges(),
+          loadNotifications(),
+          loadNotifPrefs(),
         ]);
+        // Trigger activity refresh async — don't block login flow
+        triggerActivityRefresh();
 
         // Only navigate to Hub if user hasn't already navigated elsewhere
         // (the initial page is already 'hub'; navigating here again would yank
@@ -1644,6 +1675,8 @@ const PlanAssist = () => {
       loadCanvasAnnouncements();
       loadCanvasDiscussions();
       loadActivityStream();
+      triggerActivityRefresh();
+      loadNotifications();
       // 5-min polling for activity stream while tab is open
       const actInterval = setInterval(loadActivityStream, 300000);
       setActivityPollingRef(prev => { if (prev) clearInterval(prev); return actInterval; });
@@ -3505,9 +3538,10 @@ const PlanAssist = () => {
         estimatedTime: parseInt(addTaskForm.estimatedTime),
         description: addTaskForm.description || '',
         url: addTaskForm.url || 'https://planassist.onrender.com/',
+        course: addTaskForm.course || 'Personal',
       });
       setShowAddTask(false);
-      setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' });
+      setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '', course: 'Personal' });
       await loadTasks(); // refresh task list
     } catch (err) {
       console.error('Failed to create task:', err);
@@ -5322,6 +5356,55 @@ const PlanAssist = () => {
     } catch (e) { /* silently ignore */ }
   };
 
+  const loadNotifications = async () => {
+    setNotifLoading(true);
+    try {
+      const data = await apiCall('/notifications', 'GET');
+      setNotifications(Array.isArray(data) ? data : []);
+      setNotifUnreadCount((Array.isArray(data) ? data : []).filter(n => !n.read).length);
+    } catch (e) { /* silently ignore */ }
+    finally { setNotifLoading(false); }
+  };
+
+  const loadNotifPrefs = async () => {
+    try {
+      const data = await apiCall('/user/notification-prefs', 'GET');
+      if (data) setNotifPrefs(prev => ({ ...prev, ...data }));
+    } catch (e) { /* silently ignore */ }
+  };
+
+  const markAllNotifsRead = async () => {
+    try {
+      await apiCall('/notifications/read-all', 'POST');
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      setNotifUnreadCount(0);
+    } catch (e) { /* silently ignore */ }
+  };
+
+  const openNotifSidebar = () => {
+    if (currentSessionTask || agendaRunning) return;
+    setNotifSidebarOpen(true);
+    markAllNotifsRead();
+  };
+
+  const triggerActivityRefresh = async () => {
+    try { await apiCall('/activity/refresh', 'POST'); }
+    catch (e) { /* silently ignore */ }
+  };
+
+  const handleAddCustomCourse = async () => {
+    if (!newCourseName.trim()) return;
+    setAddingCourse(true);
+    try {
+      const data = await apiCall('/courses/custom', 'POST', { name: newCourseName.trim() });
+      setCourses(prev => [...prev, data]);
+      setNewCourseName('');
+      setShowAddCourse(false);
+    } catch (e) {
+      alert(e.message || 'Failed to add course');
+    } finally { setAddingCourse(false); }
+  };
+
   const calculateHubStats = () => {
     if (!completionHistory || completionHistory.length === 0) {
       setHubStats({
@@ -5397,6 +5480,9 @@ const PlanAssist = () => {
       loadGoals();
       loadStudioBanners();
       loadMyStudios();
+      loadNotifications();
+      loadNotifPrefs();
+      triggerActivityRefresh();
       
       // Delay initial feed/leaderboard load by 2s to let the server warm up
       // (Render free tier spins down after inactivity)
@@ -5712,6 +5798,21 @@ const PlanAssist = () => {
             <button onClick={() => !isLoadingTasks && !navLocked && handleAccountPageOpen()} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <UserCircle className="w-5 h-5" />
             </button>
+            <button
+              onClick={() => !navLocked && openNotifSidebar()}
+              disabled={navLocked}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 relative ${notifSidebarOpen ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}
+              title="Notifications"
+            >
+              <span className="relative">
+                <Bell className="w-5 h-5" />
+                {notifUnreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
+                    {notifUnreadCount > 99 ? '99+' : notifUnreadCount}
+                  </span>
+                )}
+              </span>
+            </button>
             {user?.isAdmin && (
               <button
                 onClick={() => { setAdminSection('users'); setCurrentPage('admin'); loadAdminUsers(); }}
@@ -5734,6 +5835,104 @@ const PlanAssist = () => {
           </div>
         </div>
       </nav>
+
+      {/* ── NOTIFICATIONS SIDEBAR ────────────────────────────────────── */}
+      {notifSidebarOpen && (
+        <>
+          {/* Backdrop */}
+          <div className="fixed inset-0 z-30 bg-black bg-opacity-20" onClick={() => setNotifSidebarOpen(false)} />
+          {/* Sidebar */}
+          <div className={`fixed top-0 right-0 h-full w-96 z-40 shadow-2xl flex flex-col
+            ${colorTheme === 'dark' ? 'bg-gray-900 text-gray-100' :
+              colorTheme === 'cool' ? 'bg-gray-900 text-green-100' :
+              colorTheme === 'warm' ? 'bg-pink-50 text-gray-900' :
+              'bg-white text-gray-900'}`}>
+            {/* Header */}
+            <div className={`flex items-center justify-between px-5 py-4 border-b flex-shrink-0
+              ${colorTheme === 'dark' || colorTheme === 'cool' ? 'border-gray-700' : 'border-gray-200'}`}>
+              <div className="flex items-center gap-2">
+                <Bell className="w-5 h-5 text-purple-500" />
+                <h2 className="text-base font-bold">Notifications</h2>
+              </div>
+              <button onClick={() => setNotifSidebarOpen(false)}
+                className={`p-1.5 rounded-lg ${colorTheme === 'dark' || colorTheme === 'cool' ? 'hover:bg-gray-700' : 'hover:bg-gray-100'}`}>
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Notification list */}
+            <div className="flex-1 overflow-y-auto">
+              {notifLoading ? (
+                <div className="flex items-center justify-center py-16">
+                  <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                </div>
+              ) : notifications.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <BellOff className={`w-10 h-10 mb-3 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-300'}`} />
+                  <p className={`text-sm font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-400'}`}>No notifications yet</p>
+                  <p className={`text-xs mt-1 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>Grade updates, announcements, achievements and more will appear here.</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-100">
+                  {notifications.map(n => {
+                    const typeConfig = {
+                      grade:        { icon: '📊', label: 'Grade',        color: 'text-green-600' },
+                      announcement: { icon: '📢', label: 'Announcement', color: 'text-blue-600' },
+                      discussion:   { icon: '💬', label: 'Discussion',   color: 'text-indigo-600' },
+                      message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600' },
+                      insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600' },
+                      badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600' },
+                      studio:       { icon: '📚', label: 'Studio',       color: 'text-purple-600' },
+                    }[n.type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500' };
+                    const timeAgo = (() => {
+                      const diff = Date.now() - new Date(n.created_at).getTime();
+                      const mins = Math.floor(diff / 60000);
+                      if (mins < 1) return 'just now';
+                      if (mins < 60) return `${mins}m ago`;
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs < 24) return `${hrs}h ago`;
+                      return `${Math.floor(hrs / 24)}d ago`;
+                    })();
+                    return (
+                      <div
+                        key={n.id}
+                        className={`px-5 py-3.5 flex items-start gap-3 transition-colors
+                          ${!n.read ? (colorTheme === 'dark' || colorTheme === 'cool' ? 'bg-purple-900 bg-opacity-20' : 'bg-purple-50') : ''}
+                          ${n.link_url ? 'cursor-pointer hover:bg-opacity-80' : ''}`}
+                        onClick={() => n.link_url && window.open(n.link_url, '_blank')}
+                      >
+                        <span className="text-xl flex-shrink-0 mt-0.5">{typeConfig.icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2">
+                            <p className={`text-sm font-semibold leading-snug ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-100' : 'text-gray-900'}`}>{n.title}</p>
+                            {!n.read && <div className="w-2 h-2 rounded-full bg-purple-500 flex-shrink-0 mt-1.5" />}
+                          </div>
+                          {n.body && <p className={`text-xs mt-0.5 leading-relaxed ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400' : 'text-gray-500'}`}>{n.body}</p>}
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className={`text-[10px] font-semibold uppercase tracking-wide ${typeConfig.color}`}>{typeConfig.label}</span>
+                            <span className={`text-[10px] ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-600' : 'text-gray-400'}`}>· {timeAgo}</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className={`px-5 py-3 border-t flex-shrink-0
+              ${colorTheme === 'dark' || colorTheme === 'cool' ? 'border-gray-700' : 'border-gray-200'}`}>
+              <button
+                onClick={() => { setNotifSidebarOpen(false); setAccountTab('settings'); setSettingsSubTab('activity'); setCurrentPage('account'); }}
+                className={`text-xs font-medium ${colorTheme === 'dark' || colorTheme === 'cool' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Notification Settings →
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* Feature 1: Period Zoom Banner */}
       {zoomBanner && (
@@ -6493,7 +6692,7 @@ const PlanAssist = () => {
                       </div>
                       <div className="flex gap-2 items-center">
                         <button
-                          onClick={() => { setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '' }); setShowAddTask(true); }}
+                          onClick={() => { setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '', course: 'Personal' }); setShowAddTask(true); }}
                           className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 font-medium flex items-center gap-2 transition-all"
                         >
                           <Plus className="w-4 h-4" />
@@ -9162,6 +9361,7 @@ const PlanAssist = () => {
                     { id: 'courses',  label: 'Courses' },
                     { id: 'schedule', label: 'Schedule' },
                     { id: 'calendar', label: 'Calendar' },
+                    { id: 'activity', label: 'Activity' },
                     { id: 'other',    label: 'Other' },
                   ];
                   return (
@@ -9186,7 +9386,41 @@ const PlanAssist = () => {
                       {/* ── Courses sub-tab ── */}
                       {settingsSubTab === 'courses' && (
                         <div>
-                          <p className="text-sm text-gray-500 mb-4">Toggle courses on or off to show or hide their tasks everywhere in PlanAssist. Customize colors per course.</p>
+                          <div className="flex items-center justify-between mb-4">
+                            <p className="text-sm text-gray-500">Toggle courses on or off to show or hide their tasks everywhere in PlanAssist. Customize colors per course.</p>
+                            <button
+                              onClick={() => { setNewCourseName(''); setShowAddCourse(true); }}
+                              className="flex items-center gap-1.5 px-3 py-2 bg-green-500 text-white rounded-lg text-sm font-semibold hover:bg-green-600 flex-shrink-0 ml-4"
+                            >
+                              <Plus className="w-4 h-4" /> Add Course
+                            </button>
+                          </div>
+
+                          {/* Add Course inline form */}
+                          {showAddCourse && (
+                            <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
+                              <input
+                                type="text"
+                                value={newCourseName}
+                                onChange={e => setNewCourseName(e.target.value)}
+                                onKeyDown={e => e.key === 'Enter' && handleAddCustomCourse()}
+                                placeholder="Course name (e.g. Piano Practice)"
+                                autoFocus
+                                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500"
+                              />
+                              <button
+                                onClick={handleAddCustomCourse}
+                                disabled={addingCourse || !newCourseName.trim()}
+                                className="px-4 py-2 bg-green-500 text-white rounded-lg text-sm font-semibold hover:bg-green-600 disabled:opacity-50"
+                              >
+                                {addingCourse ? '…' : 'Add'}
+                              </button>
+                              <button onClick={() => setShowAddCourse(false)} className="text-gray-400 hover:text-gray-600">
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          )}
+
                           {courses.length === 0 ? (
                             <p className="text-gray-400 text-sm">No courses found. Sync Canvas to load your courses.</p>
                           ) : (
@@ -9369,6 +9603,74 @@ const PlanAssist = () => {
                       )}
 
                       {/* ── Other sub-tab ── */}
+                      {/* ── Activity sub-tab ── */}
+                      {settingsSubTab === 'activity' && (
+                        <div className="space-y-6">
+                          {/* Notification streams */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-1">Notifications</h3>
+                            <p className="text-xs text-gray-400 mb-3">Choose which activity streams appear in your Notifications sidebar. PlanAssist checks for updates every 15 minutes.</p>
+                            <div className="space-y-2">
+                              {[
+                                { key: 'notif_grades',        label: 'Grades',            desc: 'New grades and score updates from Canvas' },
+                                { key: 'notif_announcements', label: 'Announcements',      desc: 'Course announcements posted by teachers' },
+                                { key: 'notif_discussions',   label: 'Discussions',        desc: 'Recent activity in Canvas discussion boards' },
+                                { key: 'notif_messages',      label: 'Messages',           desc: 'Canvas inbox messages and conversations' },
+                                { key: 'notif_achievements',  label: 'Achievements',       desc: 'New Insignia tiers and Gallery badges you earn' },
+                                { key: 'notif_studios',       label: 'Studios',            desc: 'When you are added to a new HPT Studio' },
+                              ].map(({ key, label, desc }) => (
+                                <div key={key} className="flex items-start justify-between gap-4 p-3 rounded-xl border border-gray-200 bg-white">
+                                  <div>
+                                    <p className="text-sm font-medium text-gray-900">{label}</p>
+                                    <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
+                                  </div>
+                                  <button
+                                    onClick={async () => {
+                                      const newVal = !notifPrefs[key];
+                                      const updated = { ...notifPrefs, [key]: newVal };
+                                      setNotifPrefs(updated);
+                                      try {
+                                        await apiCall('/user/notification-prefs', 'PUT', {
+                                          notif_grades: updated.notif_grades,
+                                          notif_announcements: updated.notif_announcements,
+                                          notif_discussions: updated.notif_discussions,
+                                          notif_messages: updated.notif_messages,
+                                          notif_achievements: updated.notif_achievements,
+                                          notif_studios: updated.notif_studios,
+                                        });
+                                      } catch (e) { setNotifPrefs(prev => ({ ...prev, [key]: !newVal })); }
+                                    }}
+                                    className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ${notifPrefs[key] ? 'bg-purple-600' : 'bg-gray-200'}`}
+                                  >
+                                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${notifPrefs[key] ? 'translate-x-5' : 'translate-x-0'}`} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          {/* Privacy — moved from Other */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy</h3>
+                            <div className="border border-gray-200 rounded-xl p-4">
+                              <div className="flex items-start gap-3">
+                                <input type="checkbox" checked={user?.showInFeed === true}
+                                  onChange={async (e) => {
+                                    const newVal = e.target.checked;
+                                    setUser(prev => ({ ...prev, showInFeed: newVal }));
+                                    try { await apiCall('/user/feed-preference', 'PUT', { showInFeed: newVal }); }
+                                    catch (err) { setUser(prev => ({ ...prev, showInFeed: !newVal })); console.error(err); }
+                                  }}
+                                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                                <div>
+                                  <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
+                                  <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
                       {settingsSubTab === 'other' && (
                         <div className="space-y-6">
                           {/* Display */}
@@ -9400,26 +9702,6 @@ const PlanAssist = () => {
                                     )}
                                   </button>
                                 ))}
-                              </div>
-                            </div>
-                          </div>
-                          {/* Privacy */}
-                          <div>
-                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Privacy</h3>
-                            <div className="border border-gray-200 rounded-xl p-4">
-                              <div className="flex items-start gap-3">
-                                <input type="checkbox" checked={user?.showInFeed === true}
-                                  onChange={async (e) => {
-                                    const newVal = e.target.checked;
-                                    setUser(prev => ({ ...prev, showInFeed: newVal }));
-                                    try { await apiCall('/user/feed-preference', 'PUT', { showInFeed: newVal }); }
-                                    catch (err) { setUser(prev => ({ ...prev, showInFeed: !newVal })); console.error(err); }
-                                  }}
-                                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
-                                <div>
-                                  <p className="font-medium text-gray-900">Show my task completions in Live Activity feed</p>
-                                  <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
-                                </div>
                               </div>
                             </div>
                           </div>
@@ -11631,6 +11913,20 @@ const PlanAssist = () => {
                   placeholder="Any notes or context..."
                   rows={2}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent resize-none" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Course <span className="text-gray-400 font-normal">(optional)</span></label>
+                <select
+                  value={addTaskForm.course || 'Personal'}
+                  onChange={e => setAddTaskForm(prev => ({ ...prev, course: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                >
+                  <option value="Personal">Personal</option>
+                  {courses.filter(c => c.enabled !== false && c.manually_created).map(c => (
+                    <option key={c.id} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Only custom courses you've added appear here. Canvas courses are synced automatically.</p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">URL <span className="text-gray-400 font-normal">(optional)</span></label>
