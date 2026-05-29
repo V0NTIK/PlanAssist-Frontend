@@ -6769,7 +6769,6 @@ const PlanAssist = () => {
             )}
           </div>
           </div>
-          </div>
         )}
         {currentPage === 'tasks' && (
           <div className="flex h-[calc(100vh-73px)] overflow-hidden">
