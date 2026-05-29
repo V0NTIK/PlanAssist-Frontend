@@ -5710,7 +5710,7 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen" data-theme={colorTheme} data-planassist-theme={colorTheme}>
+    <div className="bg-gradient-to-br from-gray-50 to-blue-50 h-screen overflow-hidden flex flex-col" data-theme={colorTheme} data-planassist-theme={colorTheme}>
 
       {/* ── Session Expired Modal ── */}
       {sessionExpired && (
@@ -6346,8 +6346,9 @@ const PlanAssist = () => {
           </div>
         </div>
       )}
-      <div className={currentPage === 'sessions' ? '' : 'py-6'}>
+      <div>
         {currentPage === 'hub' && (
+          <div className="h-[calc(100vh-73px)] overflow-y-auto">
           <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
@@ -6766,6 +6767,8 @@ const PlanAssist = () => {
                 </button>
               </div>
             )}
+          </div>
+          </div>
           </div>
         )}
         {currentPage === 'tasks' && (
@@ -9017,6 +9020,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
+          <div className="h-[calc(100vh-73px)] overflow-y-auto">
           <div className="max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
@@ -9265,9 +9269,11 @@ const PlanAssist = () => {
               }
             `}</style>
           </div>
+          </div>
           );
         })()}
         {currentPage === 'account' && (
+          <div className="h-[calc(100vh-73px)] overflow-y-auto">
           <div className="max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
@@ -10659,6 +10665,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
+          <div className="h-[calc(100vh-73px)] overflow-y-auto">
           <div className="max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
@@ -11570,9 +11577,10 @@ const PlanAssist = () => {
               </div>
             </div>
           </div>
+          </div>
         )}
 
-      </div>{/* ── closes <div className="py-6"> ── */}
+      </div>{/* ── closes page content wrapper ── */}
 
       {/* ── Enhance Schedule Dialog ─────────────────────────────────────────── */}
       {showEnhanceDialog && (() => {
@@ -11889,6 +11897,7 @@ const PlanAssist = () => {
             </div>
           </div>
         </div>
+          </div>
       )}
       
       {/* Task Workspace Modal */}
@@ -12575,7 +12584,6 @@ const PlanAssist = () => {
               </div>
             </div>
           </div>
-        </div>
       )}
     </div>
   );
