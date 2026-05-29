@@ -1114,7 +1114,7 @@ function MonitorPage({ token, studios }) {
                             )}
                             <p className="text-xs text-gray-400">
                               Due: {student.activeTask.deadline_date
-                                ? new Date(student.activeTask.deadline_date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                ? new Date(String(student.activeTask.deadline_date).slice(0,10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                                 : '—'}
                               {student.activeTask.session_heartbeat &&
                                 <span className="ml-2 text-green-600">● {timeSinceHeartbeat(student.activeTask.session_heartbeat)}</span>}
@@ -1176,7 +1176,7 @@ function MonitorPage({ token, studios }) {
                         ) : (
                           <div className="space-y-1.5 max-h-48 overflow-y-auto">
                             {student.urgentTasks.map(t => {
-                              const due = new Date(t.deadline_date + 'T00:00:00');
+                              const due = new Date(String(t.deadline_date).slice(0,10) + 'T00:00:00');
                               const today = new Date(); today.setHours(0,0,0,0);
                               const overdue = due < today;
                               return (
