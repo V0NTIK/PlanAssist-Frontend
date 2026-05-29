@@ -5384,7 +5384,11 @@ const PlanAssist = () => {
   const openNotifSidebar = () => {
     if (currentSessionTask || agendaRunning) return;
     setNotifSidebarOpen(true);
-    // No longer auto-marks-all-read — user can dismiss individually or use Mark all read
+    // Load immediately to show cached data, trigger refresh in background,
+    // then reload again after a short delay to pick up anything the refresh wrote
+    loadNotifications();
+    triggerActivityRefresh();
+    setTimeout(() => loadNotifications(), 4000);
   };
 
   const triggerActivityRefresh = async () => {
