@@ -6348,8 +6348,7 @@ const PlanAssist = () => {
       )}
       <div>
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto">
-          <div className="max-w-7xl mx-auto p-6 space-y-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -6767,7 +6766,6 @@ const PlanAssist = () => {
                 </button>
               </div>
             )}
-          </div>
           </div>
         )}
         {currentPage === 'tasks' && (
@@ -9019,8 +9017,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto">
-          <div className="max-w-6xl mx-auto p-6 relative">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
                 <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.40)' }}>
@@ -9268,12 +9265,10 @@ const PlanAssist = () => {
               }
             `}</style>
           </div>
-          </div>
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto">
-          <div className="max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -10664,8 +10659,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto">
-          <div className="max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
@@ -11576,10 +11570,9 @@ const PlanAssist = () => {
               </div>
             </div>
           </div>
-          </div>
         )}
 
-      </div>{/* ── closes page content wrapper ── */}
+      </div>{/* ── closes <div className="py-6"> ── */}
 
       {/* ── Enhance Schedule Dialog ─────────────────────────────────────────── */}
       {showEnhanceDialog && (() => {
@@ -11896,7 +11889,6 @@ const PlanAssist = () => {
             </div>
           </div>
         </div>
-          </div>
       )}
       
       {/* Task Workspace Modal */}
@@ -12583,6 +12575,7 @@ const PlanAssist = () => {
               </div>
             </div>
           </div>
+        </div>
       )}
     </div>
   );
