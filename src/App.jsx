@@ -4321,12 +4321,15 @@ const PlanAssist = () => {
       system: `
         :root { color-scheme: light; }
         [data-planassist-theme="system"] { --pa-bg-page: #f0f4ff; --pa-bg-page2: #eff6ff; }
-        /* Scrollbar */
+        /* Scrollbar — 7px wide, always rendered at the screen edge.
+           scrollbar-gutter:stable reserves the track space even when no scrollbar
+           is visible, so the layout never shifts when zooming in/out. */
         [data-planassist-theme="system"] ::-webkit-scrollbar { width: 7px; height: 7px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-track { background: #f1f5f9; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
         [data-planassist-theme="system"] * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+        [data-planassist-theme="system"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards (Activity/Goals/Marks pane spinners) */
         [data-planassist-theme="system"] .pa-sync-overlay { background: rgba(255,255,255,0.82); }
         [data-planassist-theme="system"] .pa-sync-card { background: #ffffff; box-shadow: 0 8px 32px rgba(0,0,0,0.18); }
@@ -4342,6 +4345,7 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb { background: #f48fb1; border-radius: 4px; }
         [data-planassist-theme="warm"] ::-webkit-scrollbar-thumb:hover { background: #c2185b; }
         [data-planassist-theme="warm"] * { scrollbar-color: #f48fb1 #fce4ec; scrollbar-width: thin; }
+        [data-planassist-theme="warm"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="warm"] .pa-sync-overlay { background: rgba(255,240,245,0.88); }
         [data-planassist-theme="warm"] .pa-sync-card { background: #fff5f8; box-shadow: 0 8px 32px rgba(194,24,91,0.15); }
@@ -4500,6 +4504,7 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb { background: #2e7d32; border-radius: 4px; }
         [data-planassist-theme="cool"] ::-webkit-scrollbar-thumb:hover { background: #43a047; }
         [data-planassist-theme="cool"] * { scrollbar-color: #2e7d32 #0a0f0a; scrollbar-width: thin; }
+        [data-planassist-theme="cool"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="cool"] .pa-sync-overlay { background: rgba(10,15,10,0.82); }
         [data-planassist-theme="cool"] .pa-sync-card { background: #192218; box-shadow: 0 8px 32px rgba(0,0,0,0.50); }
@@ -4691,6 +4696,7 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb { background: #3d3d6b; border-radius: 4px; }
         [data-planassist-theme="dark"] ::-webkit-scrollbar-thumb:hover { background: #7c4dff; }
         [data-planassist-theme="dark"] * { scrollbar-color: #3d3d6b #0d0d14; scrollbar-width: thin; }
+        [data-planassist-theme="dark"] .scrollbar-stable { scrollbar-gutter: stable; }
         /* Sync overlay cards */
         [data-planassist-theme="dark"] .pa-sync-overlay { background: rgba(13,13,20,0.82); }
         [data-planassist-theme="dark"] .pa-sync-card { background: #13131f; box-shadow: 0 8px 32px rgba(0,0,0,0.60); }
@@ -5932,6 +5938,7 @@ const PlanAssist = () => {
                   message:      { icon: '✉️',  label: 'Message',     color: 'text-purple-600' },
                   insignia:     { icon: '🎖️', label: 'Insignia',    color: 'text-amber-600'  },
                   badge:        { icon: '🏆', label: 'Badge',        color: 'text-yellow-600' },
+                  studio:       { icon: '📚', label: 'Studio',       color: 'text-indigo-500' },
                 }[type] || { icon: '🔔', label: 'Notification', color: 'text-gray-500' });
 
                 const dismissOne = async (id, e) => {
@@ -5993,21 +6000,14 @@ const PlanAssist = () => {
 
                 // ── ALERTS TAB: unread grades, insignia, badges, studio joins ──
                 if (notifTab === 'alerts') {
+                  // All alert types come from the same notifications fetch (no separate data source).
+                  // Grades, insignia, badges: unread items only.
+                  // Studios: sourced from hpt_studio_members.unread via the UNION — same fetch.
                   const alertItems = notifications.filter(n => n.is_unread &&
-                    ['grade','insignia','badge'].includes(n.type)
+                    ['grade','insignia','badge','studio'].includes(n.type)
                   );
-                  // Studio joins come from activityData.studios — show as static entries
-                  const studioAlerts = (activityData.studios || []).map(s => ({
-                    id: `studio_${s.id}`,
-                    type: 'studio',
-                    title: `You're in ${s.name}`,
-                    body: s.teacher_name ? `Teacher: ${s.teacher_name}` : null,
-                    is_unread: false,
-                    link_url: null,
-                    event_time: s.joined_at,
-                  }));
 
-                  if (alertItems.length === 0 && studioAlerts.length === 0) {
+                  if (alertItems.length === 0) {
                     return (
                       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
                         <BellOff className={`w-10 h-10 mb-3 ${dark ? 'text-gray-600' : 'text-gray-300'}`} />
@@ -6016,18 +6016,23 @@ const PlanAssist = () => {
                       </div>
                     );
                   }
+
+                  // Split into unread non-studio and studio rows for visual separation
+                  const mainAlerts   = alertItems.filter(n => n.type !== 'studio');
+                  const studioAlerts = alertItems.filter(n => n.type === 'studio');
+
                   return (
                     <div>
-                      {alertItems.length > 0 && (
+                      {mainAlerts.length > 0 && (
                         <>
                           <div className={`px-4 py-2 flex items-center justify-between sticky top-0 z-10 ${dark ? 'bg-gray-800 border-b border-gray-700' : 'bg-gray-50 border-b border-gray-200'}`}>
-                            <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Unread · {alertItems.length}</span>
+                            <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-400' : 'text-gray-500'}`}>Unread · {mainAlerts.length}</span>
                             <button onClick={markAllNotifsRead} className={`text-[11px] font-medium ${dark ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
                               Mark all read
                             </button>
                           </div>
                           <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-purple-100'}`}>
-                            {alertItems.map(n => renderRow(n))}
+                            {mainAlerts.map(n => renderRow(n))}
                           </div>
                         </>
                       )}
@@ -6037,7 +6042,7 @@ const PlanAssist = () => {
                             <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-500' : 'text-gray-400'}`}>Studios</span>
                           </div>
                           <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-gray-100'}`}>
-                            {studioAlerts.map(n => renderRow({ ...n, type: 'studio', is_unread: false }))}
+                            {studioAlerts.map(n => renderRow(n))}
                           </div>
                         </>
                       )}
@@ -6408,7 +6413,7 @@ const PlanAssist = () => {
       )}
       <div>
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-7xl mx-auto p-6 space-y-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -7353,9 +7358,9 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="h-full bg-gray-50">
-              {/* Header bar */}
-              <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+            <div className="h-[calc(100vh-73px)] bg-gray-50 flex flex-col overflow-hidden">
+              {/* Header bar — fixed height, never scrolls */}
+              <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
                 <div>
                   <h1 className="text-xl font-bold text-gray-900">Today's Focus</h1>
                   <p className="text-gray-500 text-xs mt-0.5">{now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
@@ -7376,12 +7381,12 @@ const PlanAssist = () => {
               </div>
 
               {sessionsLoading || sessionPrioritiesLoading ? (
-                <div className="flex items-center justify-center py-32"><div className="w-10 h-10 border-4 border-purple-400 border-t-transparent rounded-full animate-spin" /></div>
+                <div className="flex-1 flex items-center justify-center"><div className="w-10 h-10 border-4 border-purple-400 border-t-transparent rounded-full animate-spin" /></div>
               ) : (
-                <div className="flex h-full" style={{ minHeight: 'calc(100vh - 120px)' }}>
+                <div className="flex flex-1 min-h-0">
 
                   {/* ── LEFT PANEL: Focus Picker ── */}
-                  <div className="w-72 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col" style={{ minWidth: '220px', maxWidth: '300px' }}>
+                  <div className="w-72 flex-shrink-0 bg-white border-r border-gray-200 flex flex-col min-h-0" style={{ minWidth: '220px', maxWidth: '300px' }}>
                     <div className="p-4 border-b border-gray-100">
                       <div className="flex items-center justify-between mb-1">
                         <div className="flex items-center gap-1.5">
@@ -7505,7 +7510,7 @@ const PlanAssist = () => {
                   </div>
 
                   {/* ── RIGHT PANEL: Dashboard ── */}
-                  <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+                  <div className="flex-1 min-w-0 flex flex-col min-h-0 overflow-hidden">
                     {focusTasks && focusTasks.length > 0 ? (
                       <>
                         {/* View toggle tabs */}
@@ -7947,6 +7952,7 @@ const PlanAssist = () => {
 
                 {currentPage === 'agendas' && (() => {
                   return (
+                    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
@@ -8296,6 +8302,7 @@ const PlanAssist = () => {
                           })}
                         </div>
                       )}
+                    </div>
                     </div>
                   );
                 })()}
@@ -8841,6 +8848,7 @@ const PlanAssist = () => {
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
+            <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
             <div className="max-w-3xl mx-auto p-6">
               {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
@@ -9070,6 +9078,7 @@ const PlanAssist = () => {
                 );
               })()}
             </div>
+            </div>
           );
         })()}
 
@@ -9077,7 +9086,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6 relative">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
                 <div className="fixed inset-0 z-[800] flex items-center justify-center" style={{ backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', background: 'rgba(0,0,0,0.40)' }}>
@@ -9328,7 +9337,7 @@ const PlanAssist = () => {
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -10714,7 +10723,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
