@@ -10081,6 +10081,7 @@ const PlanAssist = () => {
                     { key: 'messages',      label: '✉️ Messages' },
                     { key: 'achievements',  label: '🏆 Achievements' },
                     { key: 'studios',       label: '📚 Studios' },
+                    { key: 'resolutions',   label: '✅ Resolutions' },
                   ];
 
                   const isRefreshing = activityRefreshLoading;
@@ -10096,11 +10097,6 @@ const PlanAssist = () => {
                   const announcementsFiltered = filterBySearch(announcements, ['title','body','courseName']);
                   const discussionsFiltered   = filterBySearch(discussions,   ['title','body','courseName']);
                   const messagesFiltered      = filterBySearch(messages,      ['title','body']);
-
-                  const INSIGNIA_THRESHOLDS_LABELS = [
-                    [1,'Beginner'],[5,'Explorer'],[10,'Consistent'],[20,'Dedicated'],
-                    [30,'Focused'],[50,'Advanced'],[75,'Expert'],[100,'Master'],
-                  ];
 
                   return (
                     <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6 relative">
@@ -10132,7 +10128,7 @@ const PlanAssist = () => {
                       {/* Filter pills */}
                       <div className="flex flex-wrap gap-2 mb-4">
                         {FILTERS.map(f => (
-                          <button key={f.key} onClick={() => { setActivityFilter(f.key); setActivitySearch(''); }}
+                          <button key={f.key} onClick={() => { setActivityFilter(f.key); setActivitySearch(''); if (f.key === 'resolutions') loadResolvedTasks('', resolvedSort); }}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                               activityFilter === f.key ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                             }`}>
@@ -10290,51 +10286,75 @@ const PlanAssist = () => {
                       {/* ── Achievements ── */}
                       {activityFilter === 'achievements' && (
                         <div className="space-y-4">
-                          {/* Insignia */}
+                          {/* Insignia — uses the canonical INSIGNIA_THRESHOLDS from outer scope */}
                           <div>
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🎖️ Insignia</p>
-                            {insignia.length === 0 ? (
-                              <p className="text-gray-400 text-sm text-center py-4">No Insignia unlocked yet. Complete tasks to earn them!</p>
-                            ) : (
-                              <div className="space-y-2">
-                                {INSIGNIA_THRESHOLDS_LABELS.map(([threshold, label]) => {
-                                  const unlocked = insignia.find(i => i.label === label);
-                                  return (
-                                    <div key={label} className={`flex items-center justify-between p-3 rounded-xl border ${unlocked ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200 opacity-50'}`}>
-                                      <div className="flex items-center gap-2">
-                                        <span className="text-lg">{unlocked ? '🎖️' : '🔒'}</span>
-                                        <div>
-                                          <p className={`text-sm font-semibold ${unlocked ? 'text-amber-800' : 'text-gray-500'}`}>{label}</p>
-                                          <p className="text-xs text-gray-400">{threshold} completion day{threshold !== 1 ? 's' : ''}</p>
-                                        </div>
+                            <div className="space-y-2">
+                              {INSIGNIA_THRESHOLDS.filter(([, label]) => label !== 'Default').map(([threshold, label]) => {
+                                const unlocked = (activityData.insignia || []).find(i => i.label === label)
+                                              || insigniaUnlocked.includes(label) && { label, unlocked_at: null };
+                                return (
+                                  <div key={label} className={`flex items-center justify-between p-3 rounded-xl border ${unlocked ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200 opacity-50'}`}>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-lg">{unlocked ? '🎖️' : '🔒'}</span>
+                                      <div>
+                                        <p className={`text-sm font-semibold ${unlocked ? 'text-amber-800' : 'text-gray-500'}`}>{label}</p>
+                                        <p className="text-xs text-gray-400">{threshold} completion day{threshold !== 1 ? 's' : ''}</p>
                                       </div>
-                                      {unlocked?.unlocked_at && (
-                                        <p className="text-xs text-amber-600">{new Date(unlocked.unlocked_at).toLocaleDateString()}</p>
-                                      )}
                                     </div>
-                                  );
-                                })}
-                              </div>
-                            )}
+                                    {unlocked?.unlocked_at && (
+                                      <p className="text-xs text-amber-600">{new Date(unlocked.unlocked_at).toLocaleDateString()}</p>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
-                          {/* Badges */}
+                          {/* Badges — uses BADGE_DEFS from outer scope for proper names */}
                           <div>
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🏆 Badges</p>
-                            {badges.length === 0 ? (
-                              <p className="text-gray-400 text-sm text-center py-4">No badges earned yet.</p>
-                            ) : (
-                              <div className="space-y-2">
-                                {badges.map(b => (
-                                  <div key={b.id} className="flex items-center justify-between p-3 rounded-xl border bg-yellow-50 border-yellow-200">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-lg">🏆</span>
-                                      <p className="text-sm font-semibold text-yellow-800 capitalize">{b.badge_key.replace(/_/g, ' ')}</p>
-                                    </div>
-                                    {b.awarded_at && <p className="text-xs text-yellow-600">{new Date(b.awarded_at).toLocaleDateString()}</p>}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                            {(() => {
+                              const BDEFS = {
+                                first_completion: { emoji: '🎯', name: 'First Step' },
+                                tasks_10:  { emoji: '📚', name: 'Getting Started' },
+                                tasks_25:  { emoji: '💪', name: 'Building Momentum' },
+                                tasks_50:  { emoji: '🔥', name: 'On Fire' },
+                                tasks_100: { emoji: '💯', name: 'Century' },
+                                tasks_250: { emoji: '⚡', name: 'Powerhouse' },
+                                tasks_500: { emoji: '👑', name: 'Legend' },
+                                streak_7:  { emoji: '📅', name: 'Week Warrior' },
+                                streak_14: { emoji: '🌟', name: 'Fortnight Focus' },
+                                streak_30: { emoji: '🗓️', name: 'Monthly Devotion' },
+                                streak_60: { emoji: '🏆', name: 'Champion' },
+                                streak_100:{ emoji: '🎖️', name: 'Elite' },
+                                day_3:     { emoji: '🌅', name: 'Productive Day' },
+                                day_5:     { emoji: '⚡', name: 'High Output' },
+                                day_10:    { emoji: '🚀', name: 'Beast Mode' },
+                                day_20:    { emoji: '🌋', name: 'Unstoppable' },
+                                early_bird:{ emoji: '🐦', name: 'Early Bird' },
+                                night_owl: { emoji: '🦉', name: 'Night Owl' },
+                              };
+                              const earnedBadges = activityData.badges?.length > 0 ? activityData.badges : userBadges;
+                              if (earnedBadges.length === 0) return (
+                                <p className="text-gray-400 text-sm text-center py-4">No badges earned yet.</p>
+                              );
+                              return (
+                                <div className="space-y-2">
+                                  {earnedBadges.map(b => {
+                                    const def = BDEFS[b.badge_key] || { emoji: '🏅', name: b.badge_key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') };
+                                    return (
+                                      <div key={b.id || b.badge_key} className="flex items-center justify-between p-3 rounded-xl border bg-yellow-50 border-yellow-200">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-lg">{def.emoji}</span>
+                                          <p className="text-sm font-semibold text-yellow-800">{def.name}</p>
+                                        </div>
+                                        {b.awarded_at && <p className="text-xs text-yellow-600">{new Date(b.awarded_at).toLocaleDateString()}</p>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })()}
                           </div>
                         </div>
                       )}
@@ -10362,11 +10382,60 @@ const PlanAssist = () => {
                           )}
                         </div>
                       )}
+
+                      {/* ── Resolutions ── */}
+                      {activityFilter === 'resolutions' && (() => {
+                        const resFiltered = !activitySearch
+                          ? resolvedTasks
+                          : resolvedTasks.filter(t =>
+                              (t.title || '').toLowerCase().includes(activitySearch.toLowerCase()) ||
+                              (t.class || '').toLowerCase().includes(activitySearch.toLowerCase())
+                            );
+                        return (
+                          <div>
+                            {resolvedLoading ? (
+                              <p className="text-gray-400 text-sm text-center py-8">Loading resolutions…</p>
+                            ) : resFiltered.length === 0 ? (
+                              <p className="text-gray-400 text-sm text-center py-8">
+                                {resolvedTasks.length === 0 ? 'No completed tasks yet.' : 'No results.'}
+                              </p>
+                            ) : (
+                              <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
+                                {resFiltered.map(task => {
+                                  const classColor = getClassColor(task.class);
+                                  const completedDate = task.completedAt ? new Date(task.completedAt).toLocaleDateString() : null;
+                                  const actualMins = task.actualTime ? Math.round(task.actualTime / 60) : null;
+                                  const estimatedMins = task.estimatedTime || task.userEstimate || null;
+                                  const accuracy = actualMins && estimatedMins
+                                    ? Math.round(Math.min(actualMins, estimatedMins) / Math.max(actualMins, estimatedMins) * 100)
+                                    : null;
+                                  return (
+                                    <div key={task.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                      <div className="flex items-start gap-3">
+                                        <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="font-medium text-sm text-gray-900 truncate">{task.title}</p>
+                                          <p className="text-xs text-gray-400 mt-0.5">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
+                                          <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                            {completedDate && <span className="text-xs text-green-600">✓ {completedDate}</span>}
+                                            {actualMins != null && <span className="text-xs text-blue-500">{actualMins}m logged</span>}
+                                            {accuracy != null && <span className="text-xs text-purple-500">{accuracy}% accuracy</span>}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
 
-                {/* ── GOALS TAB ── */}}
+                {/* ── GOALS TAB ── */}
                 {accountTab === 'goals' && (
                   <div className="relative">
                     {courseSyncLoading && (
