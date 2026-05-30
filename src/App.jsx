@@ -4320,9 +4320,9 @@ const PlanAssist = () => {
     const themes = {
       system: `
         :root { color-scheme: light; }
-        /* scrollbar-gutter on html/body ensures the document-level scrollbar
-           always reserves its track space, preventing layout shift on zoom */
-        html, body { scrollbar-gutter: stable; }
+        /* overflow:hidden on html/body kills the document-level scrollbar entirely —
+           all scrolling happens inside bounded page containers, never on <html>. */
+        html, body { overflow: hidden; margin: 0; padding: 0; }
         [data-planassist-theme="system"] { --pa-bg-page: #f0f4ff; --pa-bg-page2: #eff6ff; }
         /* Scrollbar — 7px wide, always rendered at the screen edge.
            scrollbar-gutter:stable reserves the track space even when no scrollbar
