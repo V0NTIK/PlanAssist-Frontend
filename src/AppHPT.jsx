@@ -797,7 +797,11 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const load = React.useCallback(async () => {
     try {
       const d = await apiCall('/hpt/hub', 'GET', null, token);
-      setHubData(d);
+      if (d && d.error) {
+        console.error('[HPT HUB] server error:', d.error, d.details || '');
+      } else {
+        setHubData(d);
+      }
     } catch (e) { console.error('[HPT HUB] load error:', e.message); }
     finally { setLoading(false); }
   }, [token]);
@@ -2037,9 +2041,10 @@ export default function AppHPT({ onBack }) {
   ];
 
   return (
-    <div className="planassist-hpt min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
-      {/* Inject scrollbar styles matching PlanAssist system theme */}
+    <div className="planassist-hpt h-screen overflow-hidden bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
+      {/* Scrollbar styles — identical to PlanAssist system theme */}
       <style>{`
+        html, body { scrollbar-gutter: stable; }
         .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
         .planassist-hpt ::-webkit-scrollbar-track { background: #f1f5f9; }
         .planassist-hpt ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
