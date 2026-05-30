@@ -4320,6 +4320,9 @@ const PlanAssist = () => {
     const themes = {
       system: `
         :root { color-scheme: light; }
+        /* scrollbar-gutter on html/body ensures the document-level scrollbar
+           always reserves its track space, preventing layout shift on zoom */
+        html, body { scrollbar-gutter: stable; }
         [data-planassist-theme="system"] { --pa-bg-page: #f0f4ff; --pa-bg-page2: #eff6ff; }
         /* Scrollbar — 7px wide, always rendered at the screen edge.
            scrollbar-gutter:stable reserves the track space even when no scrollbar
@@ -5733,7 +5736,7 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-50 to-blue-50 h-screen overflow-hidden flex flex-col" data-theme={colorTheme} data-planassist-theme={colorTheme}>
+    <div className="bg-gradient-to-br from-gray-50 to-blue-50 h-screen overflow-hidden flex flex-col scrollbar-stable" data-theme={colorTheme} data-planassist-theme={colorTheme}>
 
       {/* ── Session Expired Modal ── */}
       {sessionExpired && (
