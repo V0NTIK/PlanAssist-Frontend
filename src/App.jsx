@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import AppHPT from './AppHPT';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy, Gift } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -5027,13 +5027,13 @@ const PlanAssist = () => {
     Bronze:
       { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
     Silver:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#9ca3af,#e5e7eb,#9ca3af)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#b0b8c4,#d0d5dc,#b0b8c4)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
     Gold:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#d97706,#fbbf24,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#eab308,#a16207)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
     Platinum:
-      { animClass:'ins-platinum', wave:false, nameStyle:{ background:'linear-gradient(135deg,#94a3b8,#f1f5f9,#94a3b8,#e2e8f0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+      { animClass:'ins-platinum', wave:false, nameStyle:{ background:'linear-gradient(135deg,#475569,#f1f5f9,#334155,#e2e8f0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
     Onyx:
-      { animClass:'ins-onyx', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#fde047,#a16207,#fbbf24)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+      { animClass:'ins-onyx', wave:false, nameStyle:{ background:'linear-gradient(135deg,#713f12,#eab308,#431407,#d97706)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
     Emerald:
       { animClass:'ins-emerald', wave:false, nameStyle:{ background:'linear-gradient(135deg,#059669,#34d399,#065f46,#10b981)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
     Sapphire:
@@ -5053,7 +5053,7 @@ const PlanAssist = () => {
     Meteorite:
       { animClass:'ins-meteorite', wave:false, nameStyle:{ background:'linear-gradient(135deg,#44281a,#7c3e1e,#2d1810)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
     Dragonbone:
-      { animClass:'ins-dragonbone', wave:false, nameStyle:{ background:'linear-gradient(180deg,#f8fafc 0%,#18181b 50%,#f8fafc 100%)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+      { animClass:'ins-dragonbone', wave:false, nameStyle:{ background:'linear-gradient(180deg,#f8fafc 0%,#18181b 62%,#f8fafc 100%)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
     Celestium:
       { animClass:'ins-celestium', wave:false, nameStyle:{ background:'linear-gradient(135deg,#dc2626,#7c3aed,#2563eb)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'400% auto' } },
     Aether:
@@ -5061,11 +5061,11 @@ const PlanAssist = () => {
     Soulstone:
       { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700, fontFamily:'serif' } },
     Starlight:
-      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800 } },
+      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:600, letterSpacing:'-0.02em', fontFamily:'serif' } },
     'Astral Crystal':
       { animClass:'ins-astral', wave:false, nameStyle:{ color:'#f8fafc', fontWeight:800 } },
     'Dark Matter':
-      { animClass:'', wave:false, darkMatter:true, nameStyle:{ color:'#09090b', fontWeight:900 } },
+      { animClass:'', wave:false, darkMatter:true, nameStyle:{ color:'#09090b', fontWeight:900, letterSpacing:'0.12em' } },
     Neutronium:
       { animClass:'ins-neutronium', wave:false, nameStyle:{ color:'#4ade80', fontWeight:900, textShadow:'0 0 8px #4ade80, 0 0 16px #16a34a' } },
     'Singularity Core':
@@ -5109,10 +5109,35 @@ const PlanAssist = () => {
     @keyframes ins-celestium { 0%{background-position:0% center;filter:brightness(1)} 33%{background-position:133% center;filter:brightness(1.2)} 66%{background-position:266% center;filter:brightness(1)} 100%{background-position:400% center;filter:brightness(1.1)} }
     @keyframes ins-ripple { 0%,100%{letter-spacing:normal} 50%{letter-spacing:0.04em} }
     .ins-celestium { animation: ins-celestium 3s ease-in-out infinite, ins-ripple 2s ease-in-out infinite }
-    /* Aether — purple lightning flashes handled per-letter */
-    @keyframes ins-lightning { 0%,90%,100%{filter:brightness(1)} 91%{filter:brightness(2.5) drop-shadow(0 0 3px #a855f7)} 93%{filter:brightness(0.7)} 95%{filter:brightness(2) drop-shadow(0 0 5px #c084fc)} 97%{filter:brightness(1)} }
-    .ins-aether { animation: ins-lightning 1.8s ease-in-out infinite }
-    /* Astral Crystal — glitch blink */
+    /* Aether — violent rapid purple lightning */
+    @keyframes ins-lightning {
+      0%{filter:brightness(1) saturate(1)}
+      8%{filter:brightness(3.5) saturate(3) drop-shadow(0 0 6px #c084fc)}
+      10%{filter:brightness(0.4) saturate(0.5)}
+      12%{filter:brightness(4) saturate(4) drop-shadow(0 0 10px #e879f9)}
+      14%{filter:brightness(0.6)}
+      16%{filter:brightness(2.5) drop-shadow(0 0 4px #a855f7)}
+      18%{filter:brightness(1) saturate(1)}
+      52%{filter:brightness(1)}
+      54%{filter:brightness(3) drop-shadow(0 0 5px #c084fc)}
+      56%{filter:brightness(0.3)}
+      58%{filter:brightness(3.5) saturate(3) drop-shadow(0 0 8px #e879f9)}
+      60%{filter:brightness(1)}
+      100%{filter:brightness(1) saturate(1)}
+    }
+    .ins-aether { animation: ins-lightning 1.1s ease-in-out infinite }
+    /* Starlight — individual letters blink white and micro-shake on black background */
+    @keyframes ins-starlight {
+      0%,100%{color:#1c1917;transform:translate(0,0)}
+      15%{color:#1c1917}
+      18%{color:#ffffff;transform:translate(0.4px,-0.5px)}
+      20%{color:#e5e5e5;transform:translate(-0.3px,0.3px)}
+      22%{color:#ffffff;transform:translate(0,0)}
+      25%{color:#1c1917}
+      60%{color:#1c1917}
+      62%{color:#f5f5f5;transform:translate(0.3px,-0.3px)}
+      64%{color:#1c1917}
+    }
     @keyframes ins-glitch { 0%,79%,82%,84%,87%,100%{opacity:1;transform:translate(0)} 80%{opacity:0} 83%{opacity:0.4;transform:translate(1px,0)} 85%{opacity:1} 86%{opacity:0;transform:translate(-1px,0)} }
     .ins-astral { animation: ins-glitch 3s ease-in-out infinite }
     /* Neutronium — violent shutter */
@@ -5204,29 +5229,38 @@ const PlanAssist = () => {
 
     // ── Starlight: each letter randomly blinks and micro-shakes ──────────
     if (tier === 'Starlight') {
-      const delays = [0, 0.6, 1.2, 0.3, 0.9, 1.5, 0.15, 0.75, 1.35, 0.45];
+      // Each letter independently blinks to white and micro-shakes at staggered intervals.
+      // Base color is near-black; the animation flips to white at random-feeling moments.
+      const delays = [0, 0.7, 1.4, 0.35, 1.05, 1.75, 0.2, 0.9, 1.6, 0.5, 1.2, 0.1];
       return (
         <span style={{ display:'inline-block', ...rest }}>
           {name.split('').map((ch, i) => {
             const del = delays[i % delays.length];
             return ch === ' '
-              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              ? <span key={i} style={{ display:'inline-block', width:'0.25em' }}>&nbsp;</span>
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                  animation: `ins-glitch 3.5s ease-in-out ${del}s infinite` }}>{ch}</span>;
+                  animation: `ins-starlight ${2.4 + (i % 5) * 0.3}s ease-in-out ${del}s infinite` }}>{ch}</span>;
           })}
         </span>
       );
     }
 
-    // ── Dark Matter: letters jitter violently + slow side-drift ───────────
+    // ── Dark Matter: widely spaced letters, violent jitter, side-drift, cloudy bg ─
     if (tier === 'Dark Matter') {
+      const cloudStyle = {
+        display:'inline-block',
+        background:'radial-gradient(ellipse at 40% 60%,rgba(80,60,120,0.18) 0%,rgba(30,20,50,0.22) 50%,transparent 80%)',
+        borderRadius:'4px',
+        padding:'0 2px',
+        ...rest,
+      };
       return (
-        <span style={{ display:'inline-block', ...rest }}>
+        <span style={cloudStyle}>
           {name.split('').map((ch, i) => {
             const jitterDelay = (i * 0.07).toFixed(2);
             const driftDelay  = (i * 0.12).toFixed(2);
             return ch === ' '
-              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              ? <span key={i} style={{ display:'inline-block', width:'0.5em' }}>&nbsp;</span>
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
                   animation: `ins-jitter 0.8s ease-in-out ${jitterDelay}s infinite, ins-drift 6s ease-in-out ${driftDelay}s infinite` }}>{ch}</span>;
           })}
@@ -9658,7 +9692,7 @@ const PlanAssist = () => {
                     { id: 'settings', label: 'Settings', icon: Settings },
                     { id: 'grades', label: 'Activity', icon: BarChart3 },
                     { id: 'goals',   label: 'Goals',   icon: Target },
-                    { id: 'rewards', label: 'Rewards', icon: Zap },
+                    { id: 'rewards', label: 'Rewards', icon: Gift },
                     { id: 'streak',  label: 'Streak',  icon: Zap },
                     { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
@@ -11114,31 +11148,13 @@ const PlanAssist = () => {
                       <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
                     </div>
                   );
-                  // Background card colors for each tier
-                  const bgMap = {
-                    Default:          'bg-gray-50 border-gray-200',
-                    Bronze:           'bg-orange-50 border-orange-200',
-                    Silver:           'bg-slate-50 border-slate-300',
-                    Gold:             'bg-yellow-50 border-yellow-300',
-                    Platinum:         'bg-slate-100 border-slate-400',
-                    Onyx:             'bg-yellow-50 border-yellow-400',
-                    Emerald:          'bg-emerald-50 border-emerald-300',
-                    Sapphire:         'bg-blue-50 border-blue-300',
-                    Ruby:             'bg-rose-50 border-rose-300',
-                    Amethyst:         'bg-violet-50 border-violet-300',
-                    Obsidian:         'bg-indigo-950 border-indigo-800',
-                    Diamond:          'bg-cyan-50 border-cyan-300',
-                    Antimatter:       'bg-fuchsia-50 border-fuchsia-300',
-                    Meteorite:        'bg-stone-100 border-stone-400',
-                    Dragonbone:       'bg-gray-100 border-gray-400',
-                    Celestium:        'bg-purple-50 border-purple-300',
-                    Aether:           'bg-purple-50 border-purple-400',
-                    Soulstone:        'bg-amber-50 border-amber-300',
-                    Starlight:        'bg-gray-900 border-gray-700',
-                    'Astral Crystal': 'bg-slate-50 border-slate-200',
-                    'Dark Matter':    'bg-zinc-900 border-zinc-700',
-                    Neutronium:       'bg-green-950 border-green-700',
-                    'Singularity Core':'bg-cyan-50 border-cyan-300',
+                  // All cards use the same neutral background for consistency.
+                  // Only Obsidian and Dark Matter get a dark card since their text/animation uses very dark colors.
+                  const bgMap = (label) => {
+                    if (label === 'Obsidian' || label === 'Dark Matter') return 'bg-gray-900 border-gray-700';
+                    if (label === 'Starlight')  return 'bg-gray-900 border-gray-700';
+                    if (label === 'Neutronium') return 'bg-gray-900 border-gray-700';
+                    return 'bg-white border-gray-200';
                   };
                   const selectInsignia = async (label) => {
                     if (!unlockedLabels.includes(label) || insigniaSelected === label) return;
@@ -11168,7 +11184,7 @@ const PlanAssist = () => {
                         {INSIGNIA_THRESHOLDS.map(([threshold, label]) => {
                           const unlocked = unlockedLabels.includes(label);
                           const selected = insigniaSelected === label;
-                          const baseBg = bgMap[label] || 'bg-gray-50 border-gray-200';
+                          const baseBg = bgMap(label);
                           return (
                             <button key={label} disabled={!unlocked || insigniaLoading} onClick={() => selectInsignia(label)}
                               className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[90px] ${
@@ -11192,7 +11208,7 @@ const PlanAssist = () => {
                         {creditsShop.map(item => {
                           const owned  = unlockedLabels.includes(item.label);
                           const selected = insigniaSelected === item.label;
-                          const baseBg = bgMap[item.label] || 'bg-gray-50 border-gray-200';
+                          const baseBg = bgMap(item.label);
                           const canAfford = credits >= item.cost;
                           return (
                             <div key={item.label}
