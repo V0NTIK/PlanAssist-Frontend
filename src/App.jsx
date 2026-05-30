@@ -788,6 +788,18 @@ const PlanAssist = () => {
   const [streakShieldsAvailable, setStreakShieldsAvailable] = useState(0);
   const [streakShieldMode, setStreakShieldMode] = useState('manual');
   const [streakShieldLog, setStreakShieldLog] = useState([]); // dates shields were used
+  // Credits & rewards
+  const [credits, setCredits] = useState(0);
+  const [creditsShop, setCreditsShop] = useState([]);
+  const [showBuyShieldModal, setShowBuyShieldModal] = useState(false);
+  const [buyShieldLoading, setBuyShieldLoading] = useState(false);
+  const [rewardsStatus, setRewardsStatus] = useState(null);
+  const [rewardsLoading, setRewardsLoading] = useState(false);
+  const [spinningWheel, setSpinningWheel] = useState(false);
+  const [lastSpinPrize, setLastSpinPrize] = useState(null);
+  const [claimingReactions, setClaimingReactions] = useState(false);
+  const [claimingChest, setClaimingChest] = useState(false);
+  const [lastChestPrize, setLastChestPrize] = useState(null);
   const [streakShieldToast, setStreakShieldToast] = useState(null);
   // Campus-tz converted date sets used by streak pane UI
   const [streakCampus, setStreakCampus] = useState('Ashland'); // campus used for all streak tz math
@@ -1381,9 +1393,10 @@ const PlanAssist = () => {
           loadCompletionHistory(),
           loadInsignia(),
           loadBadges(),
-          runActivityRefresh(),   // awaited — Hub waits for this before showing
+          runActivityRefresh(),
           loadNotifications(),
           loadNotifPrefs(),
+          loadCredits(),
         ]);
         // After refresh is done, load activity pane data from DB (non-blocking)
         loadActivityData();
@@ -1540,6 +1553,23 @@ const PlanAssist = () => {
       }
     } catch (err) { console.error('autoSaveSetting failed:', err.message); }
   };
+  const loadCredits = async () => {
+    try {
+      const data = await apiCall('/credits', 'GET');
+      if (data) { setCredits(data.credits ?? 0); setCreditsShop(data.shop || []); }
+    } catch (e) { /* silently ignore */ }
+  };
+
+  const loadRewardsStatus = async () => {
+    setRewardsLoading(true);
+    try {
+      const data = await apiCall('/rewards/status', 'GET');
+      setRewardsStatus(data);
+      setCredits(data.credits ?? 0);
+    } catch (e) { /* silently ignore */ }
+    finally { setRewardsLoading(false); }
+  };
+
   const loadResolvedTasks = async (search = resolvedSearch, sort = resolvedSort) => {
     setResolvedLoading(true);
     try {
@@ -1712,6 +1742,7 @@ const PlanAssist = () => {
       setGradeMiniSyncRef(prev => { if (prev) clearInterval(prev); return null; });
     }
     if (tab === 'goals') runCourseSync(false);
+    if (tab === 'rewards') loadRewardsStatus();
     if (tab === 'streak') {
       loadStreakData();
     }
@@ -4978,123 +5009,250 @@ const PlanAssist = () => {
   // ── Streak data loader (client-side calculation) ──────────────────────
   // Insignia tiers — unlock thresholds by days with ≥1 completion
   const INSIGNIA_THRESHOLDS = [
-    [0,'Default'],[2,'Copper'],[5,'Silver'],[10,'Gold'],[20,'Emerald'],
-    [30,'Amethyst'],[40,'Ruby'],[50,'Diamond'],[75,'Obsidian'],[100,'Antimatter']
+    [0,'Default'],[2,'Bronze'],[5,'Silver'],[10,'Gold'],[20,'Platinum'],
+    [30,'Onyx'],[40,'Emerald'],[50,'Sapphire'],[60,'Ruby'],[70,'Amethyst'],
+    [80,'Obsidian'],[90,'Diamond'],[100,'Antimatter']
   ];
 
-  // Single source of truth for Insignia styles — used in Feed and Leaderboard only.
+  // Purchased insignia definitions (from shop)
+  const INSIGNIA_PURCHASED = [
+    'Meteorite','Dragonbone','Celestium','Aether','Soulstone',
+    'Starlight','Astral Crystal','Dark Matter','Neutronium','Singularity Core'
+  ];
+
   const INSIGNIA_STYLES = {
-    // Default — plain gray, no decoration
-    Default:   { animClass:'', wave:false, nameStyle:{ color:'#374151', fontWeight:600 } },
-    // Copper — warm orange, no gradient, no animation
-    Copper:    { animClass:'', wave:false, nameStyle:{ color:'#c2651a', fontWeight:700 } },
-    // Silver — cool metallic gray, gradient (static)
-    Silver:    { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#9ca3af,#d1d5db,#6b7280)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
-    // Gold — warm metallic gold, gradient (static)
-    Gold:      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#d97706,#fbbf24,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
-    // Emerald — vivid bright emerald, shimmer only
-    Emerald:   { animClass:'ins-emerald', wave:false, nameStyle:{ background:'linear-gradient(135deg,#059669,#34d399,#065f46)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
-    // Amethyst — deep mysterious amethyst, shimmer only
-    Amethyst:  { animClass:'ins-amethyst', wave:false, nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a78bfa,#4c1d95)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'200% auto' } },
-    // Ruby — vivid bold ruby, heavy shimmer only
-    Ruby:      { animClass:'ins-ruby', wave:false, nameStyle:{ background:'linear-gradient(135deg,#be123c,#f43f5e,#881337)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'200% auto' } },
-    // Diamond — fluorescent diamond, bling animation only
-    Diamond:   { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#a5f3fc,#818cf8,#f0abfc,#67e8f9,#c7d2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
-    // Obsidian — deep obsidian, cloud shift + subtle jitter only
-    Obsidian:  { animClass:'ins-obsidian', wave:false, nameStyle:{ background:'linear-gradient(135deg,#1e1b4b,#312e81,#0f172a,#1e1b4b)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
-    // Antimatter — cosmic distortion: rainbowing colors with rare black/white flashes
-    Antimatter: { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#000000,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
+    // ── Earned tiers ────────────────────────────────────────────────────────
+    Default:
+      { animClass:'', wave:false, nameStyle:{ color:'#e5e7eb', fontWeight:600 } },
+    Bronze:
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+    Silver:
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#9ca3af,#e5e7eb,#9ca3af)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+    Gold:
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#d97706,#fbbf24,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+    Platinum:
+      { animClass:'ins-platinum', wave:false, nameStyle:{ background:'linear-gradient(135deg,#94a3b8,#f1f5f9,#94a3b8,#e2e8f0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+    Onyx:
+      { animClass:'ins-onyx', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#fde047,#a16207,#fbbf24)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+    Emerald:
+      { animClass:'ins-emerald', wave:false, nameStyle:{ background:'linear-gradient(135deg,#059669,#34d399,#065f46,#10b981)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+    Sapphire:
+      { animClass:'ins-sapphire', wave:false, nameStyle:{ background:'linear-gradient(135deg,#1d4ed8,#60a5fa,#1e40af,#3b82f6)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+    Ruby:
+      { animClass:'ins-ruby', wave:false, nameStyle:{ background:'linear-gradient(135deg,#be123c,#f43f5e,#881337,#fb7185)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
+    Amethyst:
+      { animClass:'ins-amethyst', wave:false, nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a78bfa,#4c1d95,#c4b5fd)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
+    Obsidian:
+      { animClass:'ins-obsidian', wave:false, nameStyle:{ background:'linear-gradient(135deg,#0f172a,#1e1b4b,#020617)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
+    Diamond:
+      { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#e0f2fe,#a5f3fc,#ffffff,#fce7f3,#e0f2fe,#a5f3fc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
+    Antimatter:
+      { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#000000,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
+
+    // ── Purchased insignias ──────────────────────────────────────────────────
+    Meteorite:
+      { animClass:'ins-meteorite', wave:false, nameStyle:{ background:'linear-gradient(135deg,#44281a,#7c3e1e,#2d1810)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+    Dragonbone:
+      { animClass:'ins-dragonbone', wave:false, nameStyle:{ background:'linear-gradient(180deg,#f8fafc 0%,#18181b 50%,#f8fafc 100%)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
+    Celestium:
+      { animClass:'ins-celestium', wave:false, nameStyle:{ background:'linear-gradient(135deg,#dc2626,#7c3aed,#2563eb)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'400% auto' } },
+    Aether:
+      { animClass:'ins-aether', wave:false, nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a21caf,#5b21b6)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, position:'relative' } },
+    Soulstone:
+      { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700, fontFamily:'serif' } },
+    Starlight:
+      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800 } },
+    'Astral Crystal':
+      { animClass:'ins-astral', wave:false, nameStyle:{ color:'#f8fafc', fontWeight:800 } },
+    'Dark Matter':
+      { animClass:'', wave:false, darkMatter:true, nameStyle:{ color:'#09090b', fontWeight:900 } },
+    Neutronium:
+      { animClass:'ins-neutronium', wave:false, nameStyle:{ color:'#4ade80', fontWeight:900, textShadow:'0 0 8px #4ade80, 0 0 16px #16a34a' } },
+    'Singularity Core':
+      { animClass:'ins-singularity', wave:false, nameStyle:{ background:'linear-gradient(90deg,#e0f2fe,#a5f3fc,#ffffff,#e0f2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
   };
+
   const INSIGNIA_KEYFRAMES = `
-    @keyframes ins-shimmer { 0%{background-position:0% center} 100%{background-position:200% center} }
-    @keyframes ins-shimmer-heavy { 0%{background-position:0% center} 100%{background-position:200% center} }
-    @keyframes ins-bling { 0%,100%{background-position:0% center;filter:brightness(1)} 25%{background-position:50% center;filter:brightness(1.3)} 50%{background-position:100% center;filter:brightness(1)} 75%{background-position:150% center;filter:brightness(1.4)} }
-    @keyframes ins-cloud { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+    /* ── Earned tier animations ─────────────────────────────────────── */
+    @keyframes ins-sweep { 0%{background-position:0% center} 100%{background-position:300% center} }
+    @keyframes ins-obsidian-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+    @keyframes ins-bling { 0%,100%{background-position:0% center;filter:brightness(1)} 25%{background-position:100% center;filter:brightness(1.4)} 50%{background-position:200% center;filter:brightness(1)} 75%{background-position:300% center;filter:brightness(1.5)} }
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
-    @keyframes ins-jitter { 0%,100%{transform:translate(0,0)} 25%{transform:translate(0.3px,-1.5px)} 50%{transform:translate(-0.3px,0.4px)} 75%{transform:translate(0.2px,-0.8px)} }
-    @keyframes ins-star-a { 0%{background-position:-30% center;opacity:0} 4%{opacity:1} 38%{background-position:130% center;opacity:0} 100%{background-position:130% center;opacity:0} }
-    @keyframes ins-star-b { 0%{background-position:130% center;opacity:0} 4%{opacity:1} 38%{background-position:-30% center;opacity:0} 100%{background-position:-30% center;opacity:0} }
-    @keyframes ins-star-c { 0%{background-position:-30% center;opacity:0} 4%{opacity:1} 33%{background-position:130% center;opacity:0} 100%{background-position:130% center;opacity:0} }
-    .ins-emerald    { animation: ins-shimmer 3s linear infinite }
-    .ins-amethyst   { animation: ins-shimmer 2.5s linear infinite }
-    .ins-ruby       { animation: ins-shimmer-heavy 1.8s linear infinite }
-    .ins-diamond    { animation: ins-bling 2s ease-in-out infinite }
-    .ins-obsidian   { animation: ins-cloud 6s ease-in-out infinite, ins-jitter 0.4s ease-in-out infinite }
-    .ins-antimatter { animation: ins-color-shift 7s linear infinite }
+    /* Obsidian — shooting white lines */
+    @keyframes ins-ob-star-a { 0%,60%,100%{opacity:0} 62%{opacity:1;background-position:-30% center} 90%{opacity:0;background-position:130% center} }
+    @keyframes ins-ob-star-b { 0%,25%,100%{opacity:0} 27%{opacity:1;background-position:130% center} 55%{opacity:0;background-position:-30% center} }
+    /* Diamond — shooting white lines */
+    @keyframes ins-star-a { 0%{background-position:-30% center;opacity:0} 4%{opacity:1} 38%{background-position:130% center;opacity:0} 100%{opacity:0} }
+    @keyframes ins-star-b { 0%{background-position:130% center;opacity:0} 4%{opacity:1} 38%{background-position:-30% center;opacity:0} 100%{opacity:0} }
+    @keyframes ins-star-c { 0%{background-position:-30% center;opacity:0} 4%{opacity:1} 33%{background-position:130% center;opacity:0} 100%{opacity:0} }
+    /* Antimatter wave */
+    @keyframes ins-float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-2px)} }
+    .ins-platinum  { animation: ins-sweep 4s linear infinite }
+    .ins-onyx      { animation: ins-sweep 3.5s linear infinite }
+    .ins-emerald   { animation: ins-sweep 3s linear infinite }
+    .ins-sapphire  { animation: ins-sweep 3s linear infinite }
+    .ins-ruby      { animation: ins-sweep 2.5s linear infinite }
+    .ins-amethyst  { animation: ins-sweep 3s linear infinite }
+    .ins-obsidian  { animation: ins-obsidian-shift 5s ease-in-out infinite }
+    .ins-diamond   { animation: ins-bling 2.5s ease-in-out infinite }
+    .ins-antimatter{ animation: ins-color-shift 4.5s linear infinite }
+
+    /* ── Purchased insignia animations ───────────────────────────────── */
+    /* Meteorite — orange ember spots fade in/out */
+    @keyframes ins-ember { 0%,100%{filter:brightness(1)} 40%{filter:brightness(1.6) drop-shadow(0 0 4px #f97316)} 70%{filter:brightness(0.8)} }
+    .ins-meteorite { animation: ins-ember 2.2s ease-in-out infinite }
+    /* Dragonbone — jitter every few seconds */
+    @keyframes ins-jitter { 0%,85%,100%{transform:translate(0,0) rotate(0deg)} 87%{transform:translate(1px,-1px) rotate(0.3deg)} 89%{transform:translate(-1px,1px) rotate(-0.3deg)} 91%{transform:translate(0.5px,-0.5px)} 93%{transform:translate(0,0)} }
+    .ins-dragonbone { animation: ins-jitter 4s ease-in-out infinite }
+    /* Celestium — color shift + pulse */
+    @keyframes ins-celestium { 0%{background-position:0% center;filter:brightness(1)} 33%{background-position:133% center;filter:brightness(1.2)} 66%{background-position:266% center;filter:brightness(1)} 100%{background-position:400% center;filter:brightness(1.1)} }
+    @keyframes ins-ripple { 0%,100%{letter-spacing:normal} 50%{letter-spacing:0.04em} }
+    .ins-celestium { animation: ins-celestium 3s ease-in-out infinite, ins-ripple 2s ease-in-out infinite }
+    /* Aether — purple lightning flashes handled per-letter */
+    @keyframes ins-lightning { 0%,90%,100%{filter:brightness(1)} 91%{filter:brightness(2.5) drop-shadow(0 0 3px #a855f7)} 93%{filter:brightness(0.7)} 95%{filter:brightness(2) drop-shadow(0 0 5px #c084fc)} 97%{filter:brightness(1)} }
+    .ins-aether { animation: ins-lightning 1.8s ease-in-out infinite }
+    /* Astral Crystal — glitch blink */
+    @keyframes ins-glitch { 0%,79%,82%,84%,87%,100%{opacity:1;transform:translate(0)} 80%{opacity:0} 83%{opacity:0.4;transform:translate(1px,0)} 85%{opacity:1} 86%{opacity:0;transform:translate(-1px,0)} }
+    .ins-astral { animation: ins-glitch 3s ease-in-out infinite }
+    /* Neutronium — violent shutter */
+    @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
+    .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
+    /* Singularity Core — sweep + flame glow */
+    @keyframes ins-singularity-shift { 0%{background-position:0% center;filter:brightness(1)} 50%{background-position:150% center;filter:brightness(1.3) drop-shadow(0 -2px 4px #a855f7)} 100%{background-position:300% center;filter:brightness(1)} }
+    .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
+    /* Dark Matter drift */
+    @keyframes ins-drift { 0%,100%{transform:translateX(0)} 30%{transform:translateX(2px)} 60%{transform:translateX(-1.5px)} 80%{transform:translateX(1px)} }
+    /* Soulstone / shared ins-wave */
+    @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
+    /* Dark Matter jitter */
+    @keyframes ins-jitter { 0%,80%,100%{transform:translate(0,0)} 82%{transform:translate(1.5px,-2px)} 84%{transform:translate(-1px,1.5px)} 86%{transform:translate(2px,-1px)} 88%{transform:translate(-1.5px,2px)} 90%{transform:translate(0.5px,-0.5px)} }
   `;
 
 
-  // Render a name with the user's Insignia tier style applied — used in Feed and Leaderboard only.
-  // Only Antimatter splits into per-letter spans for the staggered wave float effect.
   const renderInsigniaName = (name, insignia, opts = {}) => {
     const tier = insignia && INSIGNIA_STYLES[insignia] ? insignia : 'Default';
     const s = INSIGNIA_STYLES[tier];
     const { fontSize, fontWeight, ...rest } = opts;
+    const fs = fontSize || 'inherit';
 
     if (tier === 'Default') {
-      return <span style={{ fontWeight: fontWeight || 600, fontSize: fontSize || 'inherit', ...rest }}>{name}</span>;
+      return <span style={{ fontWeight: fontWeight || 600, fontSize: fs, ...rest }}>{name}</span>;
     }
 
-    // All tiers except Antimatter: single span, animation driven by CSS class.
-    // Diamond gets a shooting-star overlay on top of the standard single span.
-    if (tier === 'Diamond') {
-      // Each star is a full-width span whose background is a narrow bright streak.
-      // Animating background-position slides the streak from exactly the left edge
-      // to exactly the right edge — no translateX percentage confusion.
-      const starBase = {
-        position:'absolute', left:0, top:0, right:0,
-        height:'2px',
-        background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.95) 48%,rgba(200,230,255,0.8) 52%,transparent 65%,transparent 100%)',
-        backgroundSize:'200% 100%',
-        pointerEvents:'none',
-      };
+    // ── Obsidian: dark gradient + shooting white lines overlay ────────────
+    if (tier === 'Obsidian') {
+      const starBase = { position:'absolute', left:0, top:0, right:0, height:'2px',
+        background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.9) 48%,rgba(200,230,255,0.7) 52%,transparent 65%,transparent 100%)',
+        backgroundSize:'200% 100%', pointerEvents:'none' };
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
-          <span
-            className={s.animClass || ''}
-            style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block' }}
-          >{name}</span>
-          {/* Star A — LTR, middle */}
-          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite', animationFillMode:'backwards' }} />
-          {/* Star B — RTL, slightly higher */}
-          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite', animationFillMode:'backwards' }} />
-          {/* Star C — LTR, slightly lower */}
-          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite', animationFillMode:'backwards' }} />
+          <span className="ins-obsidian" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block' }}>{name}</span>
+          <span style={{ ...starBase, top:'35%', animation:'ins-ob-star-a 5s ease-in-out 0.8s infinite' }} />
+          <span style={{ ...starBase, top:'60%', animation:'ins-ob-star-b 5s ease-in-out 2.5s infinite' }} />
         </span>
       );
     }
 
-    if (!s.wave) {
+    // ── Diamond: color cycle + shooting white lines ────────────────────────
+    if (tier === 'Diamond') {
+      const starBase = { position:'absolute', left:0, top:0, right:0, height:'2px',
+        background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.95) 48%,rgba(200,240,255,0.8) 52%,transparent 65%,transparent 100%)',
+        backgroundSize:'200% 100%', pointerEvents:'none' };
       return (
-        <span
-          className={s.animClass || ''}
-          style={{ ...s.nameStyle, fontSize: fontSize || 'inherit', display:'inline-block', ...rest }}
-        >{name}</span>
+        <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
+          <span className="ins-diamond" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block' }}>{name}</span>
+          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite' }} />
+          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite' }} />
+          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite' }} />
+        </span>
       );
     }
 
-    // Antimatter only: split into per-letter spans with staggered ins-wave delays.
-    // Inline animation includes both the color-shift and the wave so the inline
-    // style doesn't silently drop the background-position animation from the class.
-    const WAVE_DURATION = 2.8; // slower, more cosmic float
-    const WAVE_STAGGER  = 0.18; // seconds delay between each successive letter
+    // ── Antimatter: per-letter color-shift + subtle slow float ────────────
+    if (tier === 'Antimatter') {
+      return (
+        <span style={{ display:'inline-block', ...rest }}>
+          {name.split('').map((ch, i) => {
+            const delay = (i * 0.15).toFixed(2);
+            return ch === ' '
+              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `ins-color-shift 4.5s linear ${delay}s infinite, ins-float 3.5s ease-in-out ${delay}s infinite` }} >{ch}</span>;
+          })}
+        </span>
+      );
+    }
+
+    // ── Soulstone: each letter teeters at its own random-feeling rate ─────
+    if (tier === 'Soulstone') {
+      const teeters = [1.9,2.3,1.7,2.1,1.5,2.4,1.8,2.0,1.6,2.2];
+      const offsets = [0,0.3,0.6,0.1,0.8,0.4,0.7,0.2,0.9,0.5];
+      return (
+        <span style={{ display:'inline-block', ...rest }}>
+          {name.split('').map((ch, i) => {
+            const dur = teeters[i % teeters.length];
+            const del = offsets[i % offsets.length];
+            return ch === ' '
+              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `ins-wave ${dur}s ease-in-out ${del}s infinite` }}>{ch}</span>;
+          })}
+        </span>
+      );
+    }
+
+    // ── Starlight: each letter randomly blinks and micro-shakes ──────────
+    if (tier === 'Starlight') {
+      const delays = [0, 0.6, 1.2, 0.3, 0.9, 1.5, 0.15, 0.75, 1.35, 0.45];
+      return (
+        <span style={{ display:'inline-block', ...rest }}>
+          {name.split('').map((ch, i) => {
+            const del = delays[i % delays.length];
+            return ch === ' '
+              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `ins-glitch 3.5s ease-in-out ${del}s infinite` }}>{ch}</span>;
+          })}
+        </span>
+      );
+    }
+
+    // ── Dark Matter: letters jitter violently + slow side-drift ───────────
+    if (tier === 'Dark Matter') {
+      return (
+        <span style={{ display:'inline-block', ...rest }}>
+          {name.split('').map((ch, i) => {
+            const jitterDelay = (i * 0.07).toFixed(2);
+            const driftDelay  = (i * 0.12).toFixed(2);
+            return ch === ' '
+              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `ins-jitter 0.8s ease-in-out ${jitterDelay}s infinite, ins-drift 6s ease-in-out ${driftDelay}s infinite` }}>{ch}</span>;
+          })}
+        </span>
+      );
+    }
+
+    // ── Singularity Core: sweep + flame glow rising from each letter ──────
+    if (tier === 'Singularity Core') {
+      return (
+        <span style={{ display:'inline-block', ...rest }}>
+          {name.split('').map((ch, i) => {
+            const delay = (i * 0.1).toFixed(2);
+            return ch === ' '
+              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
+              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `ins-singularity-shift 2.5s ease-in-out ${delay}s infinite` }}>{ch}</span>;
+          })}
+        </span>
+      );
+    }
+
+    // ── All other tiers: single span with CSS class ───────────────────────
     return (
-      <span style={{ display:'inline-block', ...rest }}>
-        {name.split('').map((ch, i) => {
-          const delay = (i * WAVE_STAGGER).toFixed(2);
-          return ch === ' '
-            ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
-            : <span
-                key={i}
-                style={{
-                  ...s.nameStyle,
-                  fontSize: fontSize || 'inherit',
-                  display: 'inline-block',
-                  animation: `ins-color-shift 7s linear ${delay}s infinite, ins-wave ${WAVE_DURATION}s ease-in-out ${delay}s infinite`,
-                }}
-              >{ch}</span>;
-        })}
+      <span className={s.animClass || ''} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block', ...rest }}>
+        {name}
       </span>
     );
   };
@@ -5812,6 +5970,52 @@ const PlanAssist = () => {
 
   return (
     <div className="bg-gradient-to-br from-gray-50 to-blue-50 h-screen overflow-hidden flex flex-col scrollbar-stable" data-theme={colorTheme} data-planassist-theme={colorTheme}>
+
+      {/* ── Buy Shield Modal ── */}
+      {showBuyShieldModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9998] p-4" onClick={() => !buyShieldLoading && setShowBuyShieldModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 text-center" onClick={e => e.stopPropagation()}>
+            <div className="w-16 h-16 bg-yellow-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <span className="text-3xl">🛡️</span>
+            </div>
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Buy a Streak Shield</h2>
+            {credits < 100 ? (
+              <>
+                <p className="text-gray-500 text-sm mb-2">A Streak Shield costs <span className="font-bold text-purple-600">100 Credits</span>.</p>
+                <p className="text-red-500 text-sm mb-6">You only have <span className="font-bold">{credits}</span> Credits. Earn more in the Rewards pane!</p>
+                <button onClick={() => setShowBuyShieldModal(false)} className="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors">
+                  Close
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-gray-500 text-sm mb-2">A Streak Shield costs <span className="font-bold text-purple-600">100 Credits</span>.</p>
+                <p className="text-gray-600 text-sm mb-6">You have <span className="font-bold text-purple-600">{credits}</span> Credits. You'll have <span className="font-bold">{credits - 100}</span> after this purchase.</p>
+                <div className="flex gap-3">
+                  <button onClick={() => setShowBuyShieldModal(false)} disabled={buyShieldLoading}
+                    className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors disabled:opacity-50">
+                    Cancel
+                  </button>
+                  <button disabled={buyShieldLoading} onClick={async () => {
+                    setBuyShieldLoading(true);
+                    try {
+                      const r = await apiCall('/credits/buy-shield', 'POST', {});
+                      setCredits(r.credits);
+                      setStreakShieldsAvailable(r.shieldsAvailable);
+                      setShowBuyShieldModal(false);
+                    } catch (err) {
+                      alert(err.message || 'Purchase failed');
+                    } finally { setBuyShieldLoading(false); }
+                  }}
+                    className="flex-1 py-3 bg-purple-600 text-white rounded-xl font-semibold hover:bg-purple-700 transition-colors disabled:opacity-50">
+                    {buyShieldLoading ? 'Buying…' : 'Confirm'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Session Expired Modal ── */}
       {sessionExpired && (
@@ -9453,8 +9657,9 @@ const PlanAssist = () => {
                   {[
                     { id: 'settings', label: 'Settings', icon: Settings },
                     { id: 'grades', label: 'Activity', icon: BarChart3 },
-                    { id: 'goals', label: 'Goals', icon: Target },
-                    { id: 'streak', label: 'Streak', icon: Zap },
+                    { id: 'goals',   label: 'Goals',   icon: Target },
+                    { id: 'rewards', label: 'Rewards', icon: Zap },
+                    { id: 'streak',  label: 'Streak',  icon: Zap },
                     { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
                     ...(user?.isAdmin ? [{ id: 'studios', label: 'Studios', icon: Users }] : []),
@@ -10510,6 +10715,182 @@ const PlanAssist = () => {
                   </div>
                 )}
 
+                {/* ── REWARDS TAB ── */}
+                {accountTab === 'rewards' && (() => {
+                  const SPIN_PRIZES = [0, 0, 10, 10, 10, 20, 20, 20, 30, 30, 50, 50, 75, 100, 150, 200];
+                  // Get user's local date string for daily chest
+                  const localDateStr = (() => {
+                    const d = new Date();
+                    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                  })();
+                  const lastChestDate = rewardsStatus?.lastDailyChest ? String(rewardsStatus.lastDailyChest).slice(0,10) : null;
+                  const chestAvailable = lastChestDate !== localDateStr;
+                  const spinsAvailable = rewardsStatus?.spinsAvailable ?? 0;
+                  const unclaimedReactions = rewardsStatus?.unclaimedReactions ?? 0;
+                  const weeklyEntry = rewardsStatus?.weeklyEntry;
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Credits balance header */}
+                      <div className="bg-gradient-to-r from-purple-600 to-blue-600 rounded-2xl p-6 text-white">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-purple-200 text-sm font-medium">Your Credits</p>
+                            <p className="text-4xl font-bold mt-1">{credits}</p>
+                          </div>
+                          <div className="w-16 h-16 bg-white bg-opacity-20 rounded-2xl flex items-center justify-center">
+                            <span className="text-3xl">🪙</span>
+                          </div>
+                        </div>
+                        <p className="text-purple-200 text-xs mt-3">Credits can be used to buy Streak Shields (100 credits) and Insignias in the Insignia shop.</p>
+                      </div>
+
+                      {/* Section 1: Weekly Spin */}
+                      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xl">🎡</span>
+                          <h3 className="font-bold text-gray-900">Weekly Spin</h3>
+                          {spinsAvailable > 0 && (
+                            <span className="ml-auto bg-purple-600 text-white text-xs font-bold px-2 py-0.5 rounded-full">{spinsAvailable} spin{spinsAvailable !== 1 ? 's' : ''}</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 mb-4">
+                          Every Monday, you earn one spin for each task you completed on last week's leaderboard. Spins expire at the following Monday — unused spins are lost!
+                        </p>
+                        {rewardsLoading ? (
+                          <div className="flex justify-center py-4"><div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" /></div>
+                        ) : spinsAvailable <= 0 ? (
+                          <div className="bg-gray-50 rounded-xl p-4 text-center">
+                            <p className="text-gray-400 text-sm">
+                              {weeklyEntry
+                                ? `You used all ${weeklyEntry.spinsTaken} spin${weeklyEntry.spinsTaken !== 1 ? 's' : ''} from last week.`
+                                : 'No spins available. Complete tasks to appear on next week\'s leaderboard!'}
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            {lastSpinPrize !== null && (
+                              <div className={`mb-3 p-3 rounded-xl text-center font-bold text-lg ${lastSpinPrize > 0 ? 'bg-green-50 text-green-700' : 'bg-gray-50 text-gray-500'}`}>
+                                {lastSpinPrize > 0 ? `🎉 +${lastSpinPrize} Credits!` : `No credits this time — better luck next spin!`}
+                              </div>
+                            )}
+                            <div className="flex items-center gap-3">
+                              <div className="flex-1 grid grid-cols-8 gap-1">
+                                {SPIN_PRIZES.map((p, i) => (
+                                  <div key={i} className={`text-center py-1 rounded text-xs font-bold ${p === 0 ? 'bg-gray-100 text-gray-400' : p >= 100 ? 'bg-yellow-100 text-yellow-700' : p >= 50 ? 'bg-green-100 text-green-700' : 'bg-blue-50 text-blue-600'}`}>
+                                    {p}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <p className="text-xs text-gray-400 text-center mt-1 mb-3">{spinsAvailable} spin{spinsAvailable !== 1 ? 's' : ''} remaining this week</p>
+                            <button
+                              disabled={spinningWheel}
+                              onClick={async () => {
+                                setSpinningWheel(true);
+                                setLastSpinPrize(null);
+                                try {
+                                  const r = await apiCall('/rewards/spin', 'POST', {});
+                                  setLastSpinPrize(r.prize);
+                                  setCredits(r.credits);
+                                  await loadRewardsStatus();
+                                } catch (err) { alert(err.message || 'Spin failed'); }
+                                finally { setSpinningWheel(false); }
+                              }}
+                              className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                            >
+                              {spinningWheel ? '⏳ Spinning…' : '🎡 Spin the Wheel'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section 2: Reaction Credits */}
+                      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xl">❤️</span>
+                          <h3 className="font-bold text-gray-900">Reaction Credits</h3>
+                          {unclaimedReactions > 0 && (
+                            <span className="ml-auto bg-pink-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{unclaimedReactions} reaction{unclaimedReactions !== 1 ? 's' : ''}</span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 mb-4">
+                          Earn 10 Credits for every reaction your Live Feed entries receive. Reactions older than 7 days cannot be claimed — claim regularly!
+                        </p>
+                        {rewardsLoading ? (
+                          <div className="flex justify-center py-4"><div className="w-6 h-6 border-2 border-pink-400 border-t-transparent rounded-full animate-spin" /></div>
+                        ) : unclaimedReactions <= 0 ? (
+                          <div className="bg-gray-50 rounded-xl p-4 text-center">
+                            <p className="text-gray-400 text-sm">No new reactions to claim. Keep completing tasks to appear in the Feed!</p>
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="bg-pink-50 rounded-xl p-4 text-center mb-3">
+                              <p className="text-pink-700 font-semibold">{unclaimedReactions} unclaimed reaction{unclaimedReactions !== 1 ? 's' : ''}</p>
+                              <p className="text-pink-600 text-sm">= {unclaimedReactions * 10} Credits available</p>
+                            </div>
+                            <button
+                              disabled={claimingReactions}
+                              onClick={async () => {
+                                setClaimingReactions(true);
+                                try {
+                                  const r = await apiCall('/rewards/claim-reactions', 'POST', {});
+                                  setCredits(r.credits);
+                                  await loadRewardsStatus();
+                                } catch (err) { alert(err.message || 'Claim failed'); }
+                                finally { setClaimingReactions(false); }
+                              }}
+                              className="w-full py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                            >
+                              {claimingReactions ? '⏳ Claiming…' : `❤️ Claim ${unclaimedReactions * 10} Credits`}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Section 3: Daily Chest */}
+                      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xl">📦</span>
+                          <h3 className="font-bold text-gray-900">Daily Chest</h3>
+                          {chestAvailable && <span className="ml-auto bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">Ready!</span>}
+                        </div>
+                        <p className="text-xs text-gray-400 mb-4">
+                          Open a chest once per day for a random amount of Credits (0–50). Resets at midnight in your local timezone.
+                        </p>
+                        {lastChestPrize !== null && (
+                          <div className={`mb-3 p-3 rounded-xl text-center font-bold ${lastChestPrize > 0 ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'}`}>
+                            {lastChestPrize > 0 ? `🎉 You got ${lastChestPrize} Credits!` : `Empty chest — come back tomorrow!`}
+                          </div>
+                        )}
+                        {chestAvailable ? (
+                          <button
+                            disabled={claimingChest}
+                            onClick={async () => {
+                              setClaimingChest(true);
+                              setLastChestPrize(null);
+                              try {
+                                const r = await apiCall('/rewards/daily-chest', 'POST', { localDate: localDateStr });
+                                setLastChestPrize(r.prize);
+                                setCredits(r.credits);
+                                await loadRewardsStatus();
+                              } catch (err) { alert(err.message || 'Chest failed'); }
+                              finally { setClaimingChest(false); }
+                            }}
+                            className="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                          >
+                            {claimingChest ? '⏳ Opening…' : '📦 Open Daily Chest'}
+                          </button>
+                        ) : (
+                          <div className="bg-gray-50 rounded-xl p-4 text-center">
+                            <p className="text-gray-400 text-sm">Already opened today. Come back tomorrow!</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── STREAK TAB ── */}
                 {accountTab === 'streak' && (() => {
                   // Use campus-tz today — all streak dates in state are campus-tz YYYY-MM-DD strings.
@@ -10696,6 +11077,13 @@ const PlanAssist = () => {
                             {streakShieldsAvailable < 1 ? '🛡️ No shields' : '🛡️ Use Shield'}
                           </button>
                           )}
+                          {/* Buy Shield button */}
+                          <button
+                            onClick={() => setShowBuyShieldModal(true)}
+                            className="px-4 py-2 rounded-xl text-sm font-bold bg-purple-600 hover:bg-purple-700 text-white transition-all shadow-md"
+                          >
+                            🛒 Buy Shield
+                          </button>
                         </div>
                         <div className="flex items-center gap-3">
                           <span className="text-xs text-gray-500">Mode:</span>
@@ -10726,63 +11114,116 @@ const PlanAssist = () => {
                       <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin" />
                     </div>
                   );
+                  // Background card colors for each tier
+                  const bgMap = {
+                    Default:          'bg-gray-50 border-gray-200',
+                    Bronze:           'bg-orange-50 border-orange-200',
+                    Silver:           'bg-slate-50 border-slate-300',
+                    Gold:             'bg-yellow-50 border-yellow-300',
+                    Platinum:         'bg-slate-100 border-slate-400',
+                    Onyx:             'bg-yellow-50 border-yellow-400',
+                    Emerald:          'bg-emerald-50 border-emerald-300',
+                    Sapphire:         'bg-blue-50 border-blue-300',
+                    Ruby:             'bg-rose-50 border-rose-300',
+                    Amethyst:         'bg-violet-50 border-violet-300',
+                    Obsidian:         'bg-indigo-950 border-indigo-800',
+                    Diamond:          'bg-cyan-50 border-cyan-300',
+                    Antimatter:       'bg-fuchsia-50 border-fuchsia-300',
+                    Meteorite:        'bg-stone-100 border-stone-400',
+                    Dragonbone:       'bg-gray-100 border-gray-400',
+                    Celestium:        'bg-purple-50 border-purple-300',
+                    Aether:           'bg-purple-50 border-purple-400',
+                    Soulstone:        'bg-amber-50 border-amber-300',
+                    Starlight:        'bg-gray-900 border-gray-700',
+                    'Astral Crystal': 'bg-slate-50 border-slate-200',
+                    'Dark Matter':    'bg-zinc-900 border-zinc-700',
+                    Neutronium:       'bg-green-950 border-green-700',
+                    'Singularity Core':'bg-cyan-50 border-cyan-300',
+                  };
+                  const selectInsignia = async (label) => {
+                    if (!unlockedLabels.includes(label) || insigniaSelected === label) return;
+                    setInsigniaSelected(label);
+                    try {
+                      await apiCall('/insignia', 'PUT', { label });
+                      loadCompletionFeed();
+                      loadLeaderboard();
+                    } catch (err) {
+                      console.error('Insignia update failed:', err.message);
+                      await loadInsignia();
+                    }
+                  };
                   return (
                     <div>
                       <style>{INSIGNIA_KEYFRAMES}</style>
-                      <h2 className="text-lg font-bold text-gray-900 mb-1">Insignia</h2>
+                      <div className="flex items-center justify-between mb-1">
+                        <h2 className="text-lg font-bold text-gray-900">Insignia</h2>
+                        <span className="text-sm text-purple-600 font-semibold">🪙 {credits} Credits</span>
+                      </div>
                       <p className="text-sm text-gray-500 mb-1">Your Insignia styles your name across PlanAssist — in the nav, Hub, Feed, and Leaderboard.</p>
-                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{insigniaDays}</span> days — unlocking {unlockedLabels.length} / {INSIGNIA_THRESHOLDS.length} Insignias.</p>
-                      <div className="grid grid-cols-2 gap-3">
+                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{insigniaDays}</span> days — unlocking {unlockedLabels.filter(l => !INSIGNIA_PURCHASED.includes(l)).length} / {INSIGNIA_THRESHOLDS.length} earned Insignias.</p>
+
+                      {/* Earned Insignias */}
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🏆 Earned</p>
+                      <div className="grid grid-cols-2 gap-3 mb-6">
                         {INSIGNIA_THRESHOLDS.map(([threshold, label]) => {
                           const unlocked = unlockedLabels.includes(label);
                           const selected = insigniaSelected === label;
-                          // Derive a subtle tinted background from each insignia's color
-                          const bgMap = {
-                            Default:  'bg-gray-50 border-gray-200',
-                            Copper:   'bg-orange-50 border-orange-200',
-                            Silver:   'bg-slate-50 border-slate-300',
-                            Gold:     'bg-yellow-50 border-yellow-300',
-                            Emerald:  'bg-emerald-50 border-emerald-300',
-                            Amethyst: 'bg-violet-50 border-violet-300',
-                            Ruby:     'bg-rose-50 border-rose-300',
-                            Diamond:  'bg-cyan-50 border-cyan-300',
-                            Obsidian: 'bg-indigo-950 border-indigo-800',
-                            Antimatter: 'bg-fuchsia-50 border-fuchsia-300',
-                          };
                           const baseBg = bgMap[label] || 'bg-gray-50 border-gray-200';
                           return (
-                            <button
-                              key={label}
-                              disabled={!unlocked || insigniaLoading}
-                              onClick={async () => {
-                                if (!unlocked || insigniaSelected === label) return;
-                                setInsigniaSelected(label);
-                                try {
-                                  await apiCall('/insignia', 'PUT', { label });
-                                  loadCompletionFeed();
-                                  loadLeaderboard();
-                                } catch (err) {
-                                  console.error('Insignia update failed:', err.message);
-                                  await loadInsignia();
-                                }
-                              }}
-                              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[100px] ${
-                                selected
-                                  ? `${baseBg} border-purple-500 shadow-lg ring-2 ring-purple-300`
-                                  : unlocked
-                                  ? `${baseBg} hover:shadow-md hover:scale-[1.02]`
-                                  : 'bg-gray-50 border-gray-100 opacity-40 cursor-not-allowed'
-                              }`}
-                            >
+                            <button key={label} disabled={!unlocked || insigniaLoading} onClick={() => selectInsignia(label)}
+                              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[90px] ${
+                                selected ? `${baseBg} border-purple-500 shadow-lg ring-2 ring-purple-300`
+                                  : unlocked ? `${baseBg} hover:shadow-md hover:scale-[1.02]`
+                                  : 'bg-gray-50 border-gray-100 opacity-40 cursor-not-allowed'}`}>
                               <span className="text-base font-semibold leading-tight">
                                 {renderInsigniaName(label, label, { fontSize: '1rem' })}
                               </span>
-                              <span className="text-xs text-gray-400 font-medium">
-                                {threshold === 0 ? 'Default' : `${threshold} days`}
-                              </span>
+                              <span className="text-xs text-gray-400">{threshold === 0 ? 'Default' : `${threshold} days`}</span>
                               {selected && <span className="text-purple-600 text-xs font-bold">✓ Active</span>}
                               {!unlocked && <span className="text-gray-400 text-lg">🔒</span>}
                             </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Purchased Insignias */}
+                      <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🛒 Shop</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        {creditsShop.map(item => {
+                          const owned  = unlockedLabels.includes(item.label);
+                          const selected = insigniaSelected === item.label;
+                          const baseBg = bgMap[item.label] || 'bg-gray-50 border-gray-200';
+                          const canAfford = credits >= item.cost;
+                          return (
+                            <div key={item.label}
+                              className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[90px] ${
+                                selected ? `${baseBg} border-purple-500 shadow-lg ring-2 ring-purple-300` : baseBg}`}>
+                              <span className="text-base font-semibold leading-tight">
+                                {renderInsigniaName(item.label, item.label, { fontSize: '1rem' })}
+                              </span>
+                              {owned ? (
+                                <button onClick={() => selectInsignia(item.label)} disabled={selected || insigniaLoading}
+                                  className={`text-xs font-bold px-3 py-1 rounded-lg ${selected ? 'bg-purple-100 text-purple-700' : 'bg-purple-600 text-white hover:bg-purple-700'} disabled:opacity-50`}>
+                                  {selected ? '✓ Active' : 'Equip'}
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={async () => {
+                                    if (!canAfford) return;
+                                    if (!window.confirm(`Buy ${item.label} for ${item.cost} Credits?`)) return;
+                                    try {
+                                      const r = await apiCall('/credits/buy-insignia', 'POST', { label: item.label });
+                                      setCredits(r.credits);
+                                      await loadInsignia();
+                                    } catch (err) { alert(err.message || 'Purchase failed'); }
+                                  }}
+                                  className={`text-xs font-bold px-3 py-1 rounded-lg transition-colors ${canAfford ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
+                                  title={!canAfford ? `Need ${item.cost} credits (you have ${credits})` : `Buy for ${item.cost} credits`}
+                                >
+                                  🪙 {item.cost}
+                                </button>
+                              )}
+                            </div>
                           );
                         })}
                       </div>
