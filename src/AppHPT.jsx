@@ -944,7 +944,7 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
 
   return (
-    <div className="h-[calc(100vh-73px)] overflow-y-auto max-w-7xl mx-auto p-6 space-y-6">
+    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-7xl mx-auto p-6 space-y-6">
 
       {renderStatModal()}
 
@@ -2037,7 +2037,16 @@ export default function AppHPT({ onBack }) {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
+    <div className="planassist-hpt min-h-screen bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
+      {/* Inject scrollbar styles matching PlanAssist system theme */}
+      <style>{`
+        .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
+        .planassist-hpt ::-webkit-scrollbar-track { background: #f1f5f9; }
+        .planassist-hpt ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+        .planassist-hpt * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+        .planassist-hpt .scrollbar-stable { scrollbar-gutter: stable; }
+      `}</style>
       {/* Top nav bar — identical structure to PlanAssist */}
       <nav className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -2085,7 +2094,7 @@ export default function AppHPT({ onBack }) {
       </nav>
 
       {/* Page content */}
-      <main className="flex-1 overflow-y-auto">
+      <main className="flex-1 overflow-y-auto scrollbar-stable">
         {currentPage === 'hub'     && <HubPage hptUser={hptUser} token={token} studios={studios} onNavigate={setCurrentPage} />}
         {currentPage === 'studios' && <StudiosPage token={token} hptUser={hptUser} onStudiosChange={setStudios} />}
         {currentPage === 'monitor' && <MonitorPage token={token} studios={studios} />}
