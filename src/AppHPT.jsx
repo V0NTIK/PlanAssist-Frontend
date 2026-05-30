@@ -2043,7 +2043,7 @@ export default function AppHPT({ onBack }) {
       document.head.appendChild(el);
     }
     el.textContent = `
-      html, body { overflow: hidden; scrollbar-gutter: stable; }
+      html, body { overflow: hidden; margin: 0; padding: 0; }
       .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
       .planassist-hpt ::-webkit-scrollbar-track { background: #f1f5f9; }
       .planassist-hpt ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
