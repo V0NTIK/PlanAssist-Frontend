@@ -952,7 +952,7 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
 
   return (
-    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable max-w-7xl mx-auto p-6 space-y-6">
+    <div className="max-w-7xl mx-auto p-6 space-y-6">
 
       {renderStatModal()}
 
@@ -2044,20 +2044,32 @@ export default function AppHPT({ onBack }) {
     { id: 'marks',    label: 'Marks',    icon: BarChart3 },
   ];
 
+  // Inject scrollbar CSS into document.head — identical approach to App.jsx theme injection.
+  // Runs once on mount; cleans up on unmount so it doesn't bleed into the student app.
+  React.useEffect(() => {
+    const id = 'planassist-hpt-styles';
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('style');
+      el.id = id;
+      document.head.appendChild(el);
+    }
+    el.textContent = `
+      html, body { overflow: hidden; scrollbar-gutter: stable; }
+      .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
+      .planassist-hpt ::-webkit-scrollbar-track { background: #f1f5f9; }
+      .planassist-hpt ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+      .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
+      .planassist-hpt * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+      .planassist-hpt .scrollbar-stable { scrollbar-gutter: stable; }
+    `;
+    return () => { el.textContent = ''; };
+  }, []);
+
   return (
     <div className="planassist-hpt h-screen overflow-hidden bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
-      {/* Scrollbar styles — identical to PlanAssist system theme */}
-      <style>{`
-        html, body { scrollbar-gutter: stable; }
-        .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
-        .planassist-hpt ::-webkit-scrollbar-track { background: #f1f5f9; }
-        .planassist-hpt ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
-        .planassist-hpt * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
-        .planassist-hpt .scrollbar-stable { scrollbar-gutter: stable; }
-      `}</style>
-      {/* Top nav bar — identical structure to PlanAssist */}
-      <nav className="bg-white border-b border-gray-200 px-6 py-4">
+      {/* Top nav bar — flex-shrink-0 so it never participates in height distribution */}
+      <nav className="bg-white border-b border-gray-200 px-6 py-4 flex-shrink-0">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
 
           {/* LEFT: logo + name — identical to PlanAssist logo block */}
