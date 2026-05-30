@@ -10393,36 +10393,89 @@ const PlanAssist = () => {
                             );
                         return (
                           <div>
+                            <div className="flex items-center gap-3 mb-4">
+                              <p className="text-sm text-gray-500 flex-1">Completed and dismissed tasks. Restore any task to send it back to your Task List.</p>
+                              <select value={resolvedSort}
+                                onChange={(e) => { setResolvedSort(e.target.value); loadResolvedTasks(activitySearch, e.target.value); }}
+                                className="px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-500 flex-shrink-0">
+                                <option value="created_at">Sort: Sync Date</option>
+                                <option value="deadline">Sort: Deadline</option>
+                              </select>
+                            </div>
                             {resolvedLoading ? (
-                              <p className="text-gray-400 text-sm text-center py-8">Loading resolutions…</p>
+                              <div className="flex items-center justify-center py-12">
+                                <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                              </div>
                             ) : resFiltered.length === 0 ? (
-                              <p className="text-gray-400 text-sm text-center py-8">
-                                {resolvedTasks.length === 0 ? 'No completed tasks yet.' : 'No results.'}
-                              </p>
+                              <p className="text-gray-400 text-sm text-center py-8">No resolved tasks found.</p>
                             ) : (
                               <div className="space-y-2 max-h-[55vh] overflow-y-auto pr-1">
                                 {resFiltered.map(task => {
-                                  const classColor = getClassColor(task.class);
-                                  const completedDate = task.completedAt ? new Date(task.completedAt).toLocaleDateString() : null;
-                                  const actualMins = task.actualTime ? Math.round(task.actualTime / 60) : null;
-                                  const estimatedMins = task.estimatedTime || task.userEstimate || null;
-                                  const accuracy = actualMins && estimatedMins
-                                    ? Math.round(Math.min(actualMins, estimatedMins) / Math.max(actualMins, estimatedMins) * 100)
-                                    : null;
+                                  const deadlineStr = (() => {
+                                    if (!task.deadline_date) return null;
+                                    const dp = task.deadline_date.includes('T') ? task.deadline_date.split('T')[0] : task.deadline_date;
+                                    const d = task.deadline_time ? new Date(`${dp}T${task.deadline_time}Z`) : new Date(`${dp}T23:59:00`);
+                                    return d.toLocaleDateString();
+                                  })();
+                                  // A task is Completed if completed=true; Dismissed if deleted=true but completed=false
+                                  const isCompleted = task.completed === true || task.completed === 'true';
+                                  const statusLabel = isCompleted ? 'Completed' : 'Dismissed';
+                                  const statusColor = isCompleted ? 'text-green-600' : 'text-gray-400';
+                                  const dotColor   = isCompleted ? 'bg-green-400' : 'bg-gray-300';
+                                  // actual-time editing only available for tasks with a tasks_completed entry
+                                  const hasSession = task.session_actual_time != null;
                                   return (
-                                    <div key={task.id} className="p-3 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
-                                      <div className="flex items-start gap-3">
-                                        <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                        <div className="flex-1 min-w-0">
-                                          <p className="font-medium text-sm text-gray-900 truncate">{task.title}</p>
-                                          <p className="text-xs text-gray-400 mt-0.5">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
-                                          <div className="flex items-center gap-3 mt-1 flex-wrap">
-                                            {completedDate && <span className="text-xs text-green-600">✓ {completedDate}</span>}
-                                            {actualMins != null && <span className="text-xs text-blue-500">{actualMins}m logged</span>}
-                                            {accuracy != null && <span className="text-xs text-purple-500">{accuracy}% accuracy</span>}
-                                          </div>
+                                    <div key={task.id} className="flex items-start gap-3 p-4 border border-gray-100 rounded-xl hover:border-gray-200 transition-colors">
+                                      <div className={`mt-0.5 w-2.5 h-2.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                                      <div className="flex-1 min-w-0">
+                                        {task.url ? (
+                                          <a href={task.url} target="_blank" rel="noreferrer"
+                                            className="font-medium text-sm text-gray-900 hover:text-purple-700 hover:underline block truncate">
+                                            {task.title}{task.segment ? ` · ${task.segment}` : ''}
+                                          </a>
+                                        ) : (
+                                          <p className="font-medium text-sm text-gray-900 truncate">
+                                            {task.title}{task.segment ? ` · ${task.segment}` : ''}
+                                          </p>
+                                        )}
+                                        <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                          <span className="text-xs text-gray-400">{task.class}</span>
+                                          {deadlineStr && <><span className="text-xs text-gray-300">·</span><span className="text-xs text-gray-400">Due {deadlineStr}</span></>}
+                                          <span className="text-xs text-gray-300">·</span>
+                                          <span className={`text-xs font-medium ${statusColor}`}>{statusLabel}</span>
                                         </div>
+                                        {hasSession && (
+                                          <div className="flex items-center gap-2 mt-1.5">
+                                            <Clock className="w-3 h-3 text-gray-300" />
+                                            {editingActualTime === task.id ? (
+                                              <div className="flex items-center gap-1">
+                                                <input type="number" value={editingActualTimeVal} min="0"
+                                                  onChange={(e) => setEditingActualTimeVal(e.target.value)}
+                                                  className="w-16 px-2 py-0.5 border border-purple-300 rounded text-xs focus:ring-1 focus:ring-purple-500" />
+                                                <span className="text-xs text-gray-400">min</span>
+                                                <button onClick={() => saveActualTime(task.id, editingActualTimeVal)}
+                                                  className="text-xs text-green-600 font-medium hover:text-green-700 px-1">Save</button>
+                                                <button onClick={() => setEditingActualTime(null)}
+                                                  className="text-xs text-gray-400 hover:text-gray-600 px-1">×</button>
+                                              </div>
+                                            ) : (
+                                              <button onClick={() => { setEditingActualTime(task.id); setEditingActualTimeVal(String(task.session_actual_time)); }}
+                                                className="text-xs text-gray-400 hover:text-purple-600 transition-colors">
+                                                {task.session_actual_time} min <span className="text-gray-300">(tap to edit)</span>
+                                              </button>
+                                            )}
+                                          </div>
+                                        )}
+                                        {task.completed_at && (
+                                          <p className="text-xs text-gray-300 mt-0.5">
+                                            {statusLabel} {new Date(task.completed_at).toLocaleDateString()}
+                                          </p>
+                                        )}
                                       </div>
+                                      <button onClick={() => restoreTask(task.id)}
+                                        className="flex-shrink-0 text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 font-medium transition-colors">
+                                        Restore
+                                      </button>
                                     </div>
                                   );
                                 })}
