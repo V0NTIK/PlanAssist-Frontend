@@ -3904,115 +3904,191 @@ const PlanAssist = () => {
   };
 
   const playWhiteNoise = (type) => {
-    // Stop any existing audio
     if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
       whiteNoiseAudio.context.close();
     }
 
-    // Use Web Audio API to generate sounds (no external URLs needed!)
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    
-    let oscillator, gainNode, filter;
-    
-    switch(type) {
-      case 'whitenoise':
-        // Pure white noise using buffer
-        const bufferSize = 2 * audioContext.sampleRate;
-        const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
-        const output = noiseBuffer.getChannelData(0);
-        for (let i = 0; i < bufferSize; i++) {
-          output[i] = Math.random() * 2 - 1;
-        }
-        const whiteNoise = audioContext.createBufferSource();
-        whiteNoise.buffer = noiseBuffer;
-        whiteNoise.loop = true;
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.3;
-        whiteNoise.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        whiteNoise.start(0);
-        
-        setWhiteNoiseAudio({
-          context: audioContext,
-          gainNode: gainNode
-        });
-        break;
-        
-      case 'rain':
-      case 'pink':
-        // Pink noise (softer, more balanced than white)
-        const pinkBufferSize = 2 * audioContext.sampleRate;
-        const pinkBuffer = audioContext.createBuffer(1, pinkBufferSize, audioContext.sampleRate);
-        const pinkOutput = pinkBuffer.getChannelData(0);
-        let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
-        for (let i = 0; i < pinkBufferSize; i++) {
-          const white = Math.random() * 2 - 1;
-          b0 = 0.99886 * b0 + white * 0.0555179;
-          b1 = 0.99332 * b1 + white * 0.0750759;
-          b2 = 0.96900 * b2 + white * 0.1538520;
-          b3 = 0.86650 * b3 + white * 0.3104856;
-          b4 = 0.55000 * b4 + white * 0.5329522;
-          b5 = -0.7616 * b5 - white * 0.0168980;
-          pinkOutput[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11;
-          b6 = white * 0.115926;
-        }
-        const pinkNoise = audioContext.createBufferSource();
-        pinkNoise.buffer = pinkBuffer;
-        pinkNoise.loop = true;
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.35;
-        pinkNoise.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        pinkNoise.start(0);
-        
-        setWhiteNoiseAudio({
-          context: audioContext,
-          gainNode: gainNode
-        });
-        break;
-        
-      case 'ocean':
-      case 'brown':
-        // Brown noise (deep, bass-heavy rumble)
-        const brownBufferSize = 2 * audioContext.sampleRate;
-        const brownBuffer = audioContext.createBuffer(1, brownBufferSize, audioContext.sampleRate);
-        const brownOutput = brownBuffer.getChannelData(0);
-        let lastOut = 0;
-        for (let i = 0; i < brownBufferSize; i++) {
-          const white = Math.random() * 2 - 1;
-          brownOutput[i] = (lastOut + (0.02 * white)) / 1.02;
-          lastOut = brownOutput[i];
-          brownOutput[i] *= 3.5;
-        }
-        const brownNoise = audioContext.createBufferSource();
-        brownNoise.buffer = brownBuffer;
-        brownNoise.loop = true;
-        gainNode = audioContext.createGain();
-        gainNode.gain.value = whiteNoiseVolume * 0.4;
-        
-        // Add extra low-pass filtering for ocean (deeper)
-        if (type === 'ocean') {
-          filter = audioContext.createBiquadFilter();
-          filter.type = 'lowpass';
-          filter.frequency.value = 300; // Very low for deep ocean rumble
-          filter.Q.value = 0.5;
-          
-          brownNoise.connect(filter);
-          filter.connect(gainNode);
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const master = ctx.createGain();
+    master.gain.value = whiteNoiseVolume * 0.55;
+    master.connect(ctx.destination);
+
+    // Stereo noise buffer generator
+    const makeNoiseBuf = (color, secs = 6) => {
+      const buf = ctx.createBuffer(2, secs * ctx.sampleRate, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        if (color === 'white') {
+          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        } else if (color === 'pink') {
+          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+          for (let i = 0; i < d.length; i++) {
+            const w = Math.random() * 2 - 1;
+            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
+            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
+            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
+            d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
+          }
         } else {
-          brownNoise.connect(gainNode);
+          let last = 0;
+          for (let i = 0; i < d.length; i++) {
+            const w = Math.random() * 2 - 1;
+            d[i] = (last + 0.02 * w) / 1.02; last = d[i]; d[i] *= 3.5;
+          }
         }
-        
-        gainNode.connect(audioContext.destination);
-        brownNoise.start(0);
-        
-        setWhiteNoiseAudio({
-          context: audioContext,
-          gainNode: gainNode
-        });
+      }
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      return src;
+    };
+
+    // Impulse-response reverb with dry/wet mix
+    const makeReverb = (decaySecs, wet) => {
+      const conv = ctx.createConvolver();
+      const len = Math.floor(ctx.sampleRate * decaySecs);
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.5);
+      }
+      conv.buffer = ir;
+      return {
+        connect(input, output) {
+          const dryG = ctx.createGain(); dryG.gain.value = 1 - wet;
+          const wetG = ctx.createGain(); wetG.gain.value = wet;
+          input.connect(dryG); dryG.connect(output);
+          input.connect(conv); conv.connect(wetG); wetG.connect(output);
+        }
+      };
+    };
+
+    // Slow oscillating gain (LFO for natural movement)
+    const makeSwell = (rateHz, lo, hi) => {
+      const osc = ctx.createOscillator();
+      const modG = ctx.createGain(); modG.gain.value = (hi - lo) / 2;
+      const dcG  = ctx.createGain(); dcG.gain.value  = (hi + lo) / 2;
+      osc.type = 'sine'; osc.frequency.value = rateHz;
+      osc.connect(modG); osc.start();
+      const target = ctx.createGain();
+      modG.connect(target.gain); dcG.connect(target.gain);
+      return target;
+    };
+
+    switch (type) {
+
+      case 'rain': {
+        const base    = makeNoiseBuf('pink');
+        const drizzle = makeNoiseBuf('pink');
+        const shimmer = makeNoiseBuf('white');
+
+        const bpBase = ctx.createBiquadFilter();
+        bpBase.type = 'bandpass'; bpBase.frequency.value = 900; bpBase.Q.value = 0.6;
+
+        const bpDrizzle = ctx.createBiquadFilter();
+        bpDrizzle.type = 'bandpass'; bpDrizzle.frequency.value = 2400; bpDrizzle.Q.value = 0.5;
+        const drizzleG = ctx.createGain(); drizzleG.gain.value = 0.5;
+
+        const hpShimmer = ctx.createBiquadFilter();
+        hpShimmer.type = 'highpass'; hpShimmer.frequency.value = 7000;
+        const shimmerG = ctx.createGain(); shimmerG.gain.value = 0.1;
+
+        const swell = makeSwell(0.065, 0.5, 1.0);
+        const mix   = ctx.createGain();
+        const rev   = makeReverb(1.0, 0.28);
+
+        base.connect(bpBase); bpBase.connect(mix);
+        drizzle.connect(bpDrizzle); bpDrizzle.connect(drizzleG); drizzleG.connect(mix);
+        shimmer.connect(hpShimmer); hpShimmer.connect(shimmerG); shimmerG.connect(mix);
+        mix.connect(swell);
+        rev.connect(swell, master);
+
+        base.start(); drizzle.start(); shimmer.start();
         break;
+      }
+
+      case 'ocean': {
+        const noise = makeNoiseBuf('brown');
+        const lp  = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=300;
+        const hp  = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=35;
+
+        const swellA = makeSwell(0.055, 0.1, 1.0);
+        const swellB = makeSwell(0.043, 0.0, 0.7); // offset rate → alternating waves
+
+        const sub = ctx.createOscillator(); sub.type='sine'; sub.frequency.value=38;
+        const subG = ctx.createGain(); subG.gain.value=0;
+        const subSwell = makeSwell(0.038, 0.0, 0.08);
+        sub.connect(subSwell); subSwell.connect(master);
+        sub.start();
+
+        const mix = ctx.createGain(); mix.gain.value = 0.6;
+        const rev = makeReverb(3.0, 0.45);
+
+        noise.connect(hp); hp.connect(lp);
+        lp.connect(swellA); lp.connect(swellB);
+        swellA.connect(mix); swellB.connect(mix);
+        rev.connect(mix, master);
+        noise.start();
+        break;
+      }
+
+      case 'forest': {
+        const stream  = makeNoiseBuf('brown');
+        const wind    = makeNoiseBuf('pink');
+        const insects = makeNoiseBuf('white');
+
+        const streamLP = ctx.createBiquadFilter(); streamLP.type='lowpass';  streamLP.frequency.value=360;
+        const streamG  = ctx.createGain(); streamG.gain.value=0.75;
+
+        const windBP   = ctx.createBiquadFilter(); windBP.type='bandpass'; windBP.frequency.value=1500; windBP.Q.value=0.4;
+        const windSwell = makeSwell(0.07, 0.25, 1.0);
+
+        const insHP   = ctx.createBiquadFilter(); insHP.type='highpass'; insHP.frequency.value=5500;
+        const insG    = ctx.createGain(); insG.gain.value=0.055;
+        const insSwell = makeSwell(0.28, 0.1, 1.0);
+
+        const mix = ctx.createGain();
+        const rev = makeReverb(1.8, 0.32);
+
+        stream.connect(streamLP); streamLP.connect(streamG); streamG.connect(mix);
+        wind.connect(windBP); windBP.connect(windSwell); windSwell.connect(mix);
+        insects.connect(insHP); insHP.connect(insG); insG.connect(insSwell); insSwell.connect(mix);
+        rev.connect(mix, master);
+
+        stream.start(); wind.start(); insects.start();
+        break;
+      }
+
+      case 'brown': {
+        const noise = makeNoiseBuf('brown');
+        const lp    = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=820;
+        const hp    = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=52;
+        const swell = makeSwell(0.08, 0.72, 1.0);
+        const rev   = makeReverb(1.4, 0.2);
+        noise.connect(hp); hp.connect(lp); lp.connect(swell);
+        rev.connect(swell, master);
+        noise.start();
+        break;
+      }
+
+      case 'pink': {
+        const noise = makeNoiseBuf('pink');
+        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=9500;
+        const rev   = makeReverb(0.7, 0.14);
+        noise.connect(lp);
+        rev.connect(lp, master);
+        noise.start();
+        break;
+      }
+
+      default: {
+        const noise = makeNoiseBuf('white');
+        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=11000;
+        noise.connect(lp); lp.connect(master);
+        noise.start();
+        break;
+      }
     }
-    
+
+    setWhiteNoiseAudio({ context: ctx, gainNode: master });
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
@@ -4020,8 +4096,7 @@ const PlanAssist = () => {
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
     if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
-      // Adjust gain node volume
-      whiteNoiseAudio.gainNode.gain.value = volume * 0.4;
+      whiteNoiseAudio.gainNode.gain.value = volume * 0.55;
     }
   };
 
@@ -6535,7 +6610,8 @@ const PlanAssist = () => {
                     const pct = Math.min(100, Math.max(0, (current / target) * 100));
                     const gap = (target - current).toFixed(1);
                     const isHit = current >= target;
-                    const color = picked.color || '#7c3aed';
+                    // courses table has no color column — resolve from classColors localStorage
+                    const color = getClassColor(picked.name);
                     return (
                       <div className="bg-white rounded-xl shadow-md p-6">
                         <div className="flex items-center gap-2 mb-4">
@@ -7332,14 +7408,27 @@ const PlanAssist = () => {
           const totalLoggedMins = (focusTasks || []).reduce((s, t) => s + Math.floor((t.accumulatedTime || 0) / 60), 0);
           const tomorrowMidnightForUrgent = new Date(); tomorrowMidnightForUrgent.setHours(0,0,0,0); tomorrowMidnightForUrgent.setDate(tomorrowMidnightForUrgent.getDate()+1);
           const urgentCount = eligibleTasks.filter(t => t.dueDate && t.dueDate < tomorrowMidnightForUrgent).length;
-          const suggested = [...eligibleTasks]
-            .sort((a, b) => {
-              const aD = a.dueDate ? a.dueDate - now : Infinity;
-              const bD = b.dueDate ? b.dueDate - now : Infinity;
-              return aD - bD;
-            })
-            .filter(t => !todayFocusIds?.includes(t.id))
-            .slice(0, 8);
+          const MAX_SUGGESTED_TASKS = 8;
+          const MAX_SUGGESTED_MINS = 300; // 5 hours
+          const suggested = (() => {
+            const sorted = [...eligibleTasks]
+              .sort((a, b) => {
+                const aD = a.dueDate ? a.dueDate - now : Infinity;
+                const bD = b.dueDate ? b.dueDate - now : Infinity;
+                return aD - bD;
+              })
+              .filter(t => !todayFocusIds?.includes(t.id));
+            const result = [];
+            let cumMins = 0;
+            for (const t of sorted) {
+              const est = t.userEstimate || t.estimatedTime || 20;
+              if (result.length >= MAX_SUGGESTED_TASKS) break;
+              if (cumMins + est > MAX_SUGGESTED_MINS && result.length > 0) break;
+              result.push(t);
+              cumMins += est;
+            }
+            return result;
+          })();
 
           const getDueInfo = (task) => {
             if (!task.dueDate) return { label: 'No deadline', color: 'text-gray-400', urgency: 'none' };
@@ -12496,11 +12585,12 @@ const PlanAssist = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'rain', label: '🌧️ Soft Rain', desc: 'Gentle pink noise' },
-                            { id: 'ocean', label: '🌊 Deep Rumble', desc: 'Low frequency hum' },
-                            { id: 'brown', label: '🎵 Brown Noise', desc: 'Deep, smooth tone' },
-                            { id: 'pink', label: '💗 Pink Noise', desc: 'Balanced, calming' },
-                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Pure static' }
+                            { id: 'rain',       label: '🌧️ Rainfall',   desc: 'Layered rain with gust swells' },
+                            { id: 'ocean',      label: '🌊 Ocean Waves', desc: 'Alternating swells, sub-bass' },
+                            { id: 'forest',     label: '🌲 Forest',      desc: 'Stream, wind & insects' },
+                            { id: 'brown',      label: '🎵 Brown Noise', desc: 'Warm low-end hum' },
+                            { id: 'pink',       label: '💗 Pink Noise',  desc: 'Balanced, wide-spectrum' },
+                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Full-spectrum static' }
                           ].map(sound => (
                             <button
                               key={sound.id}
