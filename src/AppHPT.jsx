@@ -2025,7 +2025,13 @@ export default function AppHPT({ onBack }) {
     localStorage.removeItem('planassist-hpt-user');
   };
 
-  // Load studios once on login so Monitor and Marks can use them without re-fetching
+  const NAV_ITEMS = [
+    { id: 'hub',      label: 'Hub',      icon: Home },
+    { id: 'studios',  label: 'Studios',  icon: Users },
+    { id: 'monitor',  label: 'Monitor',  icon: Monitor },
+    { id: 'marks',    label: 'Marks',    icon: BarChart3 },
+  ];
+
   // Inject scrollbar CSS into document.head — must be above any conditional returns
   // (Rules of Hooks: hooks cannot be called after a conditional return).
   React.useEffect(() => {
