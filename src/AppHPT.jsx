@@ -192,8 +192,10 @@ function StudioInfoModal({ studio, token, onClose, onSave, onDelete, allHptUsers
                         <tr>
                           <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Name</th>
                           <th className="text-left px-4 py-2 text-xs font-semibold text-gray-500">Grade</th>
-                          <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Period</th>
-                          <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Year</th>
+                          {studio.setup_type === 'course' && <>
+                            <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Period</th>
+                            <th className="text-right px-4 py-2 text-xs font-semibold text-gray-500">Year</th>
+                          </>}
                         </tr>
                       </thead>
                       <tbody>
@@ -201,12 +203,14 @@ function StudioInfoModal({ studio, token, onClose, onSave, onDelete, allHptUsers
                           <tr key={m.id || i} className="border-t border-gray-100 hover:bg-gray-50">
                             <td className="px-4 py-2 font-medium text-gray-800">{m.name}</td>
                             <td className="px-4 py-2 text-gray-500">Gr {m.grade || '—'}</td>
-                            <td className={`px-4 py-2 text-right font-semibold ${gradeColor(m.current_period_score)}`}>
-                              {m.current_period_score != null ? `${m.current_period_score}%` : '—'}
-                            </td>
-                            <td className={`px-4 py-2 text-right font-semibold ${gradeColor(m.final_score)}`}>
-                              {m.final_score != null ? `${m.final_score}%` : '—'}
-                            </td>
+                            {studio.setup_type === 'course' && <>
+                              <td className={`px-4 py-2 text-right font-semibold ${gradeColor(m.current_period_score)}`}>
+                                {m.current_period_score != null ? `${m.current_period_score}%` : '—'}
+                              </td>
+                              <td className={`px-4 py-2 text-right font-semibold ${gradeColor(m.current_score)}`}>
+                                {m.current_score != null ? `${m.current_score}%` : '—'}
+                              </td>
+                            </>}
                           </tr>
                         ))}
                       </tbody>
@@ -1028,7 +1032,7 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
               const pct = Math.min(100, Math.max(0, (current / target) * 100));
               const gap = (target - current).toFixed(1);
               const isHit = current >= target;
-              const color = goalSnapshot.color || '#7c3aed';
+              const color = '#7c3aed'; // courses table has no color column; use PlanAssist purple
               return (
                 <div>
                   <p className="text-xs text-gray-400 mb-3">
@@ -1634,11 +1638,11 @@ function MarksPage({ token, studios }) {
   const selectedStudio = studios.find(s => s.id === selectedStudioId);
   const studioColor = selectedStudio?.color || '#7C3AED';
 
-  // Calculate an average overall score per student across all courses
+  // Per-student average: use current_period_score (active period grade), not final_score
   const avgScore = (courses) => {
-    const valid = courses.filter(c => c.final_score != null);
+    const valid = courses.filter(c => c.current_period_score != null);
     if (valid.length === 0) return null;
-    return Math.round(valid.reduce((s, c) => s + parseFloat(c.final_score), 0) / valid.length);
+    return Math.round(valid.reduce((s, c) => s + parseFloat(c.current_period_score), 0) / valid.length);
   };
 
   const sorted = [...data].sort((a, b) => {
@@ -1842,8 +1846,8 @@ function MarksPage({ token, studios }) {
                                     </span>
                                   </td>
                                   <td className="px-3 py-2 text-center">
-                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${gradeScoreBg(c.final_score)}`}>
-                                      {c.final_score != null ? `${Math.round(c.final_score)}%` : '—'}
+                                    <span className={`text-xs font-bold px-2 py-0.5 rounded ${gradeScoreBg(c.year_score)}`}>
+                                      {c.year_score != null ? `${Math.round(c.year_score)}%` : '—'}
                                     </span>
                                   </td>
                                 </tr>
