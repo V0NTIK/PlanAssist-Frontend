@@ -2026,26 +2026,8 @@ export default function AppHPT({ onBack }) {
   };
 
   // Load studios once on login so Monitor and Marks can use them without re-fetching
-  useEffect(() => {
-    if (!token) return;
-    apiCall('/hpt/studios', 'GET', null, token)
-      .then(d => setStudios(Array.isArray(d) ? d : []))
-      .catch(() => {});
-  }, [token]);
-
-  if (!hptUser || !token) {
-    return <HPTLoginPage onLogin={handleLogin} onBack={onBack} />;
-  }
-
-  const NAV_ITEMS = [
-    { id: 'hub',      label: 'Hub',      icon: Home },
-    { id: 'studios',  label: 'Studios',  icon: Users },
-    { id: 'monitor',  label: 'Monitor',  icon: Monitor },
-    { id: 'marks',    label: 'Marks',    icon: BarChart3 },
-  ];
-
-  // Inject scrollbar CSS into document.head — identical approach to App.jsx theme injection.
-  // Runs once on mount; cleans up on unmount so it doesn't bleed into the student app.
+  // Inject scrollbar CSS into document.head — must be above any conditional returns
+  // (Rules of Hooks: hooks cannot be called after a conditional return).
   React.useEffect(() => {
     const id = 'planassist-hpt-styles';
     let el = document.getElementById(id);
@@ -2065,6 +2047,17 @@ export default function AppHPT({ onBack }) {
     `;
     return () => { el.textContent = ''; };
   }, []);
+
+  useEffect(() => {
+    if (!token) return;
+    apiCall('/hpt/studios', 'GET', null, token)
+      .then(d => setStudios(Array.isArray(d) ? d : []))
+      .catch(() => {});
+  }, [token]);
+
+  if (!hptUser || !token) {
+    return <HPTLoginPage onLogin={handleLogin} onBack={onBack} />;
+  }
 
   return (
     <div className="planassist-hpt h-screen overflow-hidden bg-gradient-to-br from-yellow-50 via-purple-50 to-blue-50 flex flex-col">
