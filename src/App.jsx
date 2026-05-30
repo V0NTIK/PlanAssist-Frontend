@@ -5063,7 +5063,7 @@ const PlanAssist = () => {
     Starlight:
       { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:600, letterSpacing:'-0.02em', fontFamily:'serif' } },
     'Astral Crystal':
-      { animClass:'ins-astral', wave:false, nameStyle:{ color:'#f8fafc', fontWeight:800 } },
+      { animClass:'ins-astral', wave:false, nameStyle:{ color:'#fef9c3', fontWeight:800 } },
     'Dark Matter':
       { animClass:'', wave:false, darkMatter:true, nameStyle:{ color:'#09090b', fontWeight:900, letterSpacing:'0.12em' } },
     Neutronium:
@@ -5138,8 +5138,23 @@ const PlanAssist = () => {
       62%{color:#f5f5f5;transform:translate(0.3px,-0.3px)}
       64%{color:#1c1917}
     }
-    @keyframes ins-glitch { 0%,79%,82%,84%,87%,100%{opacity:1;transform:translate(0)} 80%{opacity:0} 83%{opacity:0.4;transform:translate(1px,0)} 85%{opacity:1} 86%{opacity:0;transform:translate(-1px,0)} }
-    .ins-astral { animation: ins-glitch 3s ease-in-out infinite }
+    @keyframes ins-glitch {
+      0%{opacity:1;transform:translate(0)}
+      12%{opacity:1}
+      14%{opacity:0}
+      18%{opacity:0}
+      20%{opacity:0.3;transform:translate(1px,0)}
+      22%{opacity:0}
+      25%{opacity:1;transform:translate(0)}
+      55%{opacity:1}
+      57%{opacity:0}
+      60%{opacity:0}
+      62%{opacity:0.2;transform:translate(-1px,0)}
+      64%{opacity:0}
+      67%{opacity:1}
+      100%{opacity:1;transform:translate(0)}
+    }
+    .ins-astral { animation: ins-glitch 2.2s ease-in-out infinite }
     /* Neutronium — violent shutter */
     @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
     .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
@@ -5148,6 +5163,9 @@ const PlanAssist = () => {
     .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
     /* Dark Matter drift */
     @keyframes ins-drift { 0%,100%{transform:translateX(0)} 30%{transform:translateX(2px)} 60%{transform:translateX(-1.5px)} 80%{transform:translateX(1px)} }
+    /* Dark Matter purple cloud sweeps */
+    @keyframes ins-dm-cloud-a { 0%{opacity:0;background-position:-100% center} 15%{opacity:1} 70%{opacity:0.8;background-position:200% center} 80%,100%{opacity:0;background-position:200% center} }
+    @keyframes ins-dm-cloud-b { 0%{opacity:0;background-position:200% center} 15%{opacity:1} 70%{opacity:0.7;background-position:-100% center} 80%,100%{opacity:0;background-position:-100% center} }
     /* Soulstone / shared ins-wave */
     @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
     /* Dark Matter jitter */
@@ -5169,12 +5187,12 @@ const PlanAssist = () => {
     if (tier === 'Obsidian') {
       const starBase = { position:'absolute', left:0, top:0, right:0, height:'2px',
         background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.9) 48%,rgba(200,230,255,0.7) 52%,transparent 65%,transparent 100%)',
-        backgroundSize:'200% 100%', pointerEvents:'none' };
+        backgroundSize:'200% 100%', pointerEvents:'none', opacity:0 };
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
           <span className="ins-obsidian" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block' }}>{name}</span>
-          <span style={{ ...starBase, top:'35%', animation:'ins-ob-star-a 5s ease-in-out 0.8s infinite' }} />
-          <span style={{ ...starBase, top:'60%', animation:'ins-ob-star-b 5s ease-in-out 2.5s infinite' }} />
+          <span style={{ ...starBase, top:'35%', animation:'ins-ob-star-a 5s ease-in-out 0.8s infinite', animationFillMode:'backwards' }} />
+          <span style={{ ...starBase, top:'60%', animation:'ins-ob-star-b 5s ease-in-out 2.5s infinite', animationFillMode:'backwards' }} />
         </span>
       );
     }
@@ -5183,13 +5201,13 @@ const PlanAssist = () => {
     if (tier === 'Diamond') {
       const starBase = { position:'absolute', left:0, top:0, right:0, height:'2px',
         background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.95) 48%,rgba(200,240,255,0.8) 52%,transparent 65%,transparent 100%)',
-        backgroundSize:'200% 100%', pointerEvents:'none' };
+        backgroundSize:'200% 100%', pointerEvents:'none', opacity:0 };
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
           <span className="ins-diamond" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block' }}>{name}</span>
-          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite' }} />
-          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite' }} />
-          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite' }} />
+          <span style={{ ...starBase, top:'38%', animation:'ins-star-a 4s ease-in-out 0.5s infinite', animationFillMode:'backwards' }} />
+          <span style={{ ...starBase, top:'22%', animation:'ins-star-b 4s ease-in-out 2.3s infinite', animationFillMode:'backwards' }} />
+          <span style={{ ...starBase, top:'55%', animation:'ins-star-c 4s ease-in-out 3.7s infinite', animationFillMode:'backwards' }} />
         </span>
       );
     }
@@ -5245,17 +5263,18 @@ const PlanAssist = () => {
       );
     }
 
-    // ── Dark Matter: widely spaced letters, violent jitter, side-drift, cloudy bg ─
+    // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep ─
     if (tier === 'Dark Matter') {
-      const cloudStyle = {
-        display:'inline-block',
-        background:'radial-gradient(ellipse at 40% 60%,rgba(80,60,120,0.18) 0%,rgba(30,20,50,0.22) 50%,transparent 80%)',
-        borderRadius:'4px',
-        padding:'0 2px',
-        ...rest,
+      // Purple cloud: a wide soft gradient that sweeps across like Diamond's shooting lines
+      // but much thicker and more visible — a rolling fog rather than a thin streak
+      const cloudBase = {
+        position:'absolute', left:0, top:0, right:0, bottom:0,
+        background:'linear-gradient(90deg,transparent 0%,transparent 10%,rgba(147,51,234,0.28) 30%,rgba(168,85,247,0.42) 48%,rgba(147,51,234,0.28) 66%,transparent 88%,transparent 100%)',
+        backgroundSize:'300% 100%',
+        pointerEvents:'none',
       };
       return (
-        <span style={cloudStyle}>
+        <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
           {name.split('').map((ch, i) => {
             const jitterDelay = (i * 0.07).toFixed(2);
             const driftDelay  = (i * 0.12).toFixed(2);
@@ -5264,6 +5283,10 @@ const PlanAssist = () => {
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
                   animation: `ins-jitter 0.8s ease-in-out ${jitterDelay}s infinite, ins-drift 6s ease-in-out ${driftDelay}s infinite` }}>{ch}</span>;
           })}
+          {/* Purple cloud sweeps LTR every ~5s */}
+          <span style={{ ...cloudBase, animation:'ins-dm-cloud-a 5s ease-in-out 0.5s infinite', opacity:0 }} />
+          {/* Second cloud offset for alternating effect */}
+          <span style={{ ...cloudBase, animation:'ins-dm-cloud-b 5s ease-in-out 2.8s infinite', opacity:0 }} />
         </span>
       );
     }
@@ -11150,12 +11173,7 @@ const PlanAssist = () => {
                   );
                   // All cards use the same neutral background for consistency.
                   // Only Obsidian and Dark Matter get a dark card since their text/animation uses very dark colors.
-                  const bgMap = (label) => {
-                    if (label === 'Obsidian' || label === 'Dark Matter') return 'bg-gray-900 border-gray-700';
-                    if (label === 'Starlight')  return 'bg-gray-900 border-gray-700';
-                    if (label === 'Neutronium') return 'bg-gray-900 border-gray-700';
-                    return 'bg-white border-gray-200';
-                  };
+                  const bgMap = (label) => 'bg-white border-gray-200';
                   const selectInsignia = async (label) => {
                     if (!unlockedLabels.includes(label) || insigniaSelected === label) return;
                     setInsigniaSelected(label);
