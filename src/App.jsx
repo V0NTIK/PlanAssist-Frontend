@@ -5171,9 +5171,9 @@ const PlanAssist = () => {
     .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
     /* Dark Matter drift */
     @keyframes ins-drift { 0%,100%{transform:translateX(0)} 30%{transform:translateX(2px)} 60%{transform:translateX(-1.5px)} 80%{transform:translateX(1px)} }
-    /* Dark Matter purple oval clouds sweep LTR/RTL */
-    @keyframes ins-dm-cloud-a { 0%{opacity:0;transform:translateX(-80%)} 20%{opacity:1} 75%{opacity:0.8;transform:translateX(180%)} 90%,100%{opacity:0;transform:translateX(180%)} }
-    @keyframes ins-dm-cloud-b { 0%{opacity:0;transform:translateX(180%)} 20%{opacity:1} 75%{opacity:0.7;transform:translateX(-80%)} 90%,100%{opacity:0;transform:translateX(-80%)} }
+    /* Dark Matter purple oval clouds sweep via background-position (no clipping) */
+    @keyframes ins-dm-cloud-a { 0%{opacity:0;background-position:-20% center} 15%{opacity:1} 75%{opacity:0.85;background-position:120% center} 88%,100%{opacity:0;background-position:120% center} }
+    @keyframes ins-dm-cloud-b { 0%{opacity:0;background-position:120% center} 15%{opacity:1} 75%{opacity:0.75;background-position:-20% center} 88%,100%{opacity:0;background-position:-20% center} }
     /* Soulstone / shared ins-wave */
     @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
     /* Dark Matter jitter */
@@ -5273,16 +5273,16 @@ const PlanAssist = () => {
 
     // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep ─
     if (tier === 'Dark Matter') {
-      // Purple cloud: a radial ellipse that sweeps across the text.
-      // Using transform:translateX on the oval span makes it glide gracefully,
-      // and border-radius:50% + oversized dimensions give it a soft oval shape
-      // rather than a hard rectangular bar.
+      // Purple cloud: a full-width overlay whose background is a soft oval purple blob.
+      // Animating background-position slides the blob's centre from left-of-frame to
+      // right-of-frame (and vice-versa) — no translateX clipping, works on any text width.
       const cloudBase = {
         position:'absolute',
-        top:'-40%', left:'-15%',
-        width:'30%', height:'180%',
-        background:'radial-gradient(ellipse at center, rgba(168,85,247,0.5) 0%, rgba(147,51,234,0.28) 50%, transparent 80%)',
-        borderRadius:'50%',
+        top:0, left:0, right:0, bottom:0,
+        // Wide background so the blob (centred at 15% of the 400%-wide canvas) slides
+        // cleanly across without hard edges hitting the span boundary.
+        background:'radial-gradient(ellipse 18% 160% at 15% 50%, rgba(168,85,247,0.52) 0%, rgba(147,51,234,0.28) 45%, transparent 75%)',
+        backgroundSize:'400% 100%',
         pointerEvents:'none',
         opacity:0,
       };
