@@ -5061,7 +5061,7 @@ const PlanAssist = () => {
     Soulstone:
       { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700 } },
     Starlight:
-      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800, letterSpacing:'-0.02em' } },
+      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1e3a5f', fontWeight:800, letterSpacing:'-0.02em' } },
     'Astral Crystal':
       { animClass:'ins-astral', wave:false, nameStyle:{ color:'#fde047', fontWeight:800 } },
     'Dark Matter':
@@ -5126,17 +5126,17 @@ const PlanAssist = () => {
       100%{filter:brightness(1) saturate(1)}
     }
     .ins-aether { animation: ins-lightning 1.1s ease-in-out infinite }
-    /* Starlight — individual letters blink white and micro-shake on black background */
+    /* Starlight — individual letters blink white and micro-shake on dark blue background */
     @keyframes ins-starlight {
-      0%,100%{color:#1c1917;transform:translate(0,0)}
-      15%{color:#1c1917}
+      0%,100%{color:#1e3a5f;transform:translate(0,0)}
+      15%{color:#1e3a5f}
       18%{color:#ffffff;transform:translate(0.4px,-0.5px)}
       20%{color:#e5e5e5;transform:translate(-0.3px,0.3px)}
       22%{color:#ffffff;transform:translate(0,0)}
-      25%{color:#1c1917}
-      60%{color:#1c1917}
+      25%{color:#1e3a5f}
+      60%{color:#1e3a5f}
       62%{color:#f5f5f5;transform:translate(0.3px,-0.3px)}
-      64%{color:#1c1917}
+      64%{color:#1e3a5f}
     }
     @keyframes ins-glitch {
       0%{opacity:1;transform:rotate(0deg)}
@@ -5159,14 +5159,15 @@ const PlanAssist = () => {
     /* Neutronium — violent shutter */
     @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
     .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
-    /* Singularity Core — sweep + flame glow */
+    /* Singularity Core — sweep + flame glow + letter expand on pulse */
     @keyframes ins-singularity-shift {
-      0%  { background-position:0% center;   filter:brightness(1) }
-      40% { background-position:120% center; filter:brightness(1.1) }
-      50% { background-position:150% center; filter:brightness(1.6) drop-shadow(0 -3px 8px #a855f7) drop-shadow(0 3px 8px #7c3aed) saturate(1.5) }
-      55% { background-position:165% center; filter:brightness(2.2) drop-shadow(0 -4px 14px #e879f9) drop-shadow(0 4px 14px #a855f7) saturate(2) }
-      60% { background-position:180% center; filter:brightness(1.4) drop-shadow(0 -2px 6px #c084fc) }
-      100%{ background-position:300% center; filter:brightness(1) }
+      0%  { background-position:0% center;   filter:brightness(1);   transform:scale(1) }
+      40% { background-position:120% center; filter:brightness(1.1); transform:scale(1) }
+      50% { background-position:150% center; filter:brightness(1.6) drop-shadow(0 -3px 8px #a855f7) drop-shadow(0 3px 8px #7c3aed) saturate(1.5); transform:scale(1.18,1.22) }
+      55% { background-position:165% center; filter:brightness(2.2) drop-shadow(0 -4px 14px #e879f9) drop-shadow(0 4px 14px #a855f7) saturate(2); transform:scale(1.28,1.32) }
+      60% { background-position:180% center; filter:brightness(1.4) drop-shadow(0 -2px 6px #c084fc); transform:scale(1.1,1.12) }
+      72% { background-position:220% center; filter:brightness(1);   transform:scale(1) }
+      100%{ background-position:300% center; filter:brightness(1);   transform:scale(1) }
     }
     .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
     /* Dark Matter drift */
@@ -5176,6 +5177,8 @@ const PlanAssist = () => {
     @keyframes ins-dm-cloud-b { 0%{opacity:0;background-position:120% center} 15%{opacity:1} 75%{opacity:0.75;background-position:-20% center} 88%,100%{opacity:0;background-position:-20% center} }
     /* Soulstone / shared ins-wave */
     @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
+    /* Soulstone — pulsing between darker and less-dark orange */
+    @keyframes ins-soul-pulse { 0%,100%{color:#92400e} 50%{color:#c2692a} }
     /* Dark Matter jitter */
     @keyframes ins-jitter { 0%,80%,100%{transform:translate(0,0)} 82%{transform:translate(1.5px,-2px)} 84%{transform:translate(-1px,1.5px)} 86%{transform:translate(2px,-1px)} 88%{transform:translate(-1.5px,2px)} 90%{transform:translate(0.5px,-0.5px)} }
   `;
@@ -5247,7 +5250,7 @@ const PlanAssist = () => {
             return ch === ' '
               ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                  animation: `ins-wave ${dur}s ease-in-out ${del}s infinite` }}>{ch}</span>;
+                  animation: `ins-wave ${dur}s ease-in-out ${del}s infinite, ins-soul-pulse ${(1.8 + (i % 4) * 0.35).toFixed(2)}s ease-in-out ${del}s infinite` }}>{ch}</span>;
           })}
         </span>
       );
@@ -5274,20 +5277,18 @@ const PlanAssist = () => {
     // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep ─
     if (tier === 'Dark Matter') {
       // Purple cloud: a full-width overlay whose background is a soft oval purple blob.
-      // Animating background-position slides the blob's centre from left-of-frame to
-      // right-of-frame (and vice-versa) — no translateX clipping, works on any text width.
+      // No overflow:hidden — the gradient fades to transparent naturally so no box clipping.
       const cloudBase = {
         position:'absolute',
-        top:0, left:0, right:0, bottom:0,
-        // Wide background so the blob (centred at 15% of the 400%-wide canvas) slides
-        // cleanly across without hard edges hitting the span boundary.
-        background:'radial-gradient(ellipse 18% 160% at 15% 50%, rgba(168,85,247,0.52) 0%, rgba(147,51,234,0.28) 45%, transparent 75%)',
-        backgroundSize:'400% 100%',
+        top:'-20%', left:'-15%', right:'-15%', bottom:'-20%',
+        // Very wide canvas; blob is a gentle ellipse that fully fades before hitting any edge.
+        background:'radial-gradient(ellipse 12% 120% at 15% 50%, rgba(168,85,247,0.48) 0%, rgba(147,51,234,0.22) 40%, transparent 68%)',
+        backgroundSize:'500% 100%',
         pointerEvents:'none',
         opacity:0,
       };
       return (
-        <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
+        <span style={{ position:'relative', display:'inline-block', ...rest }}>
           {name.split('').map((ch, i) => {
             const jitterDelay = (i * 0.07).toFixed(2);
             const driftDelay  = (i * 0.12).toFixed(2);
