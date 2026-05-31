@@ -5061,9 +5061,9 @@ const PlanAssist = () => {
     Soulstone:
       { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700, fontFamily:'serif' } },
     Starlight:
-      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:600, letterSpacing:'-0.02em', fontFamily:'serif' } },
+      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800, letterSpacing:'-0.02em', fontFamily:'serif' } },
     'Astral Crystal':
-      { animClass:'ins-astral', wave:false, nameStyle:{ color:'#fef9c3', fontWeight:800 } },
+      { animClass:'ins-astral', wave:false, nameStyle:{ color:'#fde047', fontWeight:800 } },
     'Dark Matter':
       { animClass:'', wave:false, darkMatter:true, nameStyle:{ color:'#09090b', fontWeight:900, letterSpacing:'0.12em' } },
     Neutronium:
@@ -5139,22 +5139,23 @@ const PlanAssist = () => {
       64%{color:#1c1917}
     }
     @keyframes ins-glitch {
-      0%{opacity:1;transform:translate(0)}
-      12%{opacity:1}
-      14%{opacity:0}
-      18%{opacity:0}
-      20%{opacity:0.3;transform:translate(1px,0)}
+      0%{opacity:1;transform:rotate(0deg)}
+      8%{opacity:1}
+      10%{opacity:0;transform:rotate(-0.4deg)}
       22%{opacity:0}
-      25%{opacity:1;transform:translate(0)}
-      55%{opacity:1}
-      57%{opacity:0}
-      60%{opacity:0}
-      62%{opacity:0.2;transform:translate(-1px,0)}
-      64%{opacity:0}
-      67%{opacity:1}
-      100%{opacity:1;transform:translate(0)}
+      24%{opacity:0.25;transform:rotate(0.3deg)}
+      26%{opacity:0}
+      30%{opacity:1;transform:rotate(0deg)}
+      50%{opacity:1}
+      53%{opacity:0;transform:rotate(0.4deg)}
+      68%{opacity:0}
+      70%{opacity:0.15;transform:rotate(-0.3deg)}
+      73%{opacity:0}
+      78%{opacity:1;transform:rotate(0deg)}
+      100%{opacity:1;transform:rotate(0deg)}
     }
-    .ins-astral { animation: ins-glitch 2.2s ease-in-out infinite }
+    @keyframes ins-pendulum { 0%,100%{transform:rotate(-0.8deg)} 50%{transform:rotate(0.8deg)} }
+    .ins-astral { animation: ins-glitch 2.8s ease-in-out infinite, ins-pendulum 3.5s ease-in-out infinite }
     /* Neutronium — violent shutter */
     @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
     .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
@@ -5163,9 +5164,9 @@ const PlanAssist = () => {
     .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
     /* Dark Matter drift */
     @keyframes ins-drift { 0%,100%{transform:translateX(0)} 30%{transform:translateX(2px)} 60%{transform:translateX(-1.5px)} 80%{transform:translateX(1px)} }
-    /* Dark Matter purple cloud sweeps */
-    @keyframes ins-dm-cloud-a { 0%{opacity:0;background-position:-100% center} 15%{opacity:1} 70%{opacity:0.8;background-position:200% center} 80%,100%{opacity:0;background-position:200% center} }
-    @keyframes ins-dm-cloud-b { 0%{opacity:0;background-position:200% center} 15%{opacity:1} 70%{opacity:0.7;background-position:-100% center} 80%,100%{opacity:0;background-position:-100% center} }
+    /* Dark Matter purple oval clouds sweep LTR/RTL */
+    @keyframes ins-dm-cloud-a { 0%{opacity:0;transform:translateX(-80%)} 20%{opacity:1} 75%{opacity:0.8;transform:translateX(180%)} 90%,100%{opacity:0;transform:translateX(180%)} }
+    @keyframes ins-dm-cloud-b { 0%{opacity:0;transform:translateX(180%)} 20%{opacity:1} 75%{opacity:0.7;transform:translateX(-80%)} 90%,100%{opacity:0;transform:translateX(-80%)} }
     /* Soulstone / shared ins-wave */
     @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
     /* Dark Matter jitter */
@@ -5265,13 +5266,18 @@ const PlanAssist = () => {
 
     // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep ─
     if (tier === 'Dark Matter') {
-      // Purple cloud: a wide soft gradient that sweeps across like Diamond's shooting lines
-      // but much thicker and more visible — a rolling fog rather than a thin streak
+      // Purple cloud: a radial ellipse that sweeps across the text.
+      // Using transform:translateX on the oval span makes it glide gracefully,
+      // and border-radius:50% + oversized dimensions give it a soft oval shape
+      // rather than a hard rectangular bar.
       const cloudBase = {
-        position:'absolute', left:0, top:0, right:0, bottom:0,
-        background:'linear-gradient(90deg,transparent 0%,transparent 10%,rgba(147,51,234,0.28) 30%,rgba(168,85,247,0.42) 48%,rgba(147,51,234,0.28) 66%,transparent 88%,transparent 100%)',
-        backgroundSize:'300% 100%',
+        position:'absolute',
+        top:'-60%', left:'-30%',
+        width:'60%', height:'220%',
+        background:'radial-gradient(ellipse at center, rgba(168,85,247,0.45) 0%, rgba(147,51,234,0.25) 45%, transparent 75%)',
+        borderRadius:'50%',
         pointerEvents:'none',
+        opacity:0,
       };
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
@@ -5283,10 +5289,8 @@ const PlanAssist = () => {
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
                   animation: `ins-jitter 0.8s ease-in-out ${jitterDelay}s infinite, ins-drift 6s ease-in-out ${driftDelay}s infinite` }}>{ch}</span>;
           })}
-          {/* Purple cloud sweeps LTR every ~5s */}
-          <span style={{ ...cloudBase, animation:'ins-dm-cloud-a 5s ease-in-out 0.5s infinite', opacity:0 }} />
-          {/* Second cloud offset for alternating effect */}
-          <span style={{ ...cloudBase, animation:'ins-dm-cloud-b 5s ease-in-out 2.8s infinite', opacity:0 }} />
+          <span style={{ ...cloudBase, animation:'ins-dm-cloud-a 5s ease-in-out 0.5s infinite' }} />
+          <span style={{ ...cloudBase, animation:'ins-dm-cloud-b 5s ease-in-out 2.8s infinite' }} />
         </span>
       );
     }
