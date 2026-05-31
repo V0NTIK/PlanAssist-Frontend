@@ -5025,11 +5025,11 @@ const PlanAssist = () => {
     Default:
       { animClass:'', wave:false, nameStyle:{ color:'#e5e7eb', fontWeight:600 } },
     Bronze:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
     Silver:
       { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#b0b8c4,#d0d5dc,#b0b8c4)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
     Gold:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#eab308,#a16207)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#eab308,#a16207)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
     Platinum:
       { animClass:'ins-platinum', wave:false, nameStyle:{ background:'linear-gradient(135deg,#475569,#f1f5f9,#334155,#e2e8f0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
     Onyx:
