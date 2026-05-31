@@ -10778,7 +10778,7 @@ const PlanAssist = () => {
 
                 {/* ── REWARDS TAB ── */}
                 {accountTab === 'rewards' && (() => {
-                  const SPIN_PRIZES = [0, 0, 10, 10, 10, 20, 20, 20, 30, 30, 50, 50, 75, 100, 150, 200];
+                  const SPIN_PRIZES = [0, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40];
                   // Get user's local date string for daily chest
                   const localDateStr = (() => {
                     const d = new Date();
@@ -10876,7 +10876,7 @@ const PlanAssist = () => {
                           )}
                         </div>
                         <p className="text-xs text-gray-400 mb-4">
-                          Earn 10 Credits for every reaction your Live Feed entries receive. Reactions older than 7 days cannot be claimed — claim regularly!
+                          Earn 5 Credits for every reaction your Live Feed entries receive. Reactions older than 7 days cannot be claimed — claim regularly!
                         </p>
                         {rewardsLoading ? (
                           <div className="flex justify-center py-4"><div className="w-6 h-6 border-2 border-pink-400 border-t-transparent rounded-full animate-spin" /></div>
@@ -10888,7 +10888,7 @@ const PlanAssist = () => {
                           <div>
                             <div className="bg-pink-50 rounded-xl p-4 text-center mb-3">
                               <p className="text-pink-700 font-semibold">{unclaimedReactions} unclaimed reaction{unclaimedReactions !== 1 ? 's' : ''}</p>
-                              <p className="text-pink-600 text-sm">= {unclaimedReactions * 10} Credits available</p>
+                              <p className="text-pink-600 text-sm">= {unclaimedReactions * 5} Credits available</p>
                             </div>
                             <button
                               disabled={claimingReactions}
@@ -10903,7 +10903,7 @@ const PlanAssist = () => {
                               }}
                               className="w-full py-3 bg-pink-500 hover:bg-pink-600 text-white font-bold rounded-xl transition-colors disabled:opacity-50"
                             >
-                              {claimingReactions ? '⏳ Claiming…' : `❤️ Claim ${unclaimedReactions * 10} Credits`}
+                              {claimingReactions ? '⏳ Claiming…' : `❤️ Claim ${unclaimedReactions * 5} Credits`}
                             </button>
                           </div>
                         )}
