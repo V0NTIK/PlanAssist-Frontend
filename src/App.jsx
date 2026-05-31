@@ -6234,7 +6234,11 @@ const PlanAssist = () => {
 
             {/* Tab selector */}
             <div className={`flex border-b flex-shrink-0 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-white'}`}>
-              {[['alerts','Alerts'],['updates','Updates']].map(([key, label]) => (
+              {[['alerts','Alerts'],['updates','Updates']].map(([key, label]) => {
+                const unreadCount = key === 'alerts'
+                  ? notifUnreadCount
+                  : notifications.filter(n => n.is_unread && ['announcement','discussion','message'].includes(n.type)).length;
+                return (
                 <button
                   key={key}
                   onClick={() => setNotifTab(key)}
@@ -6245,11 +6249,12 @@ const PlanAssist = () => {
                   }`}
                 >
                   {label}
-                  {key === 'alerts' && notifUnreadCount > 0 && (
-                    <span className="ml-1.5 bg-purple-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{notifUnreadCount}</span>
+                  {unreadCount > 0 && (
+                    <span className="ml-1.5 bg-purple-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{unreadCount}</span>
                   )}
                 </button>
-              ))}
+                );
+              })}
             </div>
 
             {/* Notification list */}
@@ -6399,6 +6404,8 @@ const PlanAssist = () => {
                     ['announcement','discussion','message'].includes(n.type)
                   ).sort((a, b) => new Date(b.event_time) - new Date(a.event_time));
 
+                  const unreadUpdates = updateItems.filter(n => n.is_unread);
+
                   if (updateItems.length === 0) {
                     return (
                       <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
@@ -6409,8 +6416,20 @@ const PlanAssist = () => {
                     );
                   }
                   return (
-                    <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-gray-100'}`}>
-                      {updateItems.map(n => renderRow(n))}
+                    <div>
+                      {unreadUpdates.length > 0 && (
+                        <div className={`px-4 py-2 flex items-center justify-between sticky top-0 z-10 ${dark ? 'bg-gray-800 border-b border-gray-700' : 'bg-gray-50 border-b border-gray-200'}`}>
+                          <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
+                            {unreadUpdates.length} unread
+                          </span>
+                          <button onClick={markAllNotifsRead} className={`text-[11px] font-medium ${dark ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
+                            Mark all read
+                          </button>
+                        </div>
+                      )}
+                      <div className={`divide-y ${dark ? 'divide-gray-800' : 'divide-gray-100'}`}>
+                        {updateItems.map(n => renderRow(n))}
+                      </div>
                     </div>
                   );
                 }
