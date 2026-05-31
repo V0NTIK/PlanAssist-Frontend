@@ -5691,8 +5691,10 @@ const PlanAssist = () => {
     setNotifLoading(true);
     try {
       const data = await apiCall('/notifications', 'GET');
-      setNotifications(Array.isArray(data) ? data : []);
-      setNotifUnreadCount((Array.isArray(data) ? data : []).filter(n => n.is_unread).length);
+      const arr = Array.isArray(data) ? data : [];
+      setNotifications(arr);
+      // Total unread = all types (alerts + updates) so the bell badge reflects both
+      setNotifUnreadCount(arr.filter(n => n.is_unread).length);
     } catch (e) { /* silently ignore */ }
     finally { setNotifLoading(false); }
   };
@@ -5709,6 +5711,25 @@ const PlanAssist = () => {
       await apiCall('/notifications/read-all', 'POST');
       setNotifications(prev => prev.map(n => ({ ...n, is_unread: false })));
       setNotifUnreadCount(0);
+    } catch (e) { /* silently ignore */ }
+  };
+
+  // Mark only Updates (canvas) items as read — used by the Updates tab header
+  const markUpdatesRead = async () => {
+    try {
+      const UPDATE_TYPES = ['announcement','discussion','message'];
+      const unreadCanvasIds = notifications
+        .filter(n => n.is_unread && UPDATE_TYPES.includes(n.type))
+        .map(n => n.id);
+      await Promise.all(unreadCanvasIds.map(id => apiCall(`/notifications/${id}/read`, 'PATCH').catch(() => {})));
+      setNotifications(prev => {
+        const updated = prev.map(n =>
+          UPDATE_TYPES.includes(n.type) ? { ...n, is_unread: false } : n
+        );
+        // Recompute total from the fresh array
+        setNotifUnreadCount(updated.filter(n => n.is_unread).length);
+        return updated;
+      });
     } catch (e) { /* silently ignore */ }
   };
 
@@ -6242,9 +6263,11 @@ const PlanAssist = () => {
             {/* Tab selector */}
             <div className={`flex border-b flex-shrink-0 ${colorTheme === 'dark' || colorTheme === 'cool' ? 'border-gray-700 bg-gray-900' : 'border-gray-200 bg-white'}`}>
               {[['alerts','Alerts'],['updates','Updates']].map(([key, label]) => {
+                const ALERT_TYPES  = ['grade','insignia','badge','studio'];
+                const UPDATE_TYPES = ['announcement','discussion','message'];
                 const unreadCount = key === 'alerts'
-                  ? notifUnreadCount
-                  : notifications.filter(n => n.is_unread && ['announcement','discussion','message'].includes(n.type)).length;
+                  ? notifications.filter(n => n.is_unread && ALERT_TYPES.includes(n.type)).length
+                  : notifications.filter(n => n.is_unread && UPDATE_TYPES.includes(n.type)).length;
                 return (
                 <button
                   key={key}
@@ -6345,7 +6368,7 @@ const PlanAssist = () => {
                       </div>
                       {isUnread && (
                         <button onClick={(e) => dismissOne(n.id, e)} title="Mark as read"
-                          className={`flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded ${dark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}>
+                          className={`flex-shrink-0 transition-opacity p-1 rounded ${dark ? 'text-gray-500 hover:text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100'}`}>
                           <X className="w-3.5 h-3.5" />
                         </button>
                       )}
@@ -6429,7 +6452,7 @@ const PlanAssist = () => {
                           <span className={`text-[11px] font-bold uppercase tracking-widest ${dark ? 'text-gray-400' : 'text-gray-500'}`}>
                             {unreadUpdates.length} unread
                           </span>
-                          <button onClick={markAllNotifsRead} className={`text-[11px] font-medium ${dark ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
+                          <button onClick={markUpdatesRead} className={`text-[11px] font-medium ${dark ? 'text-gray-400 hover:text-gray-200' : 'text-purple-600 hover:text-purple-800'}`}>
                             Mark all read
                           </button>
                         </div>
