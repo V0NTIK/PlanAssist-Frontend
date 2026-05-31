@@ -5059,9 +5059,9 @@ const PlanAssist = () => {
     Aether:
       { animClass:'ins-aether', wave:false, nameStyle:{ background:'linear-gradient(135deg,#7c3aed,#a21caf,#5b21b6)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, position:'relative' } },
     Soulstone:
-      { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700, fontFamily:'serif' } },
+      { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700 } },
     Starlight:
-      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800, letterSpacing:'-0.02em', fontFamily:'serif' } },
+      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800, letterSpacing:'-0.02em' } },
     'Astral Crystal':
       { animClass:'ins-astral', wave:false, nameStyle:{ color:'#fde047', fontWeight:800 } },
     'Dark Matter':
@@ -5160,7 +5160,14 @@ const PlanAssist = () => {
     @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
     .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
     /* Singularity Core — sweep + flame glow */
-    @keyframes ins-singularity-shift { 0%{background-position:0% center;filter:brightness(1)} 50%{background-position:150% center;filter:brightness(1.3) drop-shadow(0 -2px 4px #a855f7)} 100%{background-position:300% center;filter:brightness(1)} }
+    @keyframes ins-singularity-shift {
+      0%  { background-position:0% center;   filter:brightness(1) }
+      40% { background-position:120% center; filter:brightness(1.1) }
+      50% { background-position:150% center; filter:brightness(1.6) drop-shadow(0 -3px 8px #a855f7) drop-shadow(0 3px 8px #7c3aed) saturate(1.5) }
+      55% { background-position:165% center; filter:brightness(2.2) drop-shadow(0 -4px 14px #e879f9) drop-shadow(0 4px 14px #a855f7) saturate(2) }
+      60% { background-position:180% center; filter:brightness(1.4) drop-shadow(0 -2px 6px #c084fc) }
+      100%{ background-position:300% center; filter:brightness(1) }
+    }
     .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
     /* Dark Matter drift */
     @keyframes ins-drift { 0%,100%{transform:translateX(0)} 30%{transform:translateX(2px)} 60%{transform:translateX(-1.5px)} 80%{transform:translateX(1px)} }
@@ -5272,9 +5279,9 @@ const PlanAssist = () => {
       // rather than a hard rectangular bar.
       const cloudBase = {
         position:'absolute',
-        top:'-60%', left:'-30%',
-        width:'60%', height:'220%',
-        background:'radial-gradient(ellipse at center, rgba(168,85,247,0.45) 0%, rgba(147,51,234,0.25) 45%, transparent 75%)',
+        top:'-40%', left:'-15%',
+        width:'30%', height:'180%',
+        background:'radial-gradient(ellipse at center, rgba(168,85,247,0.5) 0%, rgba(147,51,234,0.28) 50%, transparent 80%)',
         borderRadius:'50%',
         pointerEvents:'none',
         opacity:0,
