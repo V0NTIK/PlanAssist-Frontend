@@ -5009,9 +5009,9 @@ const PlanAssist = () => {
   // ── Streak data loader (client-side calculation) ──────────────────────
   // Insignia tiers — unlock thresholds by days with ≥1 completion
   const INSIGNIA_THRESHOLDS = [
-    [0,'Default'],[2,'Bronze'],[5,'Silver'],[10,'Gold'],[20,'Platinum'],
-    [30,'Onyx'],[40,'Emerald'],[50,'Sapphire'],[60,'Ruby'],[70,'Amethyst'],
-    [80,'Obsidian'],[90,'Diamond'],[100,'Antimatter']
+    [0,'Default'],[2,'Bronze'],[5,'Silver'],[10,'Gold'],
+    [20,'Emerald'],[30,'Sapphire'],[40,'Ruby'],[50,'Amethyst'],
+    [60,'Obsidian'],[80,'Diamond'],[100,'Antimatter']
   ];
 
   // Purchased insignia definitions (from shop)
