@@ -9814,7 +9814,7 @@ const PlanAssist = () => {
                     { id: 'streak',  label: 'Streak',  icon: Zap },
                     { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
-                    ...(user?.isAdmin ? [{ id: 'studios', label: 'Studios', icon: Users }] : []),
+                    { id: 'studios', label: 'Studios', icon: Users },
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
@@ -11434,8 +11434,8 @@ const PlanAssist = () => {
                   );
                 })()}
 
-                {/* ── STUDIOS TAB (admin only during testing) ── */}
-                {accountTab === 'studios' && user?.isAdmin && (() => {
+                {/* ── STUDIOS TAB ── */}
+                {accountTab === 'studios' && (() => {
                   return (
                     <div className="space-y-6">
                       <div>
