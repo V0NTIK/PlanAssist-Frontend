@@ -2837,10 +2837,29 @@ const PlanAssist = () => {
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
+
+      // Validate: all segment names must be non-empty
+      if (splitSegments.some(seg => !seg.name.trim())) {
+        alert('All segment names must be filled in.');
+        return;
+      }
+
+      // Convert each segment's deadline time from local HH:MM → UTC HH:MM:SS
+      // The rest of the app stores/renders deadline_time as UTC, so we align here.
+      const localToUtcTime = (dateStr, localTime) => {
+        if (!dateStr || !localTime) return null;
+        const dt = new Date(`${dateStr}T${localTime}:00`); // parsed as local
+        const hh = String(dt.getUTCHours()).padStart(2, '0');
+        const mm = String(dt.getUTCMinutes()).padStart(2, '0');
+        return `${hh}:${mm}:00`;
+      };
+
       const segments = splitSegments.map(seg => ({
-        name: seg.name,
+        name: seg.name.trim(),
         deadlineDate: seg.deadlineDate || null,
-        deadlineTime: seg.deadlineTime || null,
+        deadlineTime: seg.deadlineDate && seg.deadlineTime
+          ? localToUtcTime(seg.deadlineDate, seg.deadlineTime)
+          : null,
       }));
       const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segments.map(s => s.name) });
       if (result.success) {
@@ -6009,31 +6028,49 @@ const PlanAssist = () => {
     {
       page: 'hub',
       title: '👋 Welcome to PlanAssist!',
-      body: 'This is your Hub — your home base. Here you can see your live activity feed, leaderboard, and stats at a glance.',
+      body: 'This is your Hub — your home base. Your streak, stats, live activity feed, and weekly leaderboard all live here. It\'s your daily snapshot of how you\'re doing.',
       arrow: null,
     },
     {
       page: 'tasks',
-      title: '📋 Your Task List',
-      body: 'This is where all your Canvas assignments live. Tasks are automatically sorted by deadline. Set manual time estimates, split big tasks into segments, or start a session directly. Hit Sync to pull in fresh assignments from Canvas.',
+      title: '📋 Tasks',
+      body: 'All your Canvas assignments appear here, automatically sorted by deadline. Hit Sync to pull in fresh tasks. You can set a custom time estimate on any task, split a large task into named segments with individual deadlines, or start a timed session directly from this page.',
       arrow: null,
     },
     {
       page: 'sessions',
-      title: '⏱ Focus',
-      body: "Focus is your productivity launchpad. Set today's priority list, start timed work sessions on individual tasks, and track your progress. The timer runs while you work.",
+      title: '⚡ Focus',
+      body: "Focus is where you work. Pick the tasks you want to tackle today to build your focus list, then hit Start on any task to begin a count-up timer. Your time is saved automatically — you can pause, resume, and come back later. Complete the task when you're done and it's logged to your streak and stats.",
+      arrow: null,
+    },
+    {
+      page: 'agendas',
+      title: '📋 Agendas',
+      body: 'Agendas let you build structured, timed work blocks — each row is a task with a set time allocation. Run an Agenda when you want a planned session with a countdown per task rather than a free-running timer.',
+      arrow: null,
+    },
+    {
+      page: 'itinerary',
+      title: '🗓 Itinerary',
+      body: 'The Itinerary shows your full school day — Lesson periods with Zoom links alongside your Study periods pre-filled with tasks. Grades 7–12 only, and requires your schedule to be enhanced with course-to-period assignments first.',
       arrow: null,
     },
     {
       page: 'marks',
       title: '📊 Marks',
-      body: 'The Marks page shows your current grade in every course, compared against the global average of all PlanAssist users. Grades update automatically when you sync.',
+      body: 'Marks shows your current grade in every course, your GPA, and how you compare against the global average of all PlanAssist students. Drill into any course to see assignment-level scores. Grades update automatically on each Sync.',
+      arrow: null,
+    },
+    {
+      page: 'account',
+      title: '🎖️ Rewards & Insignia',
+      body: 'Your Account page is also your rewards hub. Earn credits from the daily chest, leaderboard spins, and feed reactions — then spend them on Streak Shields or exclusive Insignias that show next to your name in the feed and leaderboard. Check your streak history, gallery badges, and personal goals here too.',
       arrow: null,
     },
     {
       page: 'hub',
       title: '🚀 You\'re all set!',
-      body: "Start by syncing your Canvas tasks, then use Focus to set today's priorities and start working. Good luck!",
+      body: 'Start by heading to Tasks and hitting Sync to pull in your Canvas assignments. Then open Focus, build your list for today, and start your first session. Good luck!',
       arrow: null,
     },
   ];
@@ -6579,7 +6616,7 @@ const PlanAssist = () => {
               </div>
               <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
                 <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
-                <p className="text-purple-800">Open Focus to set today's priorities and start timed work sessions. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
+                <p className="text-purple-800">Open Focus to pick today's tasks and start timed work sessions. Manage Tasks opens your deadline-sorted Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
               </div>
             </div>
           </div>
@@ -7463,7 +7500,7 @@ const PlanAssist = () => {
                                     })()}
                                     {!className.toLowerCase().includes('homeroom') && (
                                       <button 
-                                        onClick={() => setShowSplitTask(task.id)}
+                                        onClick={() => { setShowSplitTask(task.id); setSplitSegments([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]); }}
                                         className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
                                       >
                                         Split
@@ -8182,12 +8219,12 @@ const PlanAssist = () => {
                             <Target className="w-10 h-10 text-purple-400" />
                           </div>
                           <h2 className="text-xl font-bold text-gray-800 mb-2">No focus list set</h2>
-                          <p className="text-gray-500 text-sm mb-6">Pick your priority tasks for today using the panel on the left to unlock the session dashboard.</p>
+                          <p className="text-gray-500 text-sm mb-6">Pick the tasks you want to work on today to build your focus list.</p>
                           <button
                             onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
                             className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl font-bold transition-colors flex items-center gap-2 mx-auto"
                           >
-                            <Zap className="w-5 h-5" />Set Today's Priorities
+                            <Zap className="w-5 h-5" />Set Today's Focus List
                           </button>
                         </div>
                       </div>
@@ -8203,8 +8240,8 @@ const PlanAssist = () => {
                   <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl">
                     <div className="p-5 border-b border-gray-100 flex items-center justify-between">
                       <div>
-                        <h3 className="text-gray-900 text-xl font-bold">Set Today's Priorities</h3>
-                        <p className="text-gray-500 text-sm mt-0.5">Pick 1–10 tasks to focus on ({sessionPickerSel.length}/10)</p>
+                        <h3 className="text-gray-900 text-xl font-bold">Set Today's Focus List</h3>
+                        <p className="text-gray-500 text-sm mt-0.5">Pick 1–10 tasks to work on today ({sessionPickerSel.length}/10)</p>
                       </div>
                       <button onClick={() => setSessionPrioritiesPickerOpen(false)} className="text-gray-400 hover:text-gray-600 p-1"><X className="w-5 h-5" /></button>
                     </div>
@@ -9027,11 +9064,6 @@ const PlanAssist = () => {
               .replace(/\s{2,}/g,' ').trim();
           };
 
-          // Priority lookup
-          const priorityMap = {};
-          // priorityOrder removed — tasks are deadline-sorted
-
-
           return (
             <div className="flex flex-col h-[calc(100vh-73px)] bg-gradient-to-br from-gray-50 to-blue-50">
 
@@ -9107,7 +9139,6 @@ const PlanAssist = () => {
                           )}
                           {dayTasks.map((task) => {
                             const color = getClassColor(task.class || '');
-                            const priority = priorityMap[task.id];
                             const timeStr = task.hasSpecificTime && task.dueDate
                               ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
                               : null;
@@ -9133,7 +9164,6 @@ const PlanAssist = () => {
                               >
                                 {!isExpanded && (
                                   <div className="px-1.5 py-1 flex items-start gap-1">
-                                    {priority && <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>}
                                     <span className={`truncate flex-1 ${isDone ? 'line-through opacity-60' : ''}`}>
                                       {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
                                       {displayTitle}
@@ -9144,7 +9174,6 @@ const PlanAssist = () => {
                                   <div className="p-2 space-y-1.5">
                                     <div className="flex items-start justify-between gap-1">
                                       <div className={`font-semibold leading-tight ${isDone ? 'line-through opacity-70' : ''}`}>
-                                        {priority && <span className="opacity-80">#{priority} · </span>}
                                         {timeStr && <span className="opacity-80">{timeStr} · </span>}
                                         {displayTitle}
                                       </div>
