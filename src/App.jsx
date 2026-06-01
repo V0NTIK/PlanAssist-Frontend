@@ -211,6 +211,8 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
     grade: user.grade || '',
     campus: user.campus || 'Ashland',
     is_admin: user.is_admin || false,
+    email: user.email || '',
+    password: '',
   });
   const [campusInput, setCampusInput] = React.useState(user.campus || 'Ashland');
   const [campusSuggestions, setCampusSuggestions] = React.useState([]);
@@ -256,10 +258,26 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
           <label htmlFor="isAdminCheck" className="text-sm font-medium text-gray-700">Admin</label>
           {user.id === currentUserId && <span className="text-xs text-gray-400">(can't remove own admin)</span>}
         </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+          <input value={form.email} onChange={e => setForm(p => ({...p, email: e.target.value}))}
+            type="email" placeholder="user@example.com"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">New Password <span className="text-gray-400 font-normal">(leave blank to keep)</span></label>
+          <input value={form.password} onChange={e => setForm(p => ({...p, password: e.target.value}))}
+            type="password" placeholder="Min 6 characters"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
-        <button onClick={() => onSave(form)} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
+        <button onClick={() => {
+          const fields = { name: form.name, grade: form.grade, campus: campusInput, is_admin: form.is_admin, email: form.email };
+          if (form.password.trim().length >= 6) fields.password = form.password.trim();
+          onSave(fields);
+        }} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
       </div>
     </div>
   );
@@ -514,6 +532,7 @@ const PlanAssist = () => {
   const [pipPopupSelectorOpen, setPipPopupSelectorOpen] = useState(false);
   const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
   const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
+  const pipIsZoomPingRef = React.useRef(false);        // true when the current PiP window is a Zoom Ping (not a session/agenda popup)
 
   // ── Itinerary & Enhance Schedule state ───────────────────────────────────
   const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
@@ -687,6 +706,7 @@ const PlanAssist = () => {
   const [drawColor, setDrawColor] = useState('#000000');
   const [drawWidth, setDrawWidth] = useState(3);
   const whiteboardRef = React.useRef(null);
+  const bannerRef = React.useRef(null);   // wraps all inline banners; drives --banner-h CSS var
   const [whiteboardInitialized, setWhiteboardInitialized] = useState(false);
   
   // White noise state
@@ -2189,6 +2209,12 @@ const PlanAssist = () => {
   const startTaskSession = async (task) => {
     setSessionStartingId(task.id);
 
+    // Clear any stale completion screen state from a previously completed task.
+    // If the user navigated away from session-active without clicking "Back to Focus",
+    // showSessionComplete and currentSessionTask are still set — clear them now so
+    // the new session renders the timer, not the old completion screen.
+    setShowSessionComplete(false);
+
     // Request the PiP window IMMEDIATELY inside the click handler — before any
     // await — so the browser user-gesture requirement is satisfied.
     // If PiP is unavailable we get null and fall back to the in-page render.
@@ -2202,6 +2228,23 @@ const PlanAssist = () => {
     }
 
     try {
+      // If another session is already running, save its elapsed time and end it
+      // cleanly before starting the new one — never complete it automatically.
+      if (currentSessionTask && currentSessionTask.id !== task.id) {
+        let snappedElapsed = sessionElapsed;
+        if (isTimerRunning && timerStartWallRef.current !== null) {
+          const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
+          snappedElapsed = timerBaseElapsedRef.current + wallElapsed;
+        }
+        try {
+          await apiCall(`/sessions/end/${currentSessionTask.id}`, 'POST', {
+            accumulatedTime: Math.round(snappedElapsed / 60),
+          });
+        } catch (e) { /* non-fatal — server will still clear session_active on start */ }
+        setIsTimerRunning(false);
+        setCurrentSessionTask(null);
+      }
+
       await apiCall(`/sessions/start/${task.id}`, 'POST');
       setSessionTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, sessionActive: true } : { ...t, sessionActive: false }
@@ -2933,6 +2976,117 @@ const PlanAssist = () => {
     }
   };
 
+  // ── Zoom Ping — Document PiP notification window ──────────────────────────
+  // Opens an always-on-top Zoom notification. Closes any existing session/agenda
+  // PiP first (timer keeps running in the main tab). Persists until the user
+  // closes it or clicks Join Zoom.
+  const launchZoomPing = (zoomNumber, isTutorial, theme) => {
+    if (typeof window.documentPictureInPicture === 'undefined') return; // fallback: in-app banner only
+
+    // Close any existing PiP without triggering session save/exit
+    pipIntentionalCloseRef.current = true;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipWindowRef.current = null;
+    pipIntentionalCloseRef.current = false;
+    setPipActive(false);
+    // Don't null pipSessionActiveRef — timer keeps running in main tab
+
+    pipIsZoomPingRef.current = true;
+
+    const t = (() => {
+      switch (theme) {
+        case 'warm': return { bg: 'linear-gradient(135deg,#e91e8c,#ff6f00)', card: '#fff5f8', text: '#fff', sub: '#fce4ec', btn: '#c2185b', isDark: false };
+        case 'cool': return { bg: 'linear-gradient(135deg,#1b5e20,#0d47a1)', card: '#0f1f0f', text: '#e8f5e9', sub: '#a5d6a7', btn: '#2e7d32', isDark: true };
+        case 'dark': return { bg: 'linear-gradient(135deg,#4a148c,#1a237e)', card: '#1e1e30', text: '#ede7f6', sub: '#b39ddb', btn: '#6a1b9a', isDark: true };
+        default:     return { bg: 'linear-gradient(135deg,#7c3aed,#1d4ed8)', card: '#f5f3ff', text: '#fff', sub: '#c4b5fd', btn: '#5b21b6', isDark: false };
+      }
+    })();
+
+    const zoomUrl = `https://oneschoolglobal.zoom.us/j/${zoomNumber.replace(/[\s\-]/g, '')}`;
+    const label = isTutorial ? '📘 Tutorial' : '🎓 Class';
+    const heading = isTutorial ? 'Tutorial Starting!' : 'Class Starting!';
+
+    window.documentPictureInPicture.requestWindow({ width: 320, height: 210 }).then(pipWin => {
+      pipWindowRef.current = pipWin;
+      setPipActive(true);
+
+      pipWin.document.head.insertAdjacentHTML('beforeend', `<style>
+        *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
+        html,body{width:100%;height:100%;overflow:hidden;background:transparent;}
+        .wrap{width:100%;height:100%;display:flex;flex-direction:column;background:${t.bg};padding:16px;}
+        .badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);color:${t.text};font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:8px;width:fit-content;}
+        .head{font-size:20px;font-weight:800;color:${t.text};margin-bottom:3px;line-height:1.15;}
+        .zoom{font-size:12px;color:${t.sub};margin-bottom:14px;letter-spacing:.3px;}
+        .join{display:block;width:100%;padding:10px;background:#fff;color:${t.btn};font-weight:700;font-size:14px;border:none;border-radius:10px;cursor:pointer;text-align:center;text-decoration:none;transition:opacity .15s;}
+        .join:hover{opacity:.88;}
+        .close{margin-top:8px;background:transparent;border:none;color:${t.sub};font-size:11px;cursor:pointer;width:100%;text-align:center;padding:2px;}
+        .close:hover{color:${t.text};}
+      `}</style>`);
+
+      pipWin.document.body.innerHTML = `
+        <div class="wrap">
+          <div class="badge">${label}</div>
+          <div class="head">${heading}</div>
+          <div class="zoom">Zoom: ${zoomNumber}</div>
+          <a class="join" id="join-btn" href="${zoomUrl}" target="_blank" rel="noopener noreferrer">🎥 Join Zoom</a>
+          <button class="close" id="close-btn">Dismiss</button>
+        </div>`;
+
+      // Join Zoom closes the ping window
+      pipWin.document.getElementById('join-btn').addEventListener('click', () => {
+        pipIntentionalCloseRef.current = true;
+        pipWin.close();
+        pipWindowRef.current = null;
+        pipIsZoomPingRef.current = false;
+        pipIntentionalCloseRef.current = false;
+        setPipActive(false);
+      });
+      pipWin.document.getElementById('close-btn').addEventListener('click', () => {
+        pipIntentionalCloseRef.current = true;
+        pipWin.close();
+        pipWindowRef.current = null;
+        pipIsZoomPingRef.current = false;
+        pipIntentionalCloseRef.current = false;
+        setPipActive(false);
+      });
+
+      // Looping chime using Web Audio API — plays every 4 seconds
+      const audioScript = pipWin.document.createElement('script');
+      audioScript.textContent = `
+        (function() {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          function chime() {
+            const notes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
+            notes.forEach((freq, i) => {
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+              osc.connect(gain); gain.connect(ctx.destination);
+              osc.type = 'sine';
+              osc.frequency.value = freq;
+              const t = ctx.currentTime + i * 0.18;
+              gain.gain.setValueAtTime(0, t);
+              gain.gain.linearRampToValueAtTime(0.18, t + 0.04);
+              gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
+              osc.start(t); osc.stop(t + 0.7);
+            });
+          }
+          chime();
+          const id = setInterval(chime, 4000);
+          window.addEventListener('pagehide', () => clearInterval(id));
+        })();
+      `;
+      pipWin.document.body.appendChild(audioScript);
+
+      // pagehide — user closed the window manually (not via our buttons)
+      pipWin.addEventListener('pagehide', () => {
+        if (pipIntentionalCloseRef.current) return;
+        pipWindowRef.current = null;
+        pipIsZoomPingRef.current = false;
+        setPipActive(false);
+      });
+    }).catch(err => console.error('Zoom Ping PiP failed:', err));
+  };
+
   // ── Active agenda timer logic ──────────────────────────────────────────────
   const agendaStartTimer = (baseElapsed, baseCountdown) => {
     if (agendaTimerRef.current) clearInterval(agendaTimerRef.current.intervalRef);
@@ -3530,6 +3684,36 @@ const PlanAssist = () => {
       if (adminUserDetail) {
         setAdminUserDetail(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, deleted: true } : t) }));
       }
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminSetCredits = async (userId, amount) => {
+    try {
+      const r = await apiCall(`/admin/users/${userId}/set-credits`, 'POST', { credits: amount });
+      setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, credits: r.credits } }));
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, credits: r.credits } : u));
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminAdjustCredits = async (userId, delta, reason) => {
+    try {
+      const r = await apiCall(`/admin/users/${userId}/adjust-credits`, 'POST', { delta, reason });
+      setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, credits: r.credits } }));
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, credits: r.credits } : u));
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminViewCanvasToken = async (userId) => {
+    try {
+      const r = await apiCall(`/admin/users/${userId}/canvas-token`, 'GET');
+      return r.token;
+    } catch (err) { alert('Failed: ' + err.message); return null; }
+  };
+
+  const adminSetCanvasToken = async (userId, token) => {
+    try {
+      await apiCall(`/admin/users/${userId}/set-canvas-token`, 'POST', { token });
+      alert('Canvas token updated.');
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -4322,6 +4506,7 @@ const PlanAssist = () => {
           const zoomNumber = tutorial?.zoom_number || lesson?.zoom_number || null;
           if (zoomNumber) {
             setZoomBanner({ period, zoomNumber, isTutorial: !!tutorial?.zoom_number });
+            launchZoomPing(zoomNumber, !!tutorial?.zoom_number, colorTheme);
           }
           break;
         }
@@ -5901,6 +6086,19 @@ const PlanAssist = () => {
     calculateHubStats();
   }, [completionHistory, streakCompletionDates, streakShieldDates]);
 
+  // Keep the --banner-h CSS custom property in sync with the actual rendered
+  // height of the inline banner stack so page content areas can calc correctly.
+  useEffect(() => {
+    const el = bannerRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      const h = entry.contentRect.height;
+      document.documentElement.style.setProperty('--banner-h', `${h}px`);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // Scroll to top when navigating to Hub; reload all Hub data when landing on Hub page
   useEffect(() => {
     if (currentPage === 'hub') {
@@ -6623,6 +6821,8 @@ const PlanAssist = () => {
         </div>
       )}
 
+      {/* ── Inline banner stack — height tracked via bannerRef → --banner-h ── */}
+      <div ref={bannerRef}>
       {/* PWA Install Banner */}
       {showPwaBanner && isAuthenticated && (
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
@@ -6700,6 +6900,7 @@ const PlanAssist = () => {
           </button>
         </div>
       ))}
+      </div>{/* end bannerRef — --banner-h tracks this stack's height */}
 
       {/* ── Completion Animation Overlay ───────────────────────── */}
       {completionAnim && (
@@ -6855,7 +7056,7 @@ const PlanAssist = () => {
       )}
       <div>
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full">
+          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full">
             <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
@@ -7279,7 +7480,7 @@ const PlanAssist = () => {
           </div>
         )}
         {currentPage === 'tasks' && (
-          <div className="flex h-[calc(100vh-73px)] overflow-hidden">
+          <div className="flex h-[calc(100vh-73px-var(--banner-h,0px))] overflow-hidden">
             {/* Main Task List */}
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
@@ -7816,7 +8017,7 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="h-[calc(100vh-73px)] bg-gray-50 flex flex-col overflow-hidden">
+            <div className="h-[calc(100vh-73px-var(--banner-h,0px))] bg-gray-50 flex flex-col overflow-hidden">
               {/* Header bar — fixed height, never scrolls */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
                 <div>
@@ -8410,7 +8611,7 @@ const PlanAssist = () => {
 
                 {currentPage === 'agendas' && (() => {
                   return (
-                    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
+                    <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable">
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
@@ -9065,7 +9266,7 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="flex flex-col h-[calc(100vh-73px)] bg-gradient-to-br from-gray-50 to-blue-50">
+            <div className="flex flex-col h-[calc(100vh-73px-var(--banner-h,0px))] bg-gradient-to-br from-gray-50 to-blue-50">
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
@@ -9298,7 +9499,7 @@ const PlanAssist = () => {
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
-            <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
+            <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable">
             <div className="max-w-3xl mx-auto p-6">
               {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
@@ -9536,7 +9737,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full">
+          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full">
           <div className="max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
@@ -9789,7 +9990,7 @@ const PlanAssist = () => {
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -11512,7 +11713,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
@@ -11781,6 +11982,75 @@ const PlanAssist = () => {
                             </p>
                           )}
                         </div>
+
+                        {/* Credits */}
+                        {(() => {
+                          const [creditInput, setCreditInput] = React.useState('');
+                          const [deltaInput, setDeltaInput] = React.useState('');
+                          const [deltaReason, setDeltaReason] = React.useState('');
+                          return (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                              <h4 className="font-semibold text-gray-700 mb-3 text-sm flex items-center gap-2">
+                                <Gift className="w-4 h-4 text-yellow-500" />
+                                Credits
+                                <span className="ml-auto text-lg font-bold text-yellow-600">{u.credits ?? 0}</span>
+                              </h4>
+                              <div className="space-y-3">
+                                <div className="flex gap-2">
+                                  <input type="number" min="0" value={creditInput} onChange={e => setCreditInput(e.target.value)}
+                                    placeholder="Set to exact value"
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
+                                  <button onClick={() => { if (creditInput === '') return; adminSetCredits(u.id, parseInt(creditInput)); setCreditInput(''); }}
+                                    className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-semibold hover:bg-yellow-600">Set</button>
+                                </div>
+                                <div className="flex gap-2">
+                                  <input type="number" value={deltaInput} onChange={e => setDeltaInput(e.target.value)}
+                                    placeholder="±  Adjust (e.g. +50 or -20)"
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
+                                  <input type="text" value={deltaReason} onChange={e => setDeltaReason(e.target.value)}
+                                    placeholder="Reason (optional)"
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
+                                  <button onClick={() => { if (deltaInput === '') return; adminAdjustCredits(u.id, parseInt(deltaInput), deltaReason); setDeltaInput(''); setDeltaReason(''); }}
+                                    className="px-3 py-1.5 bg-gray-600 text-white rounded-lg text-xs font-semibold hover:bg-gray-700">Adjust</button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Canvas Token */}
+                        {(() => {
+                          const [revealed, setRevealed] = React.useState(null); // null = not loaded, '' = no token, string = token
+                          const [newToken, setNewToken] = React.useState('');
+                          const [tokenLoading, setTokenLoading] = React.useState(false);
+                          return (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                              <h4 className="font-semibold text-gray-700 mb-3 text-sm">Canvas API Token</h4>
+                              <div className="space-y-2">
+                                {revealed === null ? (
+                                  <button onClick={async () => { setTokenLoading(true); const t = await adminViewCanvasToken(u.id); setRevealed(t || ''); setTokenLoading(false); }}
+                                    disabled={tokenLoading}
+                                    className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+                                    {tokenLoading ? 'Loading…' : '🔍 View Token'}
+                                  </button>
+                                ) : revealed === '' ? (
+                                  <p className="text-xs text-gray-400 italic">No token set.</p>
+                                ) : (
+                                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all select-all border border-gray-200">{revealed}</div>
+                                )}
+                                <div className="flex gap-2 mt-2">
+                                  <input type="text" value={newToken} onChange={e => setNewToken(e.target.value)}
+                                    placeholder="Paste new Canvas token to replace"
+                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400 font-mono" />
+                                  <button onClick={async () => { if (!newToken.trim()) return; await adminSetCanvasToken(u.id, newToken.trim()); setNewToken(''); setRevealed(null); }}
+                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">Replace</button>
+                                </div>
+                                <button onClick={() => adminClearToken(u.id)}
+                                  className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200">Clear Token</button>
+                              </div>
+                            </div>
+                          );
+                        })()}
 
                         {/* Tasks */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -12062,6 +12332,7 @@ const PlanAssist = () => {
                       {/* Bulk Actions */}
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <h4 className="font-bold text-gray-900 mb-3">Bulk Actions</h4>
+                        <div className="flex flex-wrap gap-3">
                         <button onClick={async () => {
                           if (!window.confirm('Grant a Streak Shield to ALL users?')) return;
                           try {
@@ -12071,6 +12342,15 @@ const PlanAssist = () => {
                         }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold transition-colors">
                           🛡️ Grant Streak Shield to All Users
                         </button>
+                        <button onClick={() => {
+                          const fakeZooms = ['123 456 7890','987 654 3210','555 867 5309','246 810 1214','111 222 3333'];
+                          const fakeNum = fakeZooms[Math.floor(Math.random() * fakeZooms.length)];
+                          const isTutorial = Math.random() > 0.5;
+                          launchZoomPing(fakeNum, isTutorial, colorTheme);
+                        }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors">
+                          🎥 Test Zoom Ping
+                        </button>
+                        </div>
                       </div>
 
                       <div className="text-right">
