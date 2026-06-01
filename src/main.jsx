@@ -5,13 +5,28 @@ import './index.css'
 import { registerSW } from 'virtual:pwa-register'
 
 // Register the service worker.
-// With skipWaiting+clientsClaim in workbox, the new SW activates immediately.
-// We listen for the onNeedRefresh callback (fired when a new SW has installed)
-// and dispatch a custom event so App.jsx can show the update banner.
+// With skipWaiting+clientsClaim in workbox, the new SW activates immediately
+// and claims all tabs. We listen for controllerchange — fired when the new SW
+// takes control — and reload the page so users always get the latest assets.
+//
+// Why controllerchange instead of onNeedRefresh:
+//   registerType:'autoUpdate' causes the plugin to call updateSW() automatically,
+//   bypassing onNeedRefresh. The controllerchange event is the reliable signal
+//   that the new SW has fully activated and the page should reload.
+
+let refreshing = false;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) return;
+    refreshing = true;
+    window.location.reload();
+  });
+}
+
 registerSW({
   onNeedRefresh() {
-    // New SW installed and active — notify the app to show the update banner
-    window.dispatchEvent(new CustomEvent('pwa-update-available'));
+    // autoUpdate mode handles this automatically; no manual banner needed.
+    // The controllerchange listener above will reload the page.
   },
   onOfflineReady() {
     // App is cached and ready for offline use — no UI needed
