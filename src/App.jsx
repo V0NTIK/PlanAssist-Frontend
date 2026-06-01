@@ -5076,6 +5076,8 @@ const PlanAssist = () => {
     /* ── Earned tier animations ─────────────────────────────────────── */
     @keyframes ins-sweep { 0%{background-position:0% center} 100%{background-position:300% center} }
     @keyframes ins-obsidian-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+    /* Obsidian — per-letter lighter purple glow pulse */
+    @keyframes ins-ob-glow { 0%,100%{filter:brightness(1) drop-shadow(0 0 0px transparent)} 50%{filter:brightness(2.2) drop-shadow(0 0 6px #a78bfa) drop-shadow(0 0 12px #7c3aed)} }
     @keyframes ins-bling { 0%,100%{background-position:0% center;filter:brightness(1)} 25%{background-position:100% center;filter:brightness(1.4)} 50%{background-position:200% center;filter:brightness(1)} 75%{background-position:300% center;filter:brightness(1.5)} }
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
@@ -5194,14 +5196,24 @@ const PlanAssist = () => {
       return <span style={{ fontWeight: fontWeight || 600, fontSize: fs, ...rest }}>{name}</span>;
     }
 
-    // ── Obsidian: dark gradient + shooting white lines overlay ────────────
+    // ── Obsidian: dark gradient + shooting white lines overlay + per-letter glow pulses ──
     if (tier === 'Obsidian') {
       const starBase = { position:'absolute', left:0, top:0, right:0, height:'2px',
         background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.9) 48%,rgba(200,230,255,0.7) 52%,transparent 65%,transparent 100%)',
         backgroundSize:'200% 100%', pointerEvents:'none', opacity:0 };
+      // Staggered glow delays — feel random, different durations per letter so they rarely sync
+      const glowDurs = [3.1,2.7,3.5,2.4,3.8,2.9,3.3,2.6,3.0,2.8];
+      const glowDels = [0, 0.9, 1.7, 0.4, 2.2, 1.1, 2.6, 0.6, 1.9, 0.2];
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
-          <span className="ins-obsidian" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block' }}>{name}</span>
+          <span style={{ display:'inline-block' }}>
+            {name.split('').map((ch, i) => (
+              ch === ' '
+                ? <span key={i} style={{ display:'inline-block', width:'0.25em' }}>&nbsp;</span>
+                : <span key={i} className="ins-obsidian" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                    animation: `ins-obsidian-shift 5s ease-in-out infinite, ins-ob-glow ${glowDurs[i % glowDurs.length]}s ease-in-out ${glowDels[i % glowDels.length]}s infinite` }}>{ch}</span>
+            ))}
+          </span>
           <span style={{ ...starBase, top:'35%', animation:'ins-ob-star-a 5s ease-in-out 0.8s infinite', animationFillMode:'backwards' }} />
           <span style={{ ...starBase, top:'60%', animation:'ins-ob-star-b 5s ease-in-out 2.5s infinite', animationFillMode:'backwards' }} />
         </span>
