@@ -941,14 +941,72 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const firstName = hptUser.name?.split(' ')[0] || 'Teacher';
 
   // Insight for header
+  const globalCompletionsToday = hubData?.globalCompletionsToday || 0;
+  const globalAvgWeek = hubData?.globalAvgWeek || 0;
+  const globalAvgAccuracy = hubData?.globalAvgAccuracy || 0;
+  const perStudentWeek = hubData?.perStudentWeek || 0;
+
   const insights = [];
-  if (stats.tasksToday > 0) insights.push(`🔥 ${stats.tasksToday} task${stats.tasksToday !== 1 ? 's' : ''} done today across your students — good momentum!`);
-  if (stats.streak >= 3) insights.push(`⚡ ${stats.streak}-day group streak! Your students are staying consistent.`);
-  if (stats.tasksWeek >= 10) insights.push(`📈 ${stats.tasksWeek} tasks this week — your class is in a strong rhythm.`);
-  if (stats.accuracy >= 80) insights.push(`🎯 ${stats.accuracy}% time accuracy — students are estimating well.`);
-  if (stats.accuracy > 0 && stats.accuracy < 50) insights.push(`⏱ Time accuracy is at ${stats.accuracy}% — encourage more timed sessions to build self-awareness.`);
-  if (studentCount === 0) insights.push('💡 No students connected yet — create a Studio and share the key or course ID.');
-  else if (insights.length === 0) insights.push(`💡 ${studentCount} student${studentCount !== 1 ? 's' : ''} connected across your Studios.`);
+
+  // 1. Cohort share of global completions today
+  if (stats.tasksToday > 0 && globalCompletionsToday > 0) {
+    const pct = Math.round((stats.tasksToday / globalCompletionsToday) * 100);
+    if (pct >= 1)
+      insights.push(`🌍 Your students contributed ${pct}% of all PlanAssist completions today — ${stats.tasksToday} of ${globalCompletionsToday} global.`);
+  }
+
+  // 2. Per-student week vs global average
+  if (perStudentWeek > 0 && globalAvgWeek > 0) {
+    const ratio = perStudentWeek / globalAvgWeek;
+    if (ratio >= 1.3)
+      insights.push(`📈 Your students average ${perStudentWeek.toFixed(1)} tasks each this week — ${ratio.toFixed(1)}× the global average of ${globalAvgWeek.toFixed(1)}.`);
+    else if (ratio < 0.7)
+      insights.push(`📊 Global average is ${globalAvgWeek.toFixed(1)} tasks per student this week — your cohort is at ${perStudentWeek.toFixed(1)}. Consider encouraging more sessions.`);
+    else
+      insights.push(`📊 Your students are completing ${perStudentWeek.toFixed(1)} tasks each this week, in line with the ${globalAvgWeek.toFixed(1)} global average.`);
+  }
+
+  // 3. Cohort accuracy vs global
+  if (stats.accuracy > 0 && globalAvgAccuracy > 0) {
+    const diff = stats.accuracy - globalAvgAccuracy;
+    if (diff >= 5)
+      insights.push(`🎯 Your cohort's time accuracy (${stats.accuracy}%) is ${diff}% above the global average — students are estimating their sessions well.`);
+    else if (diff <= -5)
+      insights.push(`⏱ Cohort accuracy (${stats.accuracy}%) is ${Math.abs(diff)}% below the global average of ${globalAvgAccuracy}% — encourage students to use time estimates more.`);
+    else
+      insights.push(`🎯 Time accuracy at ${stats.accuracy}% — tracking closely with the global average of ${globalAvgAccuracy}%.`);
+  }
+
+  // 4. Group streak
+  if (stats.streak >= 5)
+    insights.push(`🔥 ${stats.streak}-day consecutive group streak — your cohort hasn't missed a weekday in ${stats.streak} days.`);
+  else if (stats.streak >= 2)
+    insights.push(`⚡ ${stats.streak}-day group streak! Keep encouraging daily completions to build the chain.`);
+
+  // 5. Total tasks this week with per-student breakdown
+  if (stats.tasksWeek > 0 && studentCount > 0) {
+    const avg = (stats.tasksWeek / studentCount).toFixed(1);
+    insights.push(`📋 ${stats.tasksWeek} tasks completed by your ${studentCount} student${studentCount !== 1 ? 's' : ''} this week — ${avg} per student on average.`);
+  }
+
+  // 6. Active session momentum
+  if (hubData?.inProgress > 0)
+    insights.push(`⚡ ${hubData.inProgress} student${hubData.inProgress !== 1 ? 's' : ''} currently in an active work session right now.`);
+
+  // 7. Study time highlight
+  if (stats.totalStudyMins >= 60) {
+    const h = Math.floor(stats.totalStudyMins / 60);
+    const m = stats.totalStudyMins % 60;
+    const perStudent = (stats.totalStudyMins / Math.max(studentCount, 1)).toFixed(0);
+    insights.push(`⏱ Your students have logged ${h}h ${m}m of total study time — an average of ${perStudent} min per student.`);
+  }
+
+  // 8. No students edge case
+  if (studentCount === 0)
+    insights.push('💡 No students connected yet — create a Studio and share the key or course ID.');
+  else if (insights.length === 0)
+    insights.push(`💡 ${studentCount} student${studentCount !== 1 ? 's' : ''} connected across your Studios. Keep an eye on weekly momentum.`);
+
   const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
 
   return (
@@ -964,7 +1022,9 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
             <p className="text-yellow-100">Here's how your students are doing today</p>
           </div>
           <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
-            <p className="text-xs text-yellow-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
+            <p className="text-xs text-yellow-200 font-semibold uppercase tracking-wide mb-1.5">
+              Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${(Math.floor(Date.now() / 1000 / 60 / 10) % insights.length) + 1} of ${insights.length}` : ''}</span>
+            </p>
             <p className="text-sm text-white leading-relaxed">{insight}</p>
           </div>
         </div>
