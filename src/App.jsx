@@ -205,116 +205,6 @@ function getCampusTodayStr(campus) {
   const offsetHours = getCampusOffsetHours(campus);
   return utcToCampusDateStr(new Date().toISOString(), offsetHours);
 }
-const FOCUS_SOUND_FILES = {
-  ambience:   '/sounds/Ambience.mp3',
-  ocean:      '/sounds/Ocean Pulses.mp3',
-  nature:     '/sounds/Nature Sounds.mp3',
-  distortion: '/sounds/Focused Distortion.mp3',
-  rain:       '/sounds/Gentle Rain.mp3',
-  whitenoise: '/sounds/White Noise.mp3',
-};
-
-const StudiosPaneWidget = ({ myStudios, loadMyStudios, apiCall, user, renderInsigniaName }) => {
-  const [selectedStudio, setSelectedStudio] = React.useState(null);
-  const [studioLb, setStudioLb] = React.useState(null);
-  const [studioLbLoading, setStudioLbLoading] = React.useState(false);
-
-  const loadStudioLb = async (studio) => {
-    setSelectedStudio(studio);
-    setStudioLb(null);
-    setStudioLbLoading(true);
-    try {
-      const data = await apiCall(`/studios/${studio.id}/leaderboard`, 'GET');
-      setStudioLb(data);
-    } catch (e) { setStudioLb([]); }
-    finally { setStudioLbLoading(false); }
-  };
-
-  return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
-        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Click a Studio to see its weekly leaderboard.</p>
-      </div>
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
-        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
-      </div>
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
-        {myStudios.length === 0 ? (
-          <div className="text-center py-8">
-            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {myStudios.map(studio => (
-              <button key={studio.id}
-                onClick={() => selectedStudio?.id === studio.id ? setSelectedStudio(null) : loadStudioLb(studio)}
-                className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${selectedStudio?.id === studio.id ? 'border-purple-300 bg-purple-50' : 'border-gray-100 hover:bg-gray-50'}`}
-              >
-                <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
-                    {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
-                  </p>
-                </div>
-                {studio.activeBanner && !studio.activeBanner.dismissed && (
-                  <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-600 font-medium px-2.5 py-1 rounded-full flex-shrink-0">
-                    <Bell className="w-3 h-3" /> Active banner
-                  </span>
-                )}
-                <ChevronDown className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${selectedStudio?.id === studio.id ? 'rotate-180' : ''}`} />
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      {selectedStudio && (
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-3 h-8 rounded-full" style={{ backgroundColor: selectedStudio.color || '#7C3AED' }} />
-            <div>
-              <h3 className="text-sm font-semibold text-gray-900">{selectedStudio.name} — Weekly Leaderboard</h3>
-              <p className="text-xs text-gray-400">This week's task completions</p>
-            </div>
-          </div>
-          {studioLbLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="w-5 h-5 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
-            </div>
-          ) : studioLb && studioLb.length === 0 ? (
-            <p className="text-sm text-gray-400 text-center py-6">No activity this week yet.</p>
-          ) : studioLb ? (
-            <div className="space-y-2">
-              {studioLb.map(entry => {
-                const isMe = entry.user_id === user?.id;
-                const medal = entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : null;
-                return (
-                  <div key={entry.user_id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isMe ? 'bg-purple-50 border border-purple-200' : 'bg-gray-50'}`}>
-                    <span className="w-6 text-center text-sm font-bold text-gray-400 flex-shrink-0">{medal || `#${entry.rank}`}</span>
-                    <div className="flex-1 min-w-0">
-                      {renderInsigniaName(entry.user_name, entry.insignia_selected, { fontSize: '0.875rem' })}
-                      {isMe && <span className="text-xs text-purple-500 ml-1">(you)</span>}
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <span className="text-sm font-bold text-gray-800">{entry.tasks_completed}</span>
-                      <span className="text-xs text-gray-400 ml-1">tasks</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      )}
-    </div>
-  );
-};
-
 const AdminCreditsCard = ({ user, onSetCredits, onAdjustCredits }) => {
   const [creditInput, setCreditInput] = React.useState('');
   const [deltaInput, setDeltaInput] = React.useState('');
@@ -322,8 +212,7 @@ const AdminCreditsCard = ({ user, onSetCredits, onAdjustCredits }) => {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
       <h4 className="font-semibold text-gray-700 mb-3 text-sm flex items-center gap-2">
-        <span className="text-yellow-500">🎁</span>
-        Credits
+        <span className="text-yellow-500">🎁</span> Credits
         <span className="ml-auto text-lg font-bold text-yellow-600">{user.credits ?? 0}</span>
       </h4>
       <div className="space-y-3">
@@ -388,8 +277,6 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
     grade: user.grade || '',
     campus: user.campus || 'Ashland',
     is_admin: user.is_admin || false,
-    email: user.email || '',
-    password: '',
   });
   const [campusInput, setCampusInput] = React.useState(user.campus || 'Ashland');
   const [campusSuggestions, setCampusSuggestions] = React.useState([]);
@@ -435,26 +322,10 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
           <label htmlFor="isAdminCheck" className="text-sm font-medium text-gray-700">Admin</label>
           {user.id === currentUserId && <span className="text-xs text-gray-400">(can't remove own admin)</span>}
         </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
-          <input value={form.email} onChange={e => setForm(p => ({...p, email: e.target.value}))}
-            type="email" placeholder="user@example.com"
-            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">New Password <span className="text-gray-400 font-normal">(leave blank to keep)</span></label>
-          <input value={form.password} onChange={e => setForm(p => ({...p, password: e.target.value}))}
-            type="password" placeholder="Min 6 characters"
-            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
-        </div>
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
-        <button onClick={() => {
-          const fields = { name: form.name, grade: form.grade, campus: campusInput, is_admin: form.is_admin, email: form.email };
-          if (form.password.trim().length >= 6) fields.password = form.password.trim();
-          onSave(fields);
-        }} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
+        <button onClick={() => onSave(form)} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
       </div>
     </div>
   );
@@ -709,7 +580,6 @@ const PlanAssist = () => {
   const [pipPopupSelectorOpen, setPipPopupSelectorOpen] = useState(false);
   const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
   const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
-  const pipIsZoomPingRef = React.useRef(false);        // true when the current PiP window is a Zoom Ping (not a session/agenda popup)
 
   // ── Itinerary & Enhance Schedule state ───────────────────────────────────
   const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
@@ -883,12 +753,11 @@ const PlanAssist = () => {
   const [drawColor, setDrawColor] = useState('#000000');
   const [drawWidth, setDrawWidth] = useState(3);
   const whiteboardRef = React.useRef(null);
-  const bannerRef = React.useRef(null);   // wraps all inline banners; drives --banner-h CSS var
   const [whiteboardInitialized, setWhiteboardInitialized] = useState(false);
   
   // White noise state
   const [whiteNoiseAudio, setWhiteNoiseAudio] = useState(null);
-  const [whiteNoiseType, setWhiteNoiseType] = useState('ambience');
+  const [whiteNoiseType, setWhiteNoiseType] = useState('rain');
   const [whiteNoiseVolume, setWhiteNoiseVolume] = useState(0.5);
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState(
     () => localStorage.getItem('planassist-completion-sound') !== 'false'
@@ -1049,7 +918,7 @@ const PlanAssist = () => {
     streak: 0
   });
   const [insightIndex, setInsightIndex] = useState(0);
-  const [hubInsights, setHubInsights] = useState(null); // global insight data from /api/hub/insights
+  const [hubInsights, setHubInsights] = useState(null);
   const [hubStatModal, setHubStatModal] = useState(null); // 'today' | 'week' | 'studytime' | 'accuracy'
   const [hptMode, setHptMode] = useState(false);
   const [studioBanners, setStudioBanners] = useState([]); // active HPT studio banners for the student
@@ -2388,12 +2257,6 @@ const PlanAssist = () => {
   const startTaskSession = async (task) => {
     setSessionStartingId(task.id);
 
-    // Clear any stale completion screen state from a previously completed task.
-    // If the user navigated away from session-active without clicking "Back to Focus",
-    // showSessionComplete and currentSessionTask are still set — clear them now so
-    // the new session renders the timer, not the old completion screen.
-    setShowSessionComplete(false);
-
     // Request the PiP window IMMEDIATELY inside the click handler — before any
     // await — so the browser user-gesture requirement is satisfied.
     // If PiP is unavailable we get null and fall back to the in-page render.
@@ -2407,23 +2270,6 @@ const PlanAssist = () => {
     }
 
     try {
-      // If another session is already running, save its elapsed time and end it
-      // cleanly before starting the new one — never complete it automatically.
-      if (currentSessionTask && currentSessionTask.id !== task.id) {
-        let snappedElapsed = sessionElapsed;
-        if (isTimerRunning && timerStartWallRef.current !== null) {
-          const wallElapsed = Math.floor((Date.now() - timerStartWallRef.current) / 1000);
-          snappedElapsed = timerBaseElapsedRef.current + wallElapsed;
-        }
-        try {
-          await apiCall(`/sessions/end/${currentSessionTask.id}`, 'POST', {
-            accumulatedTime: Math.round(snappedElapsed / 60),
-          });
-        } catch (e) { /* non-fatal — server will still clear session_active on start */ }
-        setIsTimerRunning(false);
-        setCurrentSessionTask(null);
-      }
-
       await apiCall(`/sessions/start/${task.id}`, 'POST');
       setSessionTasks(prev => prev.map(t =>
         t.id === task.id ? { ...t, sessionActive: true } : { ...t, sessionActive: false }
@@ -3059,29 +2905,10 @@ const PlanAssist = () => {
     try {
       const task = tasks.find(t => t.id === taskId);
       if (!task) return;
-
-      // Validate: all segment names must be non-empty
-      if (splitSegments.some(seg => !seg.name.trim())) {
-        alert('All segment names must be filled in.');
-        return;
-      }
-
-      // Convert each segment's deadline time from local HH:MM → UTC HH:MM:SS
-      // The rest of the app stores/renders deadline_time as UTC, so we align here.
-      const localToUtcTime = (dateStr, localTime) => {
-        if (!dateStr || !localTime) return null;
-        const dt = new Date(`${dateStr}T${localTime}:00`); // parsed as local
-        const hh = String(dt.getUTCHours()).padStart(2, '0');
-        const mm = String(dt.getUTCMinutes()).padStart(2, '0');
-        return `${hh}:${mm}:00`;
-      };
-
       const segments = splitSegments.map(seg => ({
-        name: seg.name.trim(),
+        name: seg.name,
         deadlineDate: seg.deadlineDate || null,
-        deadlineTime: seg.deadlineDate && seg.deadlineTime
-          ? localToUtcTime(seg.deadlineDate, seg.deadlineTime)
-          : null,
+        deadlineTime: seg.deadlineTime || null,
       }));
       const result = await apiCall(`/tasks/${taskId}/split`, 'POST', { segments: segments.map(s => s.name) });
       if (result.success) {
@@ -3155,218 +2982,9 @@ const PlanAssist = () => {
     }
   };
 
-  // ── Zoom Ping — Document PiP notification window ──────────────────────────
-  // Opens an always-on-top Zoom notification. Closes any existing session/agenda
-  // PiP first (timer keeps running in the main tab). Persists until the user
-  // closes it or clicks Join Zoom.
-  const launchZoomPing = (zoomNumber, isTutorial, theme) => {
-    if (typeof window.documentPictureInPicture === 'undefined') return; // fallback: in-app banner only
-
-    // Close any existing PiP without triggering session save/exit
-    pipIntentionalCloseRef.current = true;
-    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
-    pipWindowRef.current = null;
-    pipIntentionalCloseRef.current = false;
-    setPipActive(false);
-    // Don't null pipSessionActiveRef — timer keeps running in main tab
-
-    pipIsZoomPingRef.current = true;
-
-    const t = (() => {
-      switch (theme) {
-        case 'warm': return { bg: 'linear-gradient(135deg,#e91e8c,#ff6f00)', card: '#fff5f8', text: '#fff', sub: '#fce4ec', btn: '#c2185b', isDark: false };
-        case 'cool': return { bg: 'linear-gradient(135deg,#1b5e20,#0d47a1)', card: '#0f1f0f', text: '#e8f5e9', sub: '#a5d6a7', btn: '#2e7d32', isDark: true };
-        case 'dark': return { bg: 'linear-gradient(135deg,#4a148c,#1a237e)', card: '#1e1e30', text: '#ede7f6', sub: '#b39ddb', btn: '#6a1b9a', isDark: true };
-        default:     return { bg: 'linear-gradient(135deg,#7c3aed,#1d4ed8)', card: '#f5f3ff', text: '#fff', sub: '#c4b5fd', btn: '#5b21b6', isDark: false };
-      }
-    })();
-
-    const zoomUrl = `https://oneschoolglobal.zoom.us/j/${zoomNumber.replace(/[\s\-]/g, '')}`;
-    const label = isTutorial ? '📘 Tutorial' : '🎓 Class';
-    const heading = isTutorial ? 'Tutorial Starting!' : 'Class Starting!';
-
-    const pingCss = [
-      '*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;}',
-      'html,body{width:100%;height:100%;overflow:hidden;background:transparent;}',
-      '.wrap{width:100%;height:100%;display:flex;flex-direction:column;background:' + t.bg + ';padding:16px;}',
-      '.badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);color:' + t.text + ';font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:8px;width:fit-content;}',
-      '.head{font-size:20px;font-weight:800;color:' + t.text + ';margin-bottom:3px;line-height:1.15;}',
-      '.zoom{font-size:12px;color:' + t.sub + ';margin-bottom:14px;letter-spacing:.3px;}',
-      '.join{display:block;width:100%;padding:10px;background:#fff;color:' + t.btn + ';font-weight:700;font-size:14px;border:none;border-radius:10px;cursor:pointer;text-align:center;text-decoration:none;transition:opacity .15s;}',
-      '.join:hover{opacity:.88;}',
-      '.close{margin-top:8px;background:transparent;border:none;color:' + t.sub + ';font-size:11px;cursor:pointer;width:100%;text-align:center;padding:2px;}',
-      '.close:hover{color:' + t.text + ';}',
-    ].join('\n');
-
-    window.documentPictureInPicture.requestWindow({ width: 320, height: 210 }).then(pipWin => {
-      pipWindowRef.current = pipWin;
-      setPipActive(true);
-
-      pipWin.document.head.insertAdjacentHTML('beforeend', '<style>' + pingCss + '</style>');
-
-      pipWin.document.body.innerHTML = `
-        <div class="wrap">
-          <div class="badge">${label}</div>
-          <div class="head">${heading}</div>
-          <div class="zoom">Zoom: ${zoomNumber}</div>
-          <a class="join" id="join-btn" href="${zoomUrl}" target="_blank" rel="noopener noreferrer">🎥 Join Zoom</a>
-          <button class="close" id="close-btn">Dismiss</button>
-        </div>`;
-
-      // Join Zoom closes the ping window
-      pipWin.document.getElementById('join-btn').addEventListener('click', () => {
-        pipIntentionalCloseRef.current = true;
-        pipWin.close();
-        pipWindowRef.current = null;
-        pipIsZoomPingRef.current = false;
-        pipIntentionalCloseRef.current = false;
-        setPipActive(false);
-      });
-      pipWin.document.getElementById('close-btn').addEventListener('click', () => {
-        pipIntentionalCloseRef.current = true;
-        pipWin.close();
-        pipWindowRef.current = null;
-        pipIsZoomPingRef.current = false;
-        pipIntentionalCloseRef.current = false;
-        setPipActive(false);
-      });
-
-      // Looping chime using Web Audio API — plays every 4 seconds
-      const audioScript = pipWin.document.createElement('script');
-      audioScript.textContent = `
-        (function() {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          function chime() {
-            const notes = [523.25, 659.25, 783.99, 1046.50]; // C5 E5 G5 C6
-            notes.forEach((freq, i) => {
-              const osc = ctx.createOscillator();
-              const gain = ctx.createGain();
-              osc.connect(gain); gain.connect(ctx.destination);
-              osc.type = 'sine';
-              osc.frequency.value = freq;
-              const t = ctx.currentTime + i * 0.18;
-              gain.gain.setValueAtTime(0, t);
-              gain.gain.linearRampToValueAtTime(0.18, t + 0.04);
-              gain.gain.exponentialRampToValueAtTime(0.001, t + 0.7);
-              osc.start(t); osc.stop(t + 0.7);
-            });
-          }
-          chime();
-          const id = setInterval(chime, 4000);
-          window.addEventListener('pagehide', () => clearInterval(id));
-        })();
-      `;
-      pipWin.document.body.appendChild(audioScript);
-
-      // pagehide — user closed the window manually (not via our buttons)
-      pipWin.addEventListener('pagehide', () => {
-        if (pipIntentionalCloseRef.current) return;
-        pipWindowRef.current = null;
-        pipIsZoomPingRef.current = false;
-        setPipActive(false);
-      });
-    }).catch(err => console.error('Zoom Ping PiP failed:', err));
-  };
-
-  // ── Agenda Ping — Document PiP notification when agenda row timer expires ─
-  const launchAgendaPing = () => {
-    if (typeof window.documentPictureInPicture === 'undefined') return;
-
-    // Close any existing PiP (session/zoom) without triggering save-exit
-    pipIntentionalCloseRef.current = true;
-    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
-    pipWindowRef.current = null;
-    pipIntentionalCloseRef.current = false;
-    setPipActive(false);
-    pipIsZoomPingRef.current = false;
-
-    const taskName = currentAgenda?.rows?.[agendaCurrentRow]?.task || 'Task';
-
-    const bgColor = '#1e293b';
-    const accentColor = '#f97316';
-
-    const css = [
-      '*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;}',
-      'html,body{width:100%;height:100%;overflow:hidden;background:transparent;}',
-      '.wrap{width:100%;height:100%;display:flex;flex-direction:column;justify-content:space-between;background:' + bgColor + ';padding:16px;}',
-      '.top{display:flex;align-items:center;gap:8px;margin-bottom:10px;}',
-      '.icon{font-size:22px;animation:shake 0.5s ease-in-out infinite;}',
-      '.head{font-size:17px;font-weight:800;color:#fff;line-height:1.2;}',
-      '.task{font-size:12px;color:#94a3b8;margin-bottom:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
-      '.dismiss{display:block;width:100%;padding:10px;background:' + accentColor + ';color:#fff;font-weight:700;font-size:13px;border:none;border-radius:10px;cursor:pointer;}',
-      '.dismiss:hover{opacity:.88;}',
-      '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}',
-    ].join('');
-
-    window.documentPictureInPicture.requestWindow({ width: 300, height: 180 }).then(pipWin => {
-      pipWindowRef.current = pipWin;
-      setPipActive(true);
-
-      pipWin.document.head.insertAdjacentHTML('beforeend', '<style>' + css + '</style>');
-      pipWin.document.body.innerHTML = `
-        <div class="wrap">
-          <div>
-            <div class="top"><span class="icon">⏰</span><div class="head">Time's Up!</div></div>
-            <div class="task">${taskName}</div>
-          </div>
-          <button class="dismiss" id="dismiss-btn">Dismiss</button>
-        </div>`;
-
-      const dismiss = () => {
-        pipIntentionalCloseRef.current = true;
-        pipWin.close();
-        pipWindowRef.current = null;
-        pipIsZoomPingRef.current = false;
-        pipIntentionalCloseRef.current = false;
-        setPipActive(false);
-      };
-      pipWin.document.getElementById('dismiss-btn').addEventListener('click', dismiss);
-
-      // Looping buzz sound
-      const buzzScript = pipWin.document.createElement('script');
-      buzzScript.textContent = `
-        (function() {
-          const ctx = new (window.AudioContext || window.webkitAudioContext)();
-          function buzz() {
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain); gain.connect(ctx.destination);
-            osc.type = 'square';
-            osc.frequency.value = 180;
-            gain.gain.setValueAtTime(0.12, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
-            const osc2 = ctx.createOscillator();
-            const gain2 = ctx.createGain();
-            osc2.connect(gain2); gain2.connect(ctx.destination);
-            osc2.type = 'square';
-            osc2.frequency.value = 140;
-            gain2.gain.setValueAtTime(0.10, ctx.currentTime + 0.15);
-            gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
-            osc2.start(ctx.currentTime + 0.15); osc2.stop(ctx.currentTime + 0.45);
-          }
-          buzz();
-          const id = setInterval(buzz, 2000);
-          window.addEventListener('pagehide', () => clearInterval(id));
-        })();
-      `;
-      pipWin.document.body.appendChild(buzzScript);
-
-      pipWin.addEventListener('pagehide', () => {
-        if (pipIntentionalCloseRef.current) return;
-        pipWindowRef.current = null;
-        pipIsZoomPingRef.current = false;
-        setPipActive(false);
-      });
-    }).catch(err => console.error('Agenda Ping PiP failed:', err));
-  };
-
   // ── Active agenda timer logic ──────────────────────────────────────────────
-  const agendaPingFiredRef = React.useRef(false); // prevents multiple pings for same expiry
-
   const agendaStartTimer = (baseElapsed, baseCountdown) => {
     if (agendaTimerRef.current) clearInterval(agendaTimerRef.current.intervalRef);
-    agendaPingFiredRef.current = false; // reset for new row
     const wallStart = Date.now();
     const intervalId = setInterval(() => {
       const wallSecs = Math.floor((Date.now() - wallStart) / 1000);
@@ -3375,10 +2993,6 @@ const PlanAssist = () => {
       if (remaining <= 0) {
         setAgendaCountdown(0);
         setAgendaCountdownFlash(true);
-        if (!agendaPingFiredRef.current) {
-          agendaPingFiredRef.current = true;
-          launchAgendaPing();
-        }
       } else {
         setAgendaCountdown(remaining);
         setAgendaCountdownFlash(false);
@@ -3958,21 +3572,10 @@ const PlanAssist = () => {
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
-  const adminDeleteTask = async (taskId) => {
-    if (!confirm('Soft-delete this task?')) return;
-    try {
-      await apiCall(`/admin/tasks/${taskId}`, 'DELETE');
-      if (adminUserDetail) {
-        setAdminUserDetail(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, deleted: true } : t) }));
-      }
-    } catch (err) { alert('Failed: ' + err.message); }
-  };
-
   const adminSetCredits = async (userId, amount) => {
     try {
       const r = await apiCall(`/admin/users/${userId}/set-credits`, 'POST', { credits: amount });
       setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, credits: r.credits } }));
-      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, credits: r.credits } : u));
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -3980,7 +3583,6 @@ const PlanAssist = () => {
     try {
       const r = await apiCall(`/admin/users/${userId}/adjust-credits`, 'POST', { delta, reason });
       setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, credits: r.credits } }));
-      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, credits: r.credits } : u));
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -3995,6 +3597,16 @@ const PlanAssist = () => {
     try {
       await apiCall(`/admin/users/${userId}/set-canvas-token`, 'POST', { token });
       alert('Canvas token updated.');
+    } catch (err) { alert('Failed: ' + err.message); }
+  };
+
+  const adminDeleteTask = async (taskId) => {
+    if (!confirm('Soft-delete this task?')) return;
+    try {
+      await apiCall(`/admin/tasks/${taskId}`, 'DELETE');
+      if (adminUserDetail) {
+        setAdminUserDetail(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, deleted: true } : t) }));
+      }
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -4408,9 +4020,8 @@ const PlanAssist = () => {
   // White noise functions
   const toggleWhiteNoise = () => {
     if (isWhiteNoisePlaying) {
-      if (whiteNoiseAudio && whiteNoiseAudio.audio) {
-        whiteNoiseAudio.audio.pause();
-        whiteNoiseAudio.audio.currentTime = 0;
+      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
+        whiteNoiseAudio.context.close();
       }
       setWhiteNoiseAudio(null);
       setIsWhiteNoisePlaying(false);
@@ -4420,38 +4031,207 @@ const PlanAssist = () => {
   };
 
   const playWhiteNoise = (type) => {
-    // Stop any currently playing sound
-    if (whiteNoiseAudio && whiteNoiseAudio.audio) {
-      whiteNoiseAudio.audio.pause();
-      whiteNoiseAudio.audio.currentTime = 0;
+    if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
+      whiteNoiseAudio.context.close();
     }
 
-    const src = FOCUS_SOUND_FILES[type] || FOCUS_SOUND_FILES.ambience;
-    console.log('[FocusSound] Playing:', type, '→', src);
-    const audio = new Audio(src);
-    audio.loop = true;
-    audio.volume = whiteNoiseVolume;
-    audio.play().catch(err => {
-      console.error('[FocusSound] play() failed for', src, err);
-    });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const master = ctx.createGain();
+    master.gain.value = whiteNoiseVolume * 0.55;
+    master.connect(ctx.destination);
 
-    setWhiteNoiseAudio({ audio });
+    // Stereo noise buffer generator
+    const makeNoiseBuf = (color, secs = 6) => {
+      const buf = ctx.createBuffer(2, secs * ctx.sampleRate, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        if (color === 'white') {
+          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+        } else if (color === 'pink') {
+          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
+          for (let i = 0; i < d.length; i++) {
+            const w = Math.random() * 2 - 1;
+            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
+            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
+            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
+            d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
+          }
+        } else {
+          let last = 0;
+          for (let i = 0; i < d.length; i++) {
+            const w = Math.random() * 2 - 1;
+            d[i] = (last + 0.02 * w) / 1.02; last = d[i]; d[i] *= 3.5;
+          }
+        }
+      }
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      return src;
+    };
+
+    // Impulse-response reverb with dry/wet mix
+    const makeReverb = (decaySecs, wet) => {
+      const conv = ctx.createConvolver();
+      const len = Math.floor(ctx.sampleRate * decaySecs);
+      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = ir.getChannelData(ch);
+        for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.5);
+      }
+      conv.buffer = ir;
+      return {
+        connect(input, output) {
+          const dryG = ctx.createGain(); dryG.gain.value = 1 - wet;
+          const wetG = ctx.createGain(); wetG.gain.value = wet;
+          input.connect(dryG); dryG.connect(output);
+          input.connect(conv); conv.connect(wetG); wetG.connect(output);
+        }
+      };
+    };
+
+    // Slow oscillating gain (LFO for natural movement)
+    const makeSwell = (rateHz, lo, hi) => {
+      const osc = ctx.createOscillator();
+      const modG = ctx.createGain(); modG.gain.value = (hi - lo) / 2;
+      const dcG  = ctx.createGain(); dcG.gain.value  = (hi + lo) / 2;
+      osc.type = 'sine'; osc.frequency.value = rateHz;
+      osc.connect(modG); osc.start();
+      const target = ctx.createGain();
+      modG.connect(target.gain); dcG.connect(target.gain);
+      return target;
+    };
+
+    switch (type) {
+
+      case 'rain': {
+        const base    = makeNoiseBuf('pink');
+        const drizzle = makeNoiseBuf('pink');
+        const shimmer = makeNoiseBuf('white');
+
+        const bpBase = ctx.createBiquadFilter();
+        bpBase.type = 'bandpass'; bpBase.frequency.value = 900; bpBase.Q.value = 0.6;
+
+        const bpDrizzle = ctx.createBiquadFilter();
+        bpDrizzle.type = 'bandpass'; bpDrizzle.frequency.value = 2400; bpDrizzle.Q.value = 0.5;
+        const drizzleG = ctx.createGain(); drizzleG.gain.value = 0.5;
+
+        const hpShimmer = ctx.createBiquadFilter();
+        hpShimmer.type = 'highpass'; hpShimmer.frequency.value = 7000;
+        const shimmerG = ctx.createGain(); shimmerG.gain.value = 0.1;
+
+        const swell = makeSwell(0.065, 0.5, 1.0);
+        const mix   = ctx.createGain();
+        const rev   = makeReverb(1.0, 0.28);
+
+        base.connect(bpBase); bpBase.connect(mix);
+        drizzle.connect(bpDrizzle); bpDrizzle.connect(drizzleG); drizzleG.connect(mix);
+        shimmer.connect(hpShimmer); hpShimmer.connect(shimmerG); shimmerG.connect(mix);
+        mix.connect(swell);
+        rev.connect(swell, master);
+
+        base.start(); drizzle.start(); shimmer.start();
+        break;
+      }
+
+      case 'ocean': {
+        const noise = makeNoiseBuf('brown');
+        const lp  = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=300;
+        const hp  = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=35;
+
+        const swellA = makeSwell(0.055, 0.1, 1.0);
+        const swellB = makeSwell(0.043, 0.0, 0.7); // offset rate → alternating waves
+
+        const sub = ctx.createOscillator(); sub.type='sine'; sub.frequency.value=38;
+        const subG = ctx.createGain(); subG.gain.value=0;
+        const subSwell = makeSwell(0.038, 0.0, 0.08);
+        sub.connect(subSwell); subSwell.connect(master);
+        sub.start();
+
+        const mix = ctx.createGain(); mix.gain.value = 0.6;
+        const rev = makeReverb(3.0, 0.45);
+
+        noise.connect(hp); hp.connect(lp);
+        lp.connect(swellA); lp.connect(swellB);
+        swellA.connect(mix); swellB.connect(mix);
+        rev.connect(mix, master);
+        noise.start();
+        break;
+      }
+
+      case 'forest': {
+        const stream  = makeNoiseBuf('brown');
+        const wind    = makeNoiseBuf('pink');
+        const insects = makeNoiseBuf('white');
+
+        const streamLP = ctx.createBiquadFilter(); streamLP.type='lowpass';  streamLP.frequency.value=360;
+        const streamG  = ctx.createGain(); streamG.gain.value=0.75;
+
+        const windBP   = ctx.createBiquadFilter(); windBP.type='bandpass'; windBP.frequency.value=1500; windBP.Q.value=0.4;
+        const windSwell = makeSwell(0.07, 0.25, 1.0);
+
+        const insHP   = ctx.createBiquadFilter(); insHP.type='highpass'; insHP.frequency.value=5500;
+        const insG    = ctx.createGain(); insG.gain.value=0.055;
+        const insSwell = makeSwell(0.28, 0.1, 1.0);
+
+        const mix = ctx.createGain();
+        const rev = makeReverb(1.8, 0.32);
+
+        stream.connect(streamLP); streamLP.connect(streamG); streamG.connect(mix);
+        wind.connect(windBP); windBP.connect(windSwell); windSwell.connect(mix);
+        insects.connect(insHP); insHP.connect(insG); insG.connect(insSwell); insSwell.connect(mix);
+        rev.connect(mix, master);
+
+        stream.start(); wind.start(); insects.start();
+        break;
+      }
+
+      case 'brown': {
+        const noise = makeNoiseBuf('brown');
+        const lp    = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=820;
+        const hp    = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=52;
+        const swell = makeSwell(0.08, 0.72, 1.0);
+        const rev   = makeReverb(1.4, 0.2);
+        noise.connect(hp); hp.connect(lp); lp.connect(swell);
+        rev.connect(swell, master);
+        noise.start();
+        break;
+      }
+
+      case 'pink': {
+        const noise = makeNoiseBuf('pink');
+        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=9500;
+        const rev   = makeReverb(0.7, 0.14);
+        noise.connect(lp);
+        rev.connect(lp, master);
+        noise.start();
+        break;
+      }
+
+      default: {
+        const noise = makeNoiseBuf('white');
+        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=11000;
+        noise.connect(lp); lp.connect(master);
+        noise.start();
+        break;
+      }
+    }
+
+    setWhiteNoiseAudio({ context: ctx, gainNode: master });
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
 
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
-    if (whiteNoiseAudio && whiteNoiseAudio.audio) {
-      whiteNoiseAudio.audio.volume = volume;
+    if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
+      whiteNoiseAudio.gainNode.gain.value = volume * 0.55;
     }
   };
 
-  // Cleanup audio on unmount
+  // Cleanup white noise on unmount
   useEffect(() => {
     return () => {
-      if (whiteNoiseAudio && whiteNoiseAudio.audio) {
-        whiteNoiseAudio.audio.pause();
+      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
+        whiteNoiseAudio.context.close();
       }
     };
   }, [whiteNoiseAudio]);
@@ -4610,8 +4390,8 @@ const PlanAssist = () => {
         if (period < rangeStart || period > rangeEnd) continue;
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins; // negative = period already started
-        // Show banner from 1 min before start up to the exact start time only
-        if (diff >= 0 && diff <= 1) {
+        // Show banner from 5 min before start up to 2 min after start
+        if (diff >= -2 && diff <= 5) {
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
@@ -4619,7 +4399,6 @@ const PlanAssist = () => {
           const zoomNumber = tutorial?.zoom_number || lesson?.zoom_number || null;
           if (zoomNumber) {
             setZoomBanner({ period, zoomNumber, isTutorial: !!tutorial?.zoom_number });
-            launchZoomPing(zoomNumber, !!tutorial?.zoom_number, colorTheme);
           }
           break;
         }
@@ -5343,11 +5122,11 @@ const PlanAssist = () => {
     Default:
       { animClass:'', wave:false, nameStyle:{ color:'#e5e7eb', fontWeight:600 } },
     Bronze:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
     Silver:
       { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#b0b8c4,#d0d5dc,#b0b8c4)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
     Gold:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#eab308,#a16207)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#eab308,#a16207)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
     Platinum:
       { animClass:'ins-platinum', wave:false, nameStyle:{ background:'linear-gradient(135deg,#475569,#f1f5f9,#334155,#e2e8f0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
     Onyx:
@@ -5366,8 +5145,6 @@ const PlanAssist = () => {
       { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#e0f2fe,#a5f3fc,#ffffff,#fce7f3,#e0f2fe,#a5f3fc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
     Antimatter:
       { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#000000,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
-    'Hacked PlanAssist':
-      { animClass:'', wave:false, hacked:true, nameStyle:{ fontFamily:'\'Courier New\',Courier,monospace', fontWeight:900, letterSpacing:'0.06em' } },
 
     // ── Purchased insignias ──────────────────────────────────────────────────
     Meteorite:
@@ -5381,7 +5158,7 @@ const PlanAssist = () => {
     Soulstone:
       { animClass:'', wave:false, teetering:true, nameStyle:{ color:'#92400e', fontWeight:700 } },
     Starlight:
-      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1e3a5f', fontWeight:800, letterSpacing:'-0.02em' } },
+      { animClass:'', wave:false, blinking:true, nameStyle:{ color:'#1c1917', fontWeight:800, letterSpacing:'-0.02em' } },
     'Astral Crystal':
       { animClass:'ins-astral', wave:false, nameStyle:{ color:'#fde047', fontWeight:800 } },
     'Dark Matter':
@@ -5390,14 +5167,14 @@ const PlanAssist = () => {
       { animClass:'ins-neutronium', wave:false, nameStyle:{ color:'#4ade80', fontWeight:900, textShadow:'0 0 8px #4ade80, 0 0 16px #16a34a' } },
     'Singularity Core':
       { animClass:'ins-singularity', wave:false, nameStyle:{ background:'linear-gradient(90deg,#e0f2fe,#a5f3fc,#ffffff,#e0f2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
+    'Hacked PlanAssist':
+      { animClass:'', wave:false, hacked:true, nameStyle:{ fontFamily:"'Courier New',Courier,monospace", fontWeight:900, letterSpacing:'0.06em' } },
   };
 
   const INSIGNIA_KEYFRAMES = `
     /* ── Earned tier animations ─────────────────────────────────────── */
     @keyframes ins-sweep { 0%{background-position:0% center} 100%{background-position:300% center} }
     @keyframes ins-obsidian-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
-    /* Obsidian — per-letter lighter purple glow pulse */
-    @keyframes ins-ob-glow { 0%,100%{filter:brightness(1) drop-shadow(0 0 0px transparent)} 50%{filter:brightness(2.2) drop-shadow(0 0 6px #a78bfa) drop-shadow(0 0 12px #7c3aed)} }
     @keyframes ins-bling { 0%,100%{background-position:0% center;filter:brightness(1)} 25%{background-position:100% center;filter:brightness(1.4)} 50%{background-position:200% center;filter:brightness(1)} 75%{background-position:300% center;filter:brightness(1.5)} }
     @keyframes ins-color-shift { 0%{background-position:0% center} 100%{background-position:600% center} }
     @keyframes ins-wave { 0%,100%{transform:translateY(0)} 40%{transform:translateY(-3px)} 60%{transform:translateY(1px)} }
@@ -5448,17 +5225,17 @@ const PlanAssist = () => {
       100%{filter:brightness(1) saturate(1)}
     }
     .ins-aether { animation: ins-lightning 1.1s ease-in-out infinite }
-    /* Starlight — individual letters blink white and micro-shake on dark blue background */
+    /* Starlight — individual letters blink white and micro-shake on black background */
     @keyframes ins-starlight {
-      0%,100%{color:#1e3a5f;transform:translate(0,0)}
-      15%{color:#1e3a5f}
+      0%,100%{color:#1c1917;transform:translate(0,0)}
+      15%{color:#1c1917}
       18%{color:#ffffff;transform:translate(0.4px,-0.5px)}
       20%{color:#e5e5e5;transform:translate(-0.3px,0.3px)}
       22%{color:#ffffff;transform:translate(0,0)}
-      25%{color:#1e3a5f}
-      60%{color:#1e3a5f}
+      25%{color:#1c1917}
+      60%{color:#1c1917}
       62%{color:#f5f5f5;transform:translate(0.3px,-0.3px)}
-      64%{color:#1e3a5f}
+      64%{color:#1c1917}
     }
     @keyframes ins-glitch {
       0%{opacity:1;transform:rotate(0deg)}
@@ -5481,15 +5258,14 @@ const PlanAssist = () => {
     /* Neutronium — violent shutter */
     @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
     .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
-    /* Singularity Core — sweep + flame glow + letter expand on pulse */
+    /* Singularity Core — sweep + flame glow */
     @keyframes ins-singularity-shift {
-      0%  { background-position:0% center;   filter:brightness(1);   transform:scale(1) }
-      40% { background-position:120% center; filter:brightness(1.1); transform:scale(1) }
-      50% { background-position:150% center; filter:brightness(1.6) drop-shadow(0 -3px 8px #a855f7) drop-shadow(0 3px 8px #7c3aed) saturate(1.5); transform:scale(1.18,1.22) }
-      55% { background-position:165% center; filter:brightness(2.2) drop-shadow(0 -4px 14px #e879f9) drop-shadow(0 4px 14px #a855f7) saturate(2); transform:scale(1.28,1.32) }
-      60% { background-position:180% center; filter:brightness(1.4) drop-shadow(0 -2px 6px #c084fc); transform:scale(1.1,1.12) }
-      72% { background-position:220% center; filter:brightness(1);   transform:scale(1) }
-      100%{ background-position:300% center; filter:brightness(1);   transform:scale(1) }
+      0%  { background-position:0% center;   filter:brightness(1) }
+      40% { background-position:120% center; filter:brightness(1.1) }
+      50% { background-position:150% center; filter:brightness(1.6) drop-shadow(0 -3px 8px #a855f7) drop-shadow(0 3px 8px #7c3aed) saturate(1.5) }
+      55% { background-position:165% center; filter:brightness(2.2) drop-shadow(0 -4px 14px #e879f9) drop-shadow(0 4px 14px #a855f7) saturate(2) }
+      60% { background-position:180% center; filter:brightness(1.4) drop-shadow(0 -2px 6px #c084fc) }
+      100%{ background-position:300% center; filter:brightness(1) }
     }
     .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
     /* Dark Matter drift */
@@ -5499,52 +5275,39 @@ const PlanAssist = () => {
     @keyframes ins-dm-cloud-b { 0%{opacity:0;background-position:120% center} 15%{opacity:1} 75%{opacity:0.75;background-position:-20% center} 88%,100%{opacity:0;background-position:-20% center} }
     /* Soulstone / shared ins-wave */
     @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
-    /* Soulstone — pulsing between darker and less-dark orange */
-    @keyframes ins-soul-pulse { 0%,100%{color:#92400e} 50%{color:#c2692a} }
     /* Dark Matter jitter */
     @keyframes ins-jitter { 0%,80%,100%{transform:translate(0,0)} 82%{transform:translate(1.5px,-2px)} 84%{transform:translate(-1px,1.5px)} 86%{transform:translate(2px,-1px)} 88%{transform:translate(-1.5px,2px)} 90%{transform:translate(0.5px,-0.5px)} }
 
     /* ── Hacked PlanAssist ─────────────────────────────────────────────── */
-    /* Primary letter: terminal green cycling to red with hue-rotate + brightness flicker */
     @keyframes ins-hack-primary {
       0%   { color:#00ff41; text-shadow:0 0 6px #00ff41,0 0 12px #00cc33; filter:brightness(1) }
       8%   { color:#00ff41; filter:brightness(2.2) drop-shadow(0 0 4px #00ff41); transform:translateX(0) skewX(0deg) }
       9%   { color:#ff0040; filter:brightness(0.2); transform:translateX(-2px) skewX(-4deg) }
       10%  { color:#00ff41; filter:brightness(3); transform:translateX(1px) skewX(2deg) }
       11%  { color:#00ff41; filter:brightness(1); transform:translateX(0) }
-      30%  { color:#00ff41 }
       31%  { color:#fffb00; filter:brightness(1.8); transform:translateX(1.5px) }
       32%  { color:#00ff41; transform:translateX(0) }
-      55%  { color:#00ff41; filter:brightness(1) }
       56%  { color:#ff0040; filter:brightness(0.1); transform:translateX(3px) skewX(6deg) }
       57%  { color:#ff0040; filter:brightness(3.5) drop-shadow(0 0 8px #ff0040) }
       58%  { color:#00ff41; filter:brightness(0.3); transform:translateX(-1px) }
       59%  { color:#00ff41; filter:brightness(1); transform:translateX(0) skewX(0deg) }
-      80%  { color:#00ff41 }
       82%  { color:#ff0040; filter:brightness(2) drop-shadow(0 0 6px #ff0040); transform:scaleX(1.04) }
       83%  { color:#00ff41; filter:brightness(1); transform:scaleX(1) }
       100% { color:#00ff41; text-shadow:0 0 6px #00ff41,0 0 12px #00cc33; filter:brightness(1) }
     }
-    /* Alternate letters: offset phase + different glitch pattern for corruption feel */
     @keyframes ins-hack-alt {
       0%   { color:#00cc33; filter:brightness(1) }
-      20%  { color:#00cc33 }
       21%  { color:#ff0040; filter:brightness(0.15); transform:translateX(2px) skewX(3deg) }
       22%  { color:#00cc33; filter:brightness(2.8); transform:translateX(0) }
-      23%  { color:#00cc33; filter:brightness(1) }
-      45%  { color:#00cc33 }
       46%  { color:#fffb00; filter:brightness(2.5); transform:translateX(-2px) }
       47%  { color:#00cc33; transform:translateX(0) }
-      70%  { color:#00cc33 }
       71%  { color:#ff0040; filter:brightness(0.05); transform:scaleX(0.92) translateX(1px) }
       72%  { color:#ff0040; filter:brightness(4) drop-shadow(0 0 10px #ff0040) }
       73%  { color:#00cc33; filter:brightness(1); transform:scaleX(1) translateX(0) }
-      90%  { color:#00cc33 }
       91%  { color:#00ff41; filter:brightness(2.2) drop-shadow(0 0 4px #00ff41) }
       92%  { color:#00cc33; filter:brightness(1) }
       100% { color:#00cc33; filter:brightness(1) }
     }
-    /* Scan line sweep across the whole name */
     @keyframes ins-hack-scan {
       0%   { opacity:0; background-position:-20% center }
       5%   { opacity:0.7 }
@@ -5564,24 +5327,14 @@ const PlanAssist = () => {
       return <span style={{ fontWeight: fontWeight || 600, fontSize: fs, ...rest }}>{name}</span>;
     }
 
-    // ── Obsidian: dark gradient + shooting white lines overlay + per-letter glow pulses ──
+    // ── Obsidian: dark gradient + shooting white lines overlay ────────────
     if (tier === 'Obsidian') {
       const starBase = { position:'absolute', left:0, top:0, right:0, height:'2px',
         background:'linear-gradient(90deg,transparent 0%,transparent 35%,rgba(255,255,255,0.9) 48%,rgba(200,230,255,0.7) 52%,transparent 65%,transparent 100%)',
         backgroundSize:'200% 100%', pointerEvents:'none', opacity:0 };
-      // Staggered glow delays — feel random, different durations per letter so they rarely sync
-      const glowDurs = [3.1,2.7,3.5,2.4,3.8,2.9,3.3,2.6,3.0,2.8];
-      const glowDels = [0, 0.9, 1.7, 0.4, 2.2, 1.1, 2.6, 0.6, 1.9, 0.2];
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
-          <span style={{ display:'inline-block' }}>
-            {name.split('').map((ch, i) => (
-              ch === ' '
-                ? <span key={i} style={{ display:'inline-block', width:'0.25em' }}>&nbsp;</span>
-                : <span key={i} className="ins-obsidian" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                    animation: `ins-obsidian-shift 5s ease-in-out infinite, ins-ob-glow ${glowDurs[i % glowDurs.length]}s ease-in-out ${glowDels[i % glowDels.length]}s infinite` }}>{ch}</span>
-            ))}
-          </span>
+          <span className="ins-obsidian" style={{ ...s.nameStyle, fontSize: fs, display:'inline-block' }}>{name}</span>
           <span style={{ ...starBase, top:'35%', animation:'ins-ob-star-a 5s ease-in-out 0.8s infinite', animationFillMode:'backwards' }} />
           <span style={{ ...starBase, top:'60%', animation:'ins-ob-star-b 5s ease-in-out 2.5s infinite', animationFillMode:'backwards' }} />
         </span>
@@ -5620,7 +5373,6 @@ const PlanAssist = () => {
 
     // ── Hacked PlanAssist: per-letter terminal glitch with staggered corruption ──
     if (tier === 'Hacked PlanAssist') {
-      // Alternate letters use the secondary offset keyframe for an asynchronous corruption feel
       const scanBase = {
         position:'absolute', left:0, top:0, right:0, bottom:0,
         background:'linear-gradient(90deg,transparent 0%,transparent 30%,rgba(0,255,65,0.18) 48%,rgba(0,255,65,0.08) 52%,transparent 70%,transparent 100%)',
@@ -5635,17 +5387,16 @@ const PlanAssist = () => {
             const anim = isPrimary ? 'ins-hack-primary' : 'ins-hack-alt';
             return ch === ' '
               ? <span key={i} style={{ display:'inline-block', width:'0.35em' }}>&nbsp;</span>
-              : <span key={i} style={{
-                  ...s.nameStyle, fontSize: fs, display:'inline-block',
-                  animation: `${anim} ${dur} ease-in-out ${delay}s infinite`,
-                }}>{ch}</span>;
+              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `${anim} ${dur} ease-in-out ${delay}s infinite` }}>{ch}</span>;
           })}
-          {/* Scan line sweep */}
           <span style={{ ...scanBase, animation:'ins-hack-scan 4.2s ease-in-out 0.8s infinite' }} />
           <span style={{ ...scanBase, animation:'ins-hack-scan 4.2s ease-in-out 2.9s infinite' }} />
         </span>
       );
     }
+
+    // ── Soulstone: each letter teeters at its own random-feeling rate ─────
     if (tier === 'Soulstone') {
       const teeters = [1.9,2.3,1.7,2.1,1.5,2.4,1.8,2.0,1.6,2.2];
       const offsets = [0,0.3,0.6,0.1,0.8,0.4,0.7,0.2,0.9,0.5];
@@ -5657,7 +5408,7 @@ const PlanAssist = () => {
             return ch === ' '
               ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                  animation: `ins-wave ${dur}s ease-in-out ${del}s infinite, ins-soul-pulse ${(1.8 + (i % 4) * 0.35).toFixed(2)}s ease-in-out ${del}s infinite` }}>{ch}</span>;
+                  animation: `ins-wave ${dur}s ease-in-out ${del}s infinite` }}>{ch}</span>;
           })}
         </span>
       );
@@ -5684,18 +5435,20 @@ const PlanAssist = () => {
     // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep ─
     if (tier === 'Dark Matter') {
       // Purple cloud: a full-width overlay whose background is a soft oval purple blob.
-      // No overflow:hidden — the gradient fades to transparent naturally so no box clipping.
+      // Animating background-position slides the blob's centre from left-of-frame to
+      // right-of-frame (and vice-versa) — no translateX clipping, works on any text width.
       const cloudBase = {
         position:'absolute',
-        top:'-20%', left:'-15%', right:'-15%', bottom:'-20%',
-        // Very wide canvas; blob is a gentle ellipse that fully fades before hitting any edge.
-        background:'radial-gradient(ellipse 12% 120% at 15% 50%, rgba(168,85,247,0.48) 0%, rgba(147,51,234,0.22) 40%, transparent 68%)',
-        backgroundSize:'500% 100%',
+        top:0, left:0, right:0, bottom:0,
+        // Wide background so the blob (centred at 15% of the 400%-wide canvas) slides
+        // cleanly across without hard edges hitting the span boundary.
+        background:'radial-gradient(ellipse 18% 160% at 15% 50%, rgba(168,85,247,0.52) 0%, rgba(147,51,234,0.28) 45%, transparent 75%)',
+        backgroundSize:'400% 100%',
         pointerEvents:'none',
         opacity:0,
       };
       return (
-        <span style={{ position:'relative', display:'inline-block', ...rest }}>
+        <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
           {name.split('').map((ch, i) => {
             const jitterDelay = (i * 0.07).toFixed(2);
             const driftDelay  = (i * 0.12).toFixed(2);
@@ -6165,8 +5918,14 @@ const PlanAssist = () => {
     try {
       const data = await apiCall('/hub/insights', 'GET');
       setHubInsights(data);
-    } catch (e) { /* non-fatal — insights degrade gracefully */ }
+    } catch (e) { /* non-fatal */ }
   };
+
+  // Cycle insights every 10 minutes
+  useEffect(() => {
+    const id = setInterval(() => setInsightIndex(prev => prev + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const calculateHubStats = () => {
     if (!completionHistory || completionHistory.length === 0) {
@@ -6262,13 +6021,7 @@ const PlanAssist = () => {
         loadLeaderboard();
         loadCompletionHistory();
         loadStreakData({ silent: true });
-        loadHubInsights();
       }, 120000);
-
-      // Refresh notifications every 15 minutes in the background
-      const notifInterval = setInterval(() => {
-        loadNotifications();
-      }, 15 * 60 * 1000);
 
       // Silent Course Sync every 60 minutes (regardless of page, but not if tab hidden)
       const courseSyncInterval = setInterval(() => {
@@ -6282,7 +6035,6 @@ const PlanAssist = () => {
         clearTimeout(initialDelay);
         clearInterval(interval);
         clearInterval(courseSyncInterval);
-        clearInterval(notifInterval);
       };
     }
   }, [isAuthenticated, user]);
@@ -6290,27 +6042,6 @@ const PlanAssist = () => {
   useEffect(() => {
     calculateHubStats();
   }, [completionHistory, streakCompletionDates, streakShieldDates]);
-
-  // Keep the --banner-h CSS custom property in sync with the actual rendered
-  // height of the inline banner stack so page content areas can calc correctly.
-  useEffect(() => {
-    const el = bannerRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(([entry]) => {
-      const h = entry.contentRect.height;
-      document.documentElement.style.setProperty('--banner-h', `${h}px`);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  // Cycle through insights every 10 minutes
-  useEffect(() => {
-    const id = setInterval(() => {
-      setInsightIndex(prev => prev + 1);
-    }, 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   // Scroll to top when navigating to Hub; reload all Hub data when landing on Hub page
   useEffect(() => {
@@ -6440,49 +6171,31 @@ const PlanAssist = () => {
     {
       page: 'hub',
       title: '👋 Welcome to PlanAssist!',
-      body: 'This is your Hub — your home base. Your streak, stats, live activity feed, and weekly leaderboard all live here. It\'s your daily snapshot of how you\'re doing.',
+      body: 'This is your Hub — your home base. Here you can see your live activity feed, leaderboard, and stats at a glance.',
       arrow: null,
     },
     {
       page: 'tasks',
-      title: '📋 Tasks',
-      body: 'All your Canvas assignments appear here, automatically sorted by deadline. Hit Sync to pull in fresh tasks. You can set a custom time estimate on any task, split a large task into named segments with individual deadlines, or start a timed session directly from this page.',
+      title: '📋 Your Task List',
+      body: 'This is where all your Canvas assignments live. Tasks are automatically sorted by deadline. Set manual time estimates, split big tasks into segments, or start a session directly. Hit Sync to pull in fresh assignments from Canvas.',
       arrow: null,
     },
     {
       page: 'sessions',
-      title: '⚡ Focus',
-      body: "Focus is where you work. Pick the tasks you want to tackle today to build your focus list, then hit Start on any task to begin a count-up timer. Your time is saved automatically — you can pause, resume, and come back later. Complete the task when you're done and it's logged to your streak and stats.",
-      arrow: null,
-    },
-    {
-      page: 'agendas',
-      title: '📋 Agendas',
-      body: 'Agendas let you build structured, timed work blocks — each row is a task with a set time allocation. Run an Agenda when you want a planned session with a countdown per task rather than a free-running timer.',
-      arrow: null,
-    },
-    {
-      page: 'itinerary',
-      title: '🗓 Itinerary',
-      body: 'The Itinerary shows your full school day — Lesson periods with Zoom links alongside your Study periods pre-filled with tasks. Grades 7–12 only, and requires your schedule to be enhanced with course-to-period assignments first.',
+      title: '⏱ Focus',
+      body: "Focus is your productivity launchpad. Set today's priority list, start timed work sessions on individual tasks, and track your progress. The timer runs while you work.",
       arrow: null,
     },
     {
       page: 'marks',
       title: '📊 Marks',
-      body: 'Marks shows your current grade in every course, your GPA, and how you compare against the global average of all PlanAssist students. Drill into any course to see assignment-level scores. Grades update automatically on each Sync.',
-      arrow: null,
-    },
-    {
-      page: 'account',
-      title: '🎖️ Rewards & Insignia',
-      body: 'Your Account page is also your rewards hub. Earn credits from the daily chest, leaderboard spins, and feed reactions — then spend them on Streak Shields or exclusive Insignias that show next to your name in the feed and leaderboard. Check your streak history, gallery badges, and personal goals here too.',
+      body: 'The Marks page shows your current grade in every course, compared against the global average of all PlanAssist users. Grades update automatically when you sync.',
       arrow: null,
     },
     {
       page: 'hub',
       title: '🚀 You\'re all set!',
-      body: 'Start by heading to Tasks and hitting Sync to pull in your Canvas assignments. Then open Focus, build your list for today, and start your first session. Good luck!',
+      body: "Start by syncing your Canvas tasks, then use Focus to set today's priorities and start working. Good luck!",
       arrow: null,
     },
   ];
@@ -6799,43 +6512,22 @@ const PlanAssist = () => {
                 };
 
                 const renderRow = (n) => {
-                  const isHacked = n.type === 'insignia' && n.title?.includes('Hacked PlanAssist');
-                  const cfg = {
-                    ...typeConfig(n.type),
-                    ...(isHacked ? { icon: '⚠', label: 'Insignia', color: 'text-green-600' } : {}),
-                  };
+                  const cfg = typeConfig(n.type);
                   const isUnread = n.is_unread;
-                  const titleContent = (n.type === 'insignia' && n.body)
-                    ? (() => {
-                        // Extract the insignia label from the body if present, render animated
-                        const label = n.body;
-                        if (INSIGNIA_STYLES[label]) {
-                          return (
-                            <span className="flex items-center gap-1.5 flex-wrap">
-                              <span className={`text-xs ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
-                                {n.title?.replace(label, '').trim() || 'Insignia unlocked:'}
-                              </span>
-                              {renderInsigniaName(label, label, { fontSize: '0.875rem' })}
-                            </span>
-                          );
-                        }
-                        return n.title;
-                      })()
-                    : n.title;
                   return (
                     <div
                       key={n.id}
                       className={`group px-4 py-3 flex items-start gap-3 transition-colors relative
-                        ${isUnread ? (isHacked ? 'bg-green-950 bg-opacity-30' : dark ? 'bg-purple-900 bg-opacity-25' : 'bg-purple-50') : ''}
+                        ${isUnread ? (dark ? 'bg-purple-900 bg-opacity-25' : 'bg-purple-50') : ''}
                         ${n.link_url ? 'cursor-pointer' : ''}`}
                       onClick={() => n.link_url && window.open(n.link_url, '_blank')}
                     >
                       <span className="text-lg flex-shrink-0 mt-0.5">{cfg.icon}</span>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-semibold leading-snug ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
-                          {titleContent}
+                          {n.title}
                         </p>
-                        {n.body && n.type !== 'insignia' && (
+                        {n.body && (
                           <p className={`text-xs mt-0.5 leading-relaxed line-clamp-2 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
                             {n.body}
                           </p>
@@ -7016,19 +6708,8 @@ const PlanAssist = () => {
 
       {/* Insignia unlock toast */}
       {insigniaNewUnlock && (
-        <div className={`fixed top-20 right-4 px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2
-          ${insigniaNewUnlock === 'Hacked PlanAssist'
-            ? 'bg-black border border-green-800'
-            : 'bg-purple-600 text-white'}`}>
-          {insigniaNewUnlock === 'Hacked PlanAssist' ? (
-            <>
-              <span style={{ fontFamily: "'Courier New',monospace", color: '#00ff41', fontSize: '0.85rem' }}>⚠</span>
-              <span style={{ fontFamily: "'Courier New',monospace", color: '#004d14', fontSize: '0.75rem' }}>INSIGNIA GRANTED:</span>
-              <span style={{ display: 'inline-block' }}>{renderInsigniaName(insigniaNewUnlock, insigniaNewUnlock, { fontSize: '0.875rem' })}</span>
-            </>
-          ) : (
-            <>🎉 New Insignia unlocked: <span className="font-bold">"{insigniaNewUnlock}"</span></>
-          )}
+        <div className="fixed top-20 right-4 bg-purple-600 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2">
+          🎉 New Insignia unlocked: <span className="font-bold">"{insigniaNewUnlock}"</span>
         </div>
       )}
 
@@ -7060,15 +6741,13 @@ const PlanAssist = () => {
               </div>
               <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
                 <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
-                <p className="text-purple-800">Open Focus to pick today's tasks and start timed work sessions. Manage Tasks opens your deadline-sorted Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
+                <p className="text-purple-800">Open Focus to set today's priorities and start timed work sessions. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Inline banner stack — height tracked via bannerRef → --banner-h ── */}
-      <div ref={bannerRef}>
       {/* PWA Install Banner */}
       {showPwaBanner && isAuthenticated && (
         <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
@@ -7146,7 +6825,6 @@ const PlanAssist = () => {
           </button>
         </div>
       ))}
-      </div>{/* end bannerRef — --banner-h tracks this stack's height */}
 
       {/* ── Completion Animation Overlay ───────────────────────── */}
       {completionAnim && (
@@ -7302,7 +6980,7 @@ const PlanAssist = () => {
       )}
       <div>
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full">
             <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
@@ -7316,84 +6994,51 @@ const PlanAssist = () => {
                   const ins = hubInsights;
                   const insights = [];
 
-                  // ── Global-comparative insights (require hubInsights) ──────
+                  // ── Global-comparative insights ──────────────────────────
                   if (ins) {
-                    // 1. Share of global completions today
                     if (ins.userCompletionsToday > 0 && ins.globalCompletionsToday > 0) {
                       const pct = Math.round((ins.userCompletionsToday / ins.globalCompletionsToday) * 100);
-                      if (pct >= 1)
-                        insights.push(`🌍 You accounted for ${pct}% of all PlanAssist completions today — ${ins.userCompletionsToday} of ${ins.globalCompletionsToday} global.`);
+                      if (pct >= 1) insights.push(`🌍 You accounted for ${pct}% of all PlanAssist completions today.`);
                     }
-
-                    // 2. Streak percentile — use actual current streak from hubStats
                     if (hubStats.streak >= 2 && ins.streakPercentile >= 50)
-                      insights.push(`🔥 Your ${hubStats.streak}-day streak puts you in the top ${100 - ins.streakPercentile}% of all PlanAssist students.`);
-
-                    // 3. This week vs global average
+                      insights.push(`🔥 Your ${hubStats.streak}-day streak puts you in the top ${100 - ins.streakPercentile}% of all students.`);
                     if (ins.globalAvgWeek > 0 && ins.userCompletionsThisWeek > 0) {
                       const ratio = ins.userCompletionsThisWeek / ins.globalAvgWeek;
-                      if (ratio >= 1.5)
-                        insights.push(`📈 You've completed ${ins.userCompletionsThisWeek} tasks this week — ${ratio.toFixed(1)}× the global average of ${ins.globalAvgWeek.toFixed(1)}.`);
-                      else if (ratio < 0.6 && ins.userCompletionsThisWeek > 0)
-                        insights.push(`📊 Global average is ${ins.globalAvgWeek.toFixed(1)} tasks this week — you're at ${ins.userCompletionsThisWeek}. Still time to catch up.`);
+                      if (ratio >= 1.5) insights.push(`📈 ${ins.userCompletionsThisWeek} tasks this week — ${ratio.toFixed(1)}× the global average of ${ins.globalAvgWeek.toFixed(1)}.`);
+                      else if (ratio < 0.6) insights.push(`📊 Global average is ${ins.globalAvgWeek.toFixed(1)} tasks this week — you're at ${ins.userCompletionsThisWeek}. Still time to catch up.`);
                     }
-
-                    // 4. Session length vs global
                     if (ins.userAvgSessionMins > 0 && ins.globalAvgSessionMins > 0) {
                       const diff = Math.round(ins.userAvgSessionMins - ins.globalAvgSessionMins);
-                      if (Math.abs(diff) >= 3) {
-                        const dir = diff > 0 ? `${diff} min longer` : `${Math.abs(diff)} min shorter`;
-                        insights.push(`⏱ Your average session is ${dir} than the global average — ${Math.round(ins.userAvgSessionMins)} min vs ${Math.round(ins.globalAvgSessionMins)} min globally.`);
-                      }
+                      if (Math.abs(diff) >= 3) insights.push(`⏱ Your average session is ${diff > 0 ? diff + ' min longer' : Math.abs(diff) + ' min shorter'} than the global average.`);
                     }
-
-                    // 5. Grade percentile this week
                     if (ins.gradePercentile != null && ins.gradePercentile >= 50)
-                      insights.push(`🏆 You're in the top ${100 - ins.gradePercentile}% of your grade on the leaderboard this week.`);
-
-                    // 6. Accuracy trend
+                      insights.push(`🏆 You're in the top ${100 - ins.gradePercentile}% of your grade this week.`);
                     if (ins.accuracyDelta != null && Math.abs(ins.accuracyDelta) >= 5) {
-                      if (ins.accuracyDelta > 0)
-                        insights.push(`🎯 Your time estimation accuracy has improved by ${ins.accuracyDelta}% over the last 4 weeks — you're getting sharper.`);
-                      else
-                        insights.push(`⏳ Your time estimation accuracy has dipped by ${Math.abs(ins.accuracyDelta)}% recently — try setting more conservative estimates.`);
+                      if (ins.accuracyDelta > 0) insights.push(`🎯 Your time accuracy improved by ${ins.accuracyDelta}% over the last 4 weeks.`);
+                      else insights.push(`⏳ Accuracy dipped ${Math.abs(ins.accuracyDelta)}% recently — try more conservative estimates.`);
                     }
-
-                    // 7. Week-over-week momentum
                     if (ins.userCompletionsThisWeek > 0 && ins.userCompletionsLastWeek > 0) {
                       const ratio = ins.userCompletionsThisWeek / ins.userCompletionsLastWeek;
-                      if (ratio >= 1.5)
-                        insights.push(`🚀 ${ins.userCompletionsThisWeek} tasks this week vs ${ins.userCompletionsLastWeek} last week — ${Math.round((ratio - 1) * 100)}% more output.`);
-                      else if (ratio < 0.5)
-                        insights.push(`📉 You completed fewer tasks than last week (${ins.userCompletionsThisWeek} vs ${ins.userCompletionsLastWeek}). A short session today can turn it around.`);
-                    } else if (ins.userCompletionsThisWeek > 0 && ins.userCompletionsLastWeek === 0) {
-                      insights.push(`⚡ Already ${ins.userCompletionsThisWeek} task${ins.userCompletionsThisWeek > 1 ? 's' : ''} this week — stronger start than last week!`);
+                      if (ratio >= 1.5) insights.push(`🚀 ${ins.userCompletionsThisWeek} tasks this week vs ${ins.userCompletionsLastWeek} last week — ${Math.round((ratio-1)*100)}% more output.`);
                     }
-
-                    // 8. Best day pattern
-                    if (ins.bestDay)
-                      insights.push(`📅 You complete more tasks on ${ins.bestDay}s than any other day — your most productive day of the week.`);
-
-                    // 9. Peak hour
+                    if (ins.bestDay) insights.push(`📅 You complete more tasks on ${ins.bestDay}s than any other day.`);
                     if (ins.peakHour != null) {
                       const h = ins.peakHour;
-                      const label = h === 0 ? 'midnight' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h - 12} PM`;
-                      insights.push(`🕐 Historically you finish the most tasks around ${label} — your peak productivity window.`);
+                      const label = h === 0 ? 'midnight' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h-12} PM`;
+                      insights.push(`🕐 You're historically most productive around ${label}.`);
                     }
                   }
 
-                  // ── Local insights (always available) ────────────────────
+                  // ── Local insights ───────────────────────────────────────
                   if (hubStats.averageAccuracy >= 80)
                     insights.push(`🎯 ${hubStats.averageAccuracy}% time accuracy — your estimates are consistently on point.`);
                   else if (hubStats.averageAccuracy > 0 && hubStats.averageAccuracy < 55)
                     insights.push(`⏱ Time accuracy at ${hubStats.averageAccuracy}% — more sessions will sharpen your estimates.`);
-
                   if (Object.keys(userGoals).length > 0) {
                     const cwg = courses.filter(c => userGoals[String(c.course_id)] != null && c.current_period_score != null && c.enabled !== false);
                     const onTrack = cwg.filter(c => parseFloat(c.current_period_score) >= parseFloat(userGoals[String(c.course_id)]));
                     const offTrack = cwg.filter(c => parseFloat(c.current_period_score) < parseFloat(userGoals[String(c.course_id)]));
-                    if (onTrack.length > 0)
-                      insights.push(`✅ On track for your grade goal in ${onTrack.length} course${onTrack.length > 1 ? 's' : ''}. Keep the standard up.`);
+                    if (onTrack.length > 0) insights.push(`✅ On track for your goal in ${onTrack.length} course${onTrack.length > 1 ? 's' : ''}. Keep it up.`);
                     if (offTrack.length > 0) {
                       const closest = [...offTrack].sort((a,b) =>
                         (parseFloat(userGoals[String(a.course_id)]) - parseFloat(a.current_period_score)) -
@@ -7403,25 +7048,11 @@ const PlanAssist = () => {
                       insights.push(`🎯 ${gap}% from your goal in ${closest.name.split(' ').slice(0,3).join(' ')} — one focused session could move the needle.`);
                     }
                   }
-
                   const lowCourses = courses.filter(c => c.current_period_score != null && parseFloat(c.current_period_score) < 70 && c.enabled !== false);
-                  if (lowCourses.length > 0)
-                    insights.push(`⚠️ ${lowCourses[0].name.split(' ').slice(0,3).join(' ')} is sitting below 70% — worth prioritising this week.`);
+                  if (lowCourses.length > 0) insights.push(`⚠️ ${lowCourses[0].name.split(' ').slice(0,3).join(' ')} is sitting below 70% — worth prioritising.`);
+                  if (insights.length === 0) insights.push('💡 Sync Canvas to unlock personalised insights about your study patterns.');
 
-                  // Find best accuracy course
-                  const coursesWithScores = courses.filter(c => c.current_period_score != null && c.enabled !== false);
-                  if (coursesWithScores.length > 1) {
-                    const best = [...coursesWithScores].sort((a,b) => parseFloat(b.current_period_score) - parseFloat(a.current_period_score))[0];
-                    if (parseFloat(best.current_period_score) >= 90)
-                      insights.push(`⭐ ${best.name.split(' ').slice(0,3).join(' ')} is your strongest course at ${parseFloat(best.current_period_score).toFixed(1)}% — great work there.`);
-                  }
-
-                  if (insights.length === 0)
-                    insights.push('💡 Sync Canvas to unlock personalised insights about your study patterns.');
-
-                  // Rotate every 10 minutes deterministically
-                  const idx = insightIndex % insights.length;
-                  const insight = insights[idx];
+                  const insight = insights[insightIndex % insights.length];
                   return (
                     <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
                       <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
@@ -7801,7 +7432,7 @@ const PlanAssist = () => {
           </div>
         )}
         {currentPage === 'tasks' && (
-          <div className="flex h-[calc(100vh-73px-var(--banner-h,0px))] overflow-hidden">
+          <div className="flex h-[calc(100vh-73px)] overflow-hidden">
             {/* Main Task List */}
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
@@ -8022,7 +7653,7 @@ const PlanAssist = () => {
                                     })()}
                                     {!className.toLowerCase().includes('homeroom') && (
                                       <button 
-                                        onClick={() => { setShowSplitTask(task.id); setSplitSegments([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]); }}
+                                        onClick={() => setShowSplitTask(task.id)}
                                         className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
                                       >
                                         Split
@@ -8338,7 +7969,7 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="h-[calc(100vh-73px-var(--banner-h,0px))] bg-gray-50 flex flex-col overflow-hidden">
+            <div className="h-[calc(100vh-73px)] bg-gray-50 flex flex-col overflow-hidden">
               {/* Header bar — fixed height, never scrolls */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
                 <div>
@@ -8741,12 +8372,12 @@ const PlanAssist = () => {
                             <Target className="w-10 h-10 text-purple-400" />
                           </div>
                           <h2 className="text-xl font-bold text-gray-800 mb-2">No focus list set</h2>
-                          <p className="text-gray-500 text-sm mb-6">Pick the tasks you want to work on today to build your focus list.</p>
+                          <p className="text-gray-500 text-sm mb-6">Pick your priority tasks for today using the panel on the left to unlock the session dashboard.</p>
                           <button
                             onClick={() => { setSessionPickerSel([]); setSessionPrioritiesPickerOpen(true); }}
                             className="px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-2xl font-bold transition-colors flex items-center gap-2 mx-auto"
                           >
-                            <Zap className="w-5 h-5" />Set Today's Focus List
+                            <Zap className="w-5 h-5" />Set Today's Priorities
                           </button>
                         </div>
                       </div>
@@ -8762,8 +8393,8 @@ const PlanAssist = () => {
                   <div className="bg-white border border-gray-200 rounded-2xl w-full max-w-lg max-h-[85vh] flex flex-col shadow-2xl">
                     <div className="p-5 border-b border-gray-100 flex items-center justify-between">
                       <div>
-                        <h3 className="text-gray-900 text-xl font-bold">Set Today's Focus List</h3>
-                        <p className="text-gray-500 text-sm mt-0.5">Pick 1–10 tasks to work on today ({sessionPickerSel.length}/10)</p>
+                        <h3 className="text-gray-900 text-xl font-bold">Set Today's Priorities</h3>
+                        <p className="text-gray-500 text-sm mt-0.5">Pick 1–10 tasks to focus on ({sessionPickerSel.length}/10)</p>
                       </div>
                       <button onClick={() => setSessionPrioritiesPickerOpen(false)} className="text-gray-400 hover:text-gray-600 p-1"><X className="w-5 h-5" /></button>
                     </div>
@@ -8932,7 +8563,7 @@ const PlanAssist = () => {
 
                 {currentPage === 'agendas' && (() => {
                   return (
-                    <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable">
+                    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
@@ -9586,8 +9217,13 @@ const PlanAssist = () => {
               .replace(/\s{2,}/g,' ').trim();
           };
 
+          // Priority lookup
+          const priorityMap = {};
+          // priorityOrder removed — tasks are deadline-sorted
+
+
           return (
-            <div className="flex flex-col h-[calc(100vh-73px-var(--banner-h,0px))] bg-gradient-to-br from-gray-50 to-blue-50">
+            <div className="flex flex-col h-[calc(100vh-73px)] bg-gradient-to-br from-gray-50 to-blue-50">
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
@@ -9661,6 +9297,7 @@ const PlanAssist = () => {
                           )}
                           {dayTasks.map((task) => {
                             const color = getClassColor(task.class || '');
+                            const priority = priorityMap[task.id];
                             const timeStr = task.hasSpecificTime && task.dueDate
                               ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
                               : null;
@@ -9686,6 +9323,7 @@ const PlanAssist = () => {
                               >
                                 {!isExpanded && (
                                   <div className="px-1.5 py-1 flex items-start gap-1">
+                                    {priority && <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>}
                                     <span className={`truncate flex-1 ${isDone ? 'line-through opacity-60' : ''}`}>
                                       {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
                                       {displayTitle}
@@ -9696,6 +9334,7 @@ const PlanAssist = () => {
                                   <div className="p-2 space-y-1.5">
                                     <div className="flex items-start justify-between gap-1">
                                       <div className={`font-semibold leading-tight ${isDone ? 'line-through opacity-70' : ''}`}>
+                                        {priority && <span className="opacity-80">#{priority} · </span>}
                                         {timeStr && <span className="opacity-80">{timeStr} · </span>}
                                         {displayTitle}
                                       </div>
@@ -9820,7 +9459,7 @@ const PlanAssist = () => {
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
-            <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable">
+            <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
             <div className="max-w-3xl mx-auto p-6">
               {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
@@ -10058,7 +9697,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full">
           <div className="max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
@@ -10311,7 +9950,7 @@ const PlanAssist = () => {
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -10336,7 +9975,7 @@ const PlanAssist = () => {
                     { id: 'streak',  label: 'Streak',  icon: Zap },
                     { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
-                    { id: 'studios', label: 'Studios', icon: Users },
+                    ...(user?.isAdmin ? [{ id: 'studios', label: 'Studios', icon: Users }] : []),
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
@@ -11173,33 +10812,26 @@ const PlanAssist = () => {
                                 const isAdminOnly = threshold === null;
                                 const unlocked = (activityData.insignia || []).find(i => i.label === label)
                                               || (insigniaUnlocked.some?.(u => (u.label || u) === label) ? { label, unlocked_at: null } : null);
-                                // Admin-only insignias are invisible unless the user has it
                                 if (isAdminOnly && !unlocked) return null;
                                 const isHacked = label === 'Hacked PlanAssist';
                                 return (
                                   <div key={label} className={`flex items-center justify-between p-3 rounded-xl border ${
-                                    isHacked && unlocked
-                                      ? 'bg-black border-green-900'
-                                      : unlocked
-                                        ? 'bg-amber-50 border-amber-200'
-                                        : 'bg-gray-50 border-gray-200 opacity-50'
-                                  }`}>
+                                    isHacked && unlocked ? 'bg-black border-green-900'
+                                    : unlocked ? 'bg-amber-50 border-amber-200'
+                                    : 'bg-gray-50 border-gray-200 opacity-50'}`}>
                                     <div className="flex items-center gap-2">
                                       <span className="text-lg">{isHacked && unlocked ? '⚠' : unlocked ? '🎖️' : '🔒'}</span>
                                       <div>
                                         {unlocked
                                           ? renderInsigniaName(label, label, { fontSize: '0.875rem' })
-                                          : <p className="text-sm font-semibold text-gray-500">{label}</p>
-                                        }
+                                          : <p className="text-sm font-semibold text-gray-500">{label}</p>}
                                         <p className={`text-xs ${isHacked && unlocked ? 'text-green-900' : 'text-gray-400'}`}>
                                           {isAdminOnly ? '⚠ Admin-granted' : `${threshold} completion day${threshold !== 1 ? 's' : ''}`}
                                         </p>
                                       </div>
                                     </div>
                                     {unlocked?.unlocked_at && (
-                                      <p className={`text-xs ${isHacked ? 'text-green-700 font-mono' : 'text-amber-600'}`}>
-                                        {new Date(unlocked.unlocked_at).toLocaleDateString()}
-                                      </p>
+                                      <p className={`text-xs ${isHacked ? 'text-green-700 font-mono' : 'text-amber-600'}`}>{new Date(unlocked.unlocked_at).toLocaleDateString()}</p>
                                     )}
                                   </div>
                                 );
@@ -11409,7 +11041,7 @@ const PlanAssist = () => {
                 {/* ── REWARDS TAB ── */}
                 {accountTab === 'rewards' && (() => {
                   const SPIN_PRIZES = [0, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40];
-                  // Use UTC date to match the server — prevents timezone spoofing
+                  // Use UTC date to match server — prevents timezone exploit
                   const todayUTC = new Date().toISOString().slice(0, 10);
                   const lastChestDate = rewardsStatus?.lastDailyChest ? String(rewardsStatus.lastDailyChest).slice(0,10) : null;
                   const chestAvailable = lastChestDate !== todayUTC;
@@ -11831,11 +11463,11 @@ const PlanAssist = () => {
                       <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🏆 Earned</p>
                       <div className="grid grid-cols-2 gap-3 mb-6">
                         {INSIGNIA_THRESHOLDS.map(([threshold, label]) => {
+                          const isAdminOnly = threshold === null;
                           const unlocked = unlockedLabels.includes(label);
+                          if (isAdminOnly && !unlocked) return null;
                           const selected = insigniaSelected === label;
                           const baseBg = bgMap(label);
-                          const isAdminOnly = threshold === null;
-                          if (isAdminOnly && !unlocked) return null; // hidden unless granted
                           return (
                             <button key={label} disabled={!unlocked || insigniaLoading} onClick={() => selectInsignia(label)}
                               className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[90px] ${
@@ -11972,18 +11604,56 @@ const PlanAssist = () => {
                   );
                 })()}
 
-                {/* ── STUDIOS TAB ── */}
-                {accountTab === 'studios' && (
-                  <StudiosPaneWidget
-                    myStudios={myStudios}
-                    loadMyStudios={loadMyStudios}
-                    apiCall={apiCall}
-                    user={user}
-                    renderInsigniaName={renderInsigniaName}
-                  />
-                )}
+                {/* ── STUDIOS TAB (admin only during testing) ── */}
+                {accountTab === 'studios' && user?.isAdmin && (() => {
+                  return (
+                    <div className="space-y-6">
+                      <div>
+                        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
+                        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Enter a Studio Key to join a key-based Studio.</p>
+                      </div>
 
-                                {/* ── HELP TAB ── */}
+                      {/* Join by key */}
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
+                        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
+                      </div>
+
+                      {/* My Studios list */}
+                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+                        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
+                        {myStudios.length === 0 ? (
+                          <div className="text-center py-8">
+                            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-3">
+                            {myStudios.map(studio => (
+                              <div key={studio.id} className="flex items-center gap-4 p-4 rounded-xl border border-gray-100 hover:bg-gray-50">
+                                <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">
+                                    {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
+                                    {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
+                                  </p>
+                                </div>
+                                {studio.activeBanner && !studio.activeBanner.dismissed && (
+                                  <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-600 font-medium px-2.5 py-1 rounded-full flex-shrink-0">
+                                    <Bell className="w-3 h-3" /> Active banner
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <h2 className="text-lg font-bold text-gray-900 mb-1">Help</h2>
@@ -12012,7 +11682,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px-var(--banner-h,0px))] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
+          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
@@ -12094,8 +11764,6 @@ const PlanAssist = () => {
                         <option value="joined_oldest">Oldest First</option>
                         <option value="grade_asc">Grade ↑</option>
                         <option value="grade_desc">Grade ↓</option>
-                        <option value="credits_desc">Most Credits</option>
-                        <option value="credits_asc">Least Credits</option>
                         <option value="active_tasks_desc">Most Tasks</option>
                         <option value="active_tasks_asc">Fewest Tasks</option>
                         <option value="completions_desc">Most Completions</option>
@@ -12147,8 +11815,6 @@ const PlanAssist = () => {
                           case 'grade_desc': return (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0);
                           case 'active_tasks_desc': return (parseInt(b.active_tasks) || 0) - (parseInt(a.active_tasks) || 0);
                           case 'active_tasks_asc': return (parseInt(a.active_tasks) || 0) - (parseInt(b.active_tasks) || 0);
-                          case 'credits_desc': return (parseInt(b.credits) || 0) - (parseInt(a.credits) || 0);
-                          case 'credits_asc': return (parseInt(a.credits) || 0) - (parseInt(b.credits) || 0);
                           case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
                           case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
                           case 'health_desc': {
@@ -12277,26 +11943,23 @@ const PlanAssist = () => {
                                 </button>
                               )}
                               {/* Hacked PlanAssist insignia grant/revoke */}
-                              {(() => {
-                                const hasHacked = (adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist');
-                                return hasHacked ? (
-                                  <button onClick={async () => {
-                                    if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
-                                    try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
-                                    catch (err) { alert('Failed: ' + err.message); }
-                                  }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
-                                    ⚠ Revoke Hack
-                                  </button>
-                                ) : (
-                                  <button onClick={async () => {
-                                    if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}? This is irreversible unless manually revoked.`)) return;
-                                    try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ "Hacked PlanAssist" granted to ${u.name}.`); }
-                                    catch (err) { alert('Failed: ' + err.message); }
-                                  }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
-                                    ⚠ Grant Hack
-                                  </button>
-                                );
-                              })()}
+                              {(adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist') ? (
+                                <button onClick={async () => {
+                                  if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
+                                  try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
+                                  catch (err) { alert('Failed: ' + err.message); }
+                                }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
+                                  ⚠ Revoke Hack
+                                </button>
+                              ) : (
+                                <button onClick={async () => {
+                                  if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}?`)) return;
+                                  try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ Granted to ${u.name}.`); }
+                                  catch (err) { alert('Failed: ' + err.message); }
+                                }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
+                                  ⚠ Grant Hack
+                                </button>
+                              )}
                             </div>
                           )}
 
@@ -12602,7 +12265,6 @@ const PlanAssist = () => {
                       {/* Bulk Actions */}
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <h4 className="font-bold text-gray-900 mb-3">Bulk Actions</h4>
-                        <div className="flex flex-wrap gap-3">
                         <button onClick={async () => {
                           if (!window.confirm('Grant a Streak Shield to ALL users?')) return;
                           try {
@@ -12612,15 +12274,6 @@ const PlanAssist = () => {
                         }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold transition-colors">
                           🛡️ Grant Streak Shield to All Users
                         </button>
-                        <button onClick={() => {
-                          const fakeZooms = ['123 456 7890','987 654 3210','555 867 5309','246 810 1214','111 222 3333'];
-                          const fakeNum = fakeZooms[Math.floor(Math.random() * fakeZooms.length)];
-                          const isTutorial = Math.random() > 0.5;
-                          launchZoomPing(fakeNum, isTutorial, colorTheme);
-                        }} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-semibold transition-colors">
-                          🎥 Test Zoom Ping
-                        </button>
-                        </div>
                       </div>
 
                       <div className="text-right">
@@ -13827,12 +13480,12 @@ const PlanAssist = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'ambience',   label: '🌌 Ambience',           desc: 'Atmospheric background tone' },
-                            { id: 'ocean',      label: '🌊 Ocean Pulses',        desc: 'Rhythmic ocean swells' },
-                            { id: 'nature',     label: '🌿 Nature Sounds',       desc: 'Birds, breeze & outdoors' },
-                            { id: 'distortion', label: '⚡ Focused Distortion',  desc: 'Textured focus static' },
-                            { id: 'rain',       label: '🌧️ Gentle Rain',         desc: 'Soft steady rainfall' },
-                            { id: 'whitenoise', label: '📻 White Noise',         desc: 'Full-spectrum static' },
+                            { id: 'rain',       label: '🌧️ Rainfall',   desc: 'Layered rain with gust swells' },
+                            { id: 'ocean',      label: '🌊 Ocean Waves', desc: 'Alternating swells, sub-bass' },
+                            { id: 'forest',     label: '🌲 Forest',      desc: 'Stream, wind & insects' },
+                            { id: 'brown',      label: '🎵 Brown Noise', desc: 'Warm low-end hum' },
+                            { id: 'pink',       label: '💗 Pink Noise',  desc: 'Balanced, wide-spectrum' },
+                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Full-spectrum static' }
                           ].map(sound => (
                             <button
                               key={sound.id}
