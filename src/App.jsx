@@ -207,11 +207,177 @@ function getCampusTodayStr(campus) {
 }
 const FOCUS_SOUND_FILES = {
   ambience:   '/sounds/Ambience.mp3',
-  ocean:      '/sounds/Ocean_Pulses.mp3',
-  nature:     '/sounds/Nature_Sounds.mp3',
-  distortion: '/sounds/Focused_Distortion.mp3',
-  rain:       '/sounds/Gentle_Rain.mp3',
-  whitenoise: '/sounds/White_Noise.mp3',
+  ocean:      '/sounds/Ocean Pulses.mp3',
+  nature:     '/sounds/Nature Sounds.mp3',
+  distortion: '/sounds/Focused Distortion.mp3',
+  rain:       '/sounds/Gentle Rain.mp3',
+  whitenoise: '/sounds/White Noise.mp3',
+};
+
+const StudiosPaneWidget = ({ myStudios, loadMyStudios, apiCall, user, renderInsigniaName }) => {
+  const [selectedStudio, setSelectedStudio] = React.useState(null);
+  const [studioLb, setStudioLb] = React.useState(null);
+  const [studioLbLoading, setStudioLbLoading] = React.useState(false);
+
+  const loadStudioLb = async (studio) => {
+    setSelectedStudio(studio);
+    setStudioLb(null);
+    setStudioLbLoading(true);
+    try {
+      const data = await apiCall(`/studios/${studio.id}/leaderboard`, 'GET');
+      setStudioLb(data);
+    } catch (e) { setStudioLb([]); }
+    finally { setStudioLbLoading(false); }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
+        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Click a Studio to see its weekly leaderboard.</p>
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
+        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
+      </div>
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
+        {myStudios.length === 0 ? (
+          <div className="text-center py-8">
+            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {myStudios.map(studio => (
+              <button key={studio.id}
+                onClick={() => selectedStudio?.id === studio.id ? setSelectedStudio(null) : loadStudioLb(studio)}
+                className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${selectedStudio?.id === studio.id ? 'border-purple-300 bg-purple-50' : 'border-gray-100 hover:bg-gray-50'}`}
+              >
+                <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
+                    {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
+                  </p>
+                </div>
+                {studio.activeBanner && !studio.activeBanner.dismissed && (
+                  <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-600 font-medium px-2.5 py-1 rounded-full flex-shrink-0">
+                    <Bell className="w-3 h-3" /> Active banner
+                  </span>
+                )}
+                <ChevronDown className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${selectedStudio?.id === studio.id ? 'rotate-180' : ''}`} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {selectedStudio && (
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-3 h-8 rounded-full" style={{ backgroundColor: selectedStudio.color || '#7C3AED' }} />
+            <div>
+              <h3 className="text-sm font-semibold text-gray-900">{selectedStudio.name} — Weekly Leaderboard</h3>
+              <p className="text-xs text-gray-400">This week's task completions</p>
+            </div>
+          </div>
+          {studioLbLoading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="w-5 h-5 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin" />
+            </div>
+          ) : studioLb && studioLb.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-6">No activity this week yet.</p>
+          ) : studioLb ? (
+            <div className="space-y-2">
+              {studioLb.map(entry => {
+                const isMe = entry.user_id === user?.id;
+                const medal = entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : null;
+                return (
+                  <div key={entry.user_id} className={`flex items-center gap-3 px-3 py-2.5 rounded-xl ${isMe ? 'bg-purple-50 border border-purple-200' : 'bg-gray-50'}`}>
+                    <span className="w-6 text-center text-sm font-bold text-gray-400 flex-shrink-0">{medal || `#${entry.rank}`}</span>
+                    <div className="flex-1 min-w-0">
+                      {renderInsigniaName(entry.user_name, entry.insignia_selected, { fontSize: '0.875rem' })}
+                      {isMe && <span className="text-xs text-purple-500 ml-1">(you)</span>}
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <span className="text-sm font-bold text-gray-800">{entry.tasks_completed}</span>
+                      <span className="text-xs text-gray-400 ml-1">tasks</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+};
+  const [creditInput, setCreditInput] = React.useState('');
+  const [deltaInput, setDeltaInput] = React.useState('');
+  const [deltaReason, setDeltaReason] = React.useState('');
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <h4 className="font-semibold text-gray-700 mb-3 text-sm flex items-center gap-2">
+        <span className="text-yellow-500">🎁</span>
+        Credits
+        <span className="ml-auto text-lg font-bold text-yellow-600">{user.credits ?? 0}</span>
+      </h4>
+      <div className="space-y-3">
+        <div className="flex gap-2">
+          <input type="number" min="0" value={creditInput} onChange={e => setCreditInput(e.target.value)}
+            placeholder="Set to exact value"
+            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
+          <button onClick={() => { if (creditInput === '') return; onSetCredits(parseInt(creditInput)); setCreditInput(''); }}
+            className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-semibold hover:bg-yellow-600">Set</button>
+        </div>
+        <div className="flex gap-2">
+          <input type="number" value={deltaInput} onChange={e => setDeltaInput(e.target.value)}
+            placeholder="± Adjust (e.g. +50 or -20)"
+            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
+          <input type="text" value={deltaReason} onChange={e => setDeltaReason(e.target.value)}
+            placeholder="Reason (optional)"
+            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
+          <button onClick={() => { if (deltaInput === '') return; onAdjustCredits(parseInt(deltaInput), deltaReason); setDeltaInput(''); setDeltaReason(''); }}
+            className="px-3 py-1.5 bg-gray-600 text-white rounded-lg text-xs font-semibold hover:bg-gray-700">Adjust</button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminTokenCard = ({ user, onViewToken, onSetToken, onClearToken }) => {
+  const [revealed, setRevealed] = React.useState(null);
+  const [newToken, setNewToken] = React.useState('');
+  const [tokenLoading, setTokenLoading] = React.useState(false);
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <h4 className="font-semibold text-gray-700 mb-3 text-sm">Canvas API Token</h4>
+      <div className="space-y-2">
+        {revealed === null ? (
+          <button onClick={async () => { setTokenLoading(true); const t = await onViewToken(); setRevealed(t || ''); setTokenLoading(false); }}
+            disabled={tokenLoading}
+            className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50">
+            {tokenLoading ? 'Loading…' : '🔍 View Token'}
+          </button>
+        ) : revealed === '' ? (
+          <p className="text-xs text-gray-400 italic">No token set.</p>
+        ) : (
+          <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all select-all border border-gray-200">{revealed}</div>
+        )}
+        <div className="flex gap-2 mt-2">
+          <input type="text" value={newToken} onChange={e => setNewToken(e.target.value)}
+            placeholder="Paste new Canvas token to replace"
+            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400 font-mono" />
+          <button onClick={async () => { if (!newToken.trim()) return; await onSetToken(newToken.trim()); setNewToken(''); setRevealed(null); }}
+            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">Replace</button>
+        </div>
+        <button onClick={onClearToken}
+          className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200">Clear Token</button>
+      </div>
+    </div>
+  );
 };
 
 const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
@@ -3100,9 +3266,105 @@ const PlanAssist = () => {
     }).catch(err => console.error('Zoom Ping PiP failed:', err));
   };
 
+  // ── Agenda Ping — Document PiP notification when agenda row timer expires ─
+  const launchAgendaPing = () => {
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+
+    // Close any existing PiP (session/zoom) without triggering save-exit
+    pipIntentionalCloseRef.current = true;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipWindowRef.current = null;
+    pipIntentionalCloseRef.current = false;
+    setPipActive(false);
+    pipIsZoomPingRef.current = false;
+
+    const taskName = currentAgenda?.rows?.[agendaCurrentRow]?.task || 'Task';
+
+    const bgColor = '#1e293b';
+    const accentColor = '#f97316';
+
+    const css = [
+      '*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;}',
+      'html,body{width:100%;height:100%;overflow:hidden;background:transparent;}',
+      '.wrap{width:100%;height:100%;display:flex;flex-direction:column;justify-content:space-between;background:' + bgColor + ';padding:16px;}',
+      '.top{display:flex;align-items:center;gap:8px;margin-bottom:10px;}',
+      '.icon{font-size:22px;animation:shake 0.5s ease-in-out infinite;}',
+      '.head{font-size:17px;font-weight:800;color:#fff;line-height:1.2;}',
+      '.task{font-size:12px;color:#94a3b8;margin-bottom:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+      '.dismiss{display:block;width:100%;padding:10px;background:' + accentColor + ';color:#fff;font-weight:700;font-size:13px;border:none;border-radius:10px;cursor:pointer;}',
+      '.dismiss:hover{opacity:.88;}',
+      '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}',
+    ].join('');
+
+    window.documentPictureInPicture.requestWindow({ width: 300, height: 180 }).then(pipWin => {
+      pipWindowRef.current = pipWin;
+      setPipActive(true);
+
+      pipWin.document.head.insertAdjacentHTML('beforeend', '<style>' + css + '</style>');
+      pipWin.document.body.innerHTML = `
+        <div class="wrap">
+          <div>
+            <div class="top"><span class="icon">⏰</span><div class="head">Time's Up!</div></div>
+            <div class="task">${taskName}</div>
+          </div>
+          <button class="dismiss" id="dismiss-btn">Dismiss</button>
+        </div>`;
+
+      const dismiss = () => {
+        pipIntentionalCloseRef.current = true;
+        pipWin.close();
+        pipWindowRef.current = null;
+        pipIsZoomPingRef.current = false;
+        pipIntentionalCloseRef.current = false;
+        setPipActive(false);
+      };
+      pipWin.document.getElementById('dismiss-btn').addEventListener('click', dismiss);
+
+      // Looping buzz sound
+      const buzzScript = pipWin.document.createElement('script');
+      buzzScript.textContent = `
+        (function() {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          function buzz() {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'square';
+            osc.frequency.value = 180;
+            gain.gain.setValueAtTime(0.12, ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+            osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3);
+            const osc2 = ctx.createOscillator();
+            const gain2 = ctx.createGain();
+            osc2.connect(gain2); gain2.connect(ctx.destination);
+            osc2.type = 'square';
+            osc2.frequency.value = 140;
+            gain2.gain.setValueAtTime(0.10, ctx.currentTime + 0.15);
+            gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+            osc2.start(ctx.currentTime + 0.15); osc2.stop(ctx.currentTime + 0.45);
+          }
+          buzz();
+          const id = setInterval(buzz, 2000);
+          window.addEventListener('pagehide', () => clearInterval(id));
+        })();
+      `;
+      pipWin.document.body.appendChild(buzzScript);
+
+      pipWin.addEventListener('pagehide', () => {
+        if (pipIntentionalCloseRef.current) return;
+        pipWindowRef.current = null;
+        pipIsZoomPingRef.current = false;
+        setPipActive(false);
+      });
+    }).catch(err => console.error('Agenda Ping PiP failed:', err));
+  };
+
   // ── Active agenda timer logic ──────────────────────────────────────────────
+  const agendaPingFiredRef = React.useRef(false); // prevents multiple pings for same expiry
+
   const agendaStartTimer = (baseElapsed, baseCountdown) => {
     if (agendaTimerRef.current) clearInterval(agendaTimerRef.current.intervalRef);
+    agendaPingFiredRef.current = false; // reset for new row
     const wallStart = Date.now();
     const intervalId = setInterval(() => {
       const wallSecs = Math.floor((Date.now() - wallStart) / 1000);
@@ -3111,6 +3373,10 @@ const PlanAssist = () => {
       if (remaining <= 0) {
         setAgendaCountdown(0);
         setAgendaCountdownFlash(true);
+        if (!agendaPingFiredRef.current) {
+          agendaPingFiredRef.current = true;
+          launchAgendaPing();
+        }
       } else {
         setAgendaCountdown(remaining);
         setAgendaCountdownFlash(false);
@@ -4342,8 +4608,8 @@ const PlanAssist = () => {
         if (period < rangeStart || period > rangeEnd) continue;
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins; // negative = period already started
-        // Show banner from 5 min before start up to 2 min after start
-        if (diff >= -2 && diff <= 5) {
+        // Show banner from 1 min before start up to the exact start time only
+        if (diff >= 0 && diff <= 1) {
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
@@ -5060,7 +5326,8 @@ const PlanAssist = () => {
   const INSIGNIA_THRESHOLDS = [
     [0,'Default'],[2,'Bronze'],[5,'Silver'],[10,'Gold'],
     [20,'Emerald'],[30,'Sapphire'],[40,'Ruby'],[50,'Amethyst'],
-    [60,'Obsidian'],[80,'Diamond'],[100,'Antimatter']
+    [60,'Obsidian'],[80,'Diamond'],[100,'Antimatter'],
+    [null,'Hacked PlanAssist'], // Admin-granted only — no streak threshold
   ];
 
   // Purchased insignia definitions (from shop)
@@ -5097,6 +5364,8 @@ const PlanAssist = () => {
       { animClass:'ins-diamond', wave:false, nameStyle:{ background:'linear-gradient(90deg,#e0f2fe,#a5f3fc,#ffffff,#fce7f3,#e0f2fe,#a5f3fc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'400% auto' } },
     Antimatter:
       { animClass:'ins-antimatter', wave:true, nameStyle:{ background:'linear-gradient(90deg,#f0abfc,#818cf8,#34d399,#000000,#fbbf24,#ffffff,#f43f5e,#a5f3fc,#818cf8,#f0abfc)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'800% auto' } },
+    'Hacked PlanAssist':
+      { animClass:'', wave:false, hacked:true, nameStyle:{ fontFamily:'\'Courier New\',Courier,monospace', fontWeight:900, letterSpacing:'0.06em' } },
 
     // ── Purchased insignias ──────────────────────────────────────────────────
     Meteorite:
@@ -5232,6 +5501,54 @@ const PlanAssist = () => {
     @keyframes ins-soul-pulse { 0%,100%{color:#92400e} 50%{color:#c2692a} }
     /* Dark Matter jitter */
     @keyframes ins-jitter { 0%,80%,100%{transform:translate(0,0)} 82%{transform:translate(1.5px,-2px)} 84%{transform:translate(-1px,1.5px)} 86%{transform:translate(2px,-1px)} 88%{transform:translate(-1.5px,2px)} 90%{transform:translate(0.5px,-0.5px)} }
+
+    /* ── Hacked PlanAssist ─────────────────────────────────────────────── */
+    /* Primary letter: terminal green cycling to red with hue-rotate + brightness flicker */
+    @keyframes ins-hack-primary {
+      0%   { color:#00ff41; text-shadow:0 0 6px #00ff41,0 0 12px #00cc33; filter:brightness(1) }
+      8%   { color:#00ff41; filter:brightness(2.2) drop-shadow(0 0 4px #00ff41); transform:translateX(0) skewX(0deg) }
+      9%   { color:#ff0040; filter:brightness(0.2); transform:translateX(-2px) skewX(-4deg) }
+      10%  { color:#00ff41; filter:brightness(3); transform:translateX(1px) skewX(2deg) }
+      11%  { color:#00ff41; filter:brightness(1); transform:translateX(0) }
+      30%  { color:#00ff41 }
+      31%  { color:#fffb00; filter:brightness(1.8); transform:translateX(1.5px) }
+      32%  { color:#00ff41; transform:translateX(0) }
+      55%  { color:#00ff41; filter:brightness(1) }
+      56%  { color:#ff0040; filter:brightness(0.1); transform:translateX(3px) skewX(6deg) }
+      57%  { color:#ff0040; filter:brightness(3.5) drop-shadow(0 0 8px #ff0040) }
+      58%  { color:#00ff41; filter:brightness(0.3); transform:translateX(-1px) }
+      59%  { color:#00ff41; filter:brightness(1); transform:translateX(0) skewX(0deg) }
+      80%  { color:#00ff41 }
+      82%  { color:#ff0040; filter:brightness(2) drop-shadow(0 0 6px #ff0040); transform:scaleX(1.04) }
+      83%  { color:#00ff41; filter:brightness(1); transform:scaleX(1) }
+      100% { color:#00ff41; text-shadow:0 0 6px #00ff41,0 0 12px #00cc33; filter:brightness(1) }
+    }
+    /* Alternate letters: offset phase + different glitch pattern for corruption feel */
+    @keyframes ins-hack-alt {
+      0%   { color:#00cc33; filter:brightness(1) }
+      20%  { color:#00cc33 }
+      21%  { color:#ff0040; filter:brightness(0.15); transform:translateX(2px) skewX(3deg) }
+      22%  { color:#00cc33; filter:brightness(2.8); transform:translateX(0) }
+      23%  { color:#00cc33; filter:brightness(1) }
+      45%  { color:#00cc33 }
+      46%  { color:#fffb00; filter:brightness(2.5); transform:translateX(-2px) }
+      47%  { color:#00cc33; transform:translateX(0) }
+      70%  { color:#00cc33 }
+      71%  { color:#ff0040; filter:brightness(0.05); transform:scaleX(0.92) translateX(1px) }
+      72%  { color:#ff0040; filter:brightness(4) drop-shadow(0 0 10px #ff0040) }
+      73%  { color:#00cc33; filter:brightness(1); transform:scaleX(1) translateX(0) }
+      90%  { color:#00cc33 }
+      91%  { color:#00ff41; filter:brightness(2.2) drop-shadow(0 0 4px #00ff41) }
+      92%  { color:#00cc33; filter:brightness(1) }
+      100% { color:#00cc33; filter:brightness(1) }
+    }
+    /* Scan line sweep across the whole name */
+    @keyframes ins-hack-scan {
+      0%   { opacity:0; background-position:-20% center }
+      5%   { opacity:0.7 }
+      90%  { opacity:0.5; background-position:120% center }
+      95%,100% { opacity:0 }
+    }
   `;
 
 
@@ -5299,7 +5616,34 @@ const PlanAssist = () => {
       );
     }
 
-    // ── Soulstone: each letter teeters at its own random-feeling rate ─────
+    // ── Hacked PlanAssist: per-letter terminal glitch with staggered corruption ──
+    if (tier === 'Hacked PlanAssist') {
+      // Alternate letters use the secondary offset keyframe for an asynchronous corruption feel
+      const scanBase = {
+        position:'absolute', left:0, top:0, right:0, bottom:0,
+        background:'linear-gradient(90deg,transparent 0%,transparent 30%,rgba(0,255,65,0.18) 48%,rgba(0,255,65,0.08) 52%,transparent 70%,transparent 100%)',
+        backgroundSize:'200% 100%', pointerEvents:'none', opacity:0,
+      };
+      return (
+        <span style={{ position:'relative', display:'inline-block', ...rest }}>
+          {name.split('').map((ch, i) => {
+            const isPrimary = i % 2 === 0;
+            const delay = (i * 0.13).toFixed(2);
+            const dur = isPrimary ? '3.1s' : '3.7s';
+            const anim = isPrimary ? 'ins-hack-primary' : 'ins-hack-alt';
+            return ch === ' '
+              ? <span key={i} style={{ display:'inline-block', width:'0.35em' }}>&nbsp;</span>
+              : <span key={i} style={{
+                  ...s.nameStyle, fontSize: fs, display:'inline-block',
+                  animation: `${anim} ${dur} ease-in-out ${delay}s infinite`,
+                }}>{ch}</span>;
+          })}
+          {/* Scan line sweep */}
+          <span style={{ ...scanBase, animation:'ins-hack-scan 4.2s ease-in-out 0.8s infinite' }} />
+          <span style={{ ...scanBase, animation:'ins-hack-scan 4.2s ease-in-out 2.9s infinite' }} />
+        </span>
+      );
+    }
     if (tier === 'Soulstone') {
       const teeters = [1.9,2.3,1.7,2.1,1.5,2.4,1.8,2.0,1.6,2.2];
       const offsets = [0,0.3,0.6,0.1,0.8,0.4,0.7,0.2,0.9,0.5];
@@ -6947,9 +7291,9 @@ const PlanAssist = () => {
                         insights.push(`🌍 You accounted for ${pct}% of all PlanAssist completions today — ${ins.userCompletionsToday} of ${ins.globalCompletionsToday} global.`);
                     }
 
-                    // 2. Streak percentile
-                    if (ins.userStreakDays >= 2 && ins.streakPercentile >= 50)
-                      insights.push(`🔥 Your ${ins.userStreakDays}-day streak puts you in the top ${100 - ins.streakPercentile}% of all PlanAssist students.`);
+                    // 2. Streak percentile — use actual current streak from hubStats
+                    if (hubStats.streak >= 2 && ins.streakPercentile >= 50)
+                      insights.push(`🔥 Your ${hubStats.streak}-day streak puts you in the top ${100 - ins.streakPercentile}% of all PlanAssist students.`);
 
                     // 3. This week vs global average
                     if (ins.globalAvgWeek > 0 && ins.userCompletionsThisWeek > 0) {
@@ -7046,9 +7390,7 @@ const PlanAssist = () => {
                   const insight = insights[idx];
                   return (
                     <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
-                      <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">
-                        Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${idx + 1} of ${insights.length}` : ''}</span>
-                      </p>
+                      <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
                       <p className="text-sm text-white leading-relaxed">{insight}</p>
                     </div>
                   );
@@ -11016,13 +11358,10 @@ const PlanAssist = () => {
                 {/* ── REWARDS TAB ── */}
                 {accountTab === 'rewards' && (() => {
                   const SPIN_PRIZES = [0, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40];
-                  // Get user's local date string for daily chest
-                  const localDateStr = (() => {
-                    const d = new Date();
-                    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-                  })();
+                  // Use UTC date to match the server — prevents timezone spoofing
+                  const todayUTC = new Date().toISOString().slice(0, 10);
                   const lastChestDate = rewardsStatus?.lastDailyChest ? String(rewardsStatus.lastDailyChest).slice(0,10) : null;
-                  const chestAvailable = lastChestDate !== localDateStr;
+                  const chestAvailable = lastChestDate !== todayUTC;
                   const spinsAvailable = rewardsStatus?.spinsAvailable ?? 0;
                   const unclaimedReactions = rewardsStatus?.unclaimedReactions ?? 0;
                   const weeklyEntry = rewardsStatus?.weeklyEntry;
@@ -11168,7 +11507,7 @@ const PlanAssist = () => {
                               setClaimingChest(true);
                               setLastChestPrize(null);
                               try {
-                                const r = await apiCall('/rewards/daily-chest', 'POST', { localDate: localDateStr });
+                                const r = await apiCall('/rewards/daily-chest', 'POST', {});
                                 setLastChestPrize(r.prize);
                                 setCredits(r.credits);
                                 await loadRewardsStatus();
@@ -11435,7 +11774,7 @@ const PlanAssist = () => {
                         <span className="text-sm text-purple-600 font-semibold">🪙 {credits} Credits</span>
                       </div>
                       <p className="text-sm text-gray-500 mb-1">Your Insignia styles your name across PlanAssist — in the nav, Hub, Feed, and Leaderboard.</p>
-                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{insigniaDays}</span> days — unlocking {unlockedLabels.filter(l => !INSIGNIA_PURCHASED.includes(l)).length} / {INSIGNIA_THRESHOLDS.length} earned Insignias.</p>
+                      <p className="text-xs text-gray-400 mb-5">You have completed tasks on <span className="font-bold text-purple-600">{insigniaDays}</span> days — unlocking {unlockedLabels.filter(l => !INSIGNIA_PURCHASED.includes(l) && l !== 'Hacked PlanAssist').length} / {INSIGNIA_THRESHOLDS.filter(([t]) => t !== null).length} earned Insignias.</p>
 
                       {/* Earned Insignias */}
                       <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">🏆 Earned</p>
@@ -11444,6 +11783,8 @@ const PlanAssist = () => {
                           const unlocked = unlockedLabels.includes(label);
                           const selected = insigniaSelected === label;
                           const baseBg = bgMap(label);
+                          const isAdminOnly = threshold === null;
+                          if (isAdminOnly && !unlocked) return null; // hidden unless granted
                           return (
                             <button key={label} disabled={!unlocked || insigniaLoading} onClick={() => selectInsignia(label)}
                               className={`flex flex-col items-center justify-center gap-2 p-4 rounded-2xl border-2 text-center transition-all min-h-[90px] ${
@@ -11453,7 +11794,7 @@ const PlanAssist = () => {
                               <span className="text-base font-semibold leading-tight">
                                 {renderInsigniaName(label, label, { fontSize: '1rem' })}
                               </span>
-                              <span className="text-xs text-gray-400">{threshold === 0 ? 'Default' : `${threshold} days`}</span>
+                              <span className="text-xs text-gray-400">{isAdminOnly ? '⚠ Admin-granted' : threshold === 0 ? 'Default' : `${threshold} days`}</span>
                               {selected && <span className="text-purple-600 text-xs font-bold">✓ Active</span>}
                               {!unlocked && <span className="text-gray-400 text-lg">🔒</span>}
                             </button>
@@ -11581,55 +11922,17 @@ const PlanAssist = () => {
                 })()}
 
                 {/* ── STUDIOS TAB ── */}
-                {accountTab === 'studios' && (() => {
-                  return (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
-                        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Enter a Studio Key to join a key-based Studio.</p>
-                      </div>
+                {accountTab === 'studios' && (
+                  <StudiosPaneWidget
+                    myStudios={myStudios}
+                    loadMyStudios={loadMyStudios}
+                    apiCall={apiCall}
+                    user={user}
+                    renderInsigniaName={renderInsigniaName}
+                  />
+                )}
 
-                      {/* Join by key */}
-                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
-                        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
-                      </div>
-
-                      {/* My Studios list */}
-                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
-                        {myStudios.length === 0 ? (
-                          <div className="text-center py-8">
-                            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {myStudios.map(studio => (
-                              <div key={studio.id} className="flex items-center gap-4 p-4 rounded-xl border border-gray-100 hover:bg-gray-50">
-                                <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
-                                  <p className="text-xs text-gray-500 mt-0.5">
-                                    {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
-                                    {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
-                                  </p>
-                                </div>
-                                {studio.activeBanner && !studio.activeBanner.dismissed && (
-                                  <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-600 font-medium px-2.5 py-1 rounded-full flex-shrink-0">
-                                    <Bell className="w-3 h-3" /> Active banner
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* ── HELP TAB ── */}
+                                {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
                   <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
                     <h2 className="text-lg font-bold text-gray-900 mb-1">Help</h2>
@@ -11918,6 +12221,27 @@ const PlanAssist = () => {
                                   <Ban className="w-3.5 h-3.5" />Block Account
                                 </button>
                               )}
+                              {/* Hacked PlanAssist insignia grant/revoke */}
+                              {(() => {
+                                const hasHacked = (adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist');
+                                return hasHacked ? (
+                                  <button onClick={async () => {
+                                    if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
+                                    try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
+                                    catch (err) { alert('Failed: ' + err.message); }
+                                  }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
+                                    ⚠ Revoke Hack
+                                  </button>
+                                ) : (
+                                  <button onClick={async () => {
+                                    if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}? This is irreversible unless manually revoked.`)) return;
+                                    try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ "Hacked PlanAssist" granted to ${u.name}.`); }
+                                    catch (err) { alert('Failed: ' + err.message); }
+                                  }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
+                                    ⚠ Grant Hack
+                                  </button>
+                                );
+                              })()}
                             </div>
                           )}
 
@@ -11929,73 +12253,19 @@ const PlanAssist = () => {
                         </div>
 
                         {/* Credits */}
-                        {(() => {
-                          const [creditInput, setCreditInput] = React.useState('');
-                          const [deltaInput, setDeltaInput] = React.useState('');
-                          const [deltaReason, setDeltaReason] = React.useState('');
-                          return (
-                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                              <h4 className="font-semibold text-gray-700 mb-3 text-sm flex items-center gap-2">
-                                <Gift className="w-4 h-4 text-yellow-500" />
-                                Credits
-                                <span className="ml-auto text-lg font-bold text-yellow-600">{u.credits ?? 0}</span>
-                              </h4>
-                              <div className="space-y-3">
-                                <div className="flex gap-2">
-                                  <input type="number" min="0" value={creditInput} onChange={e => setCreditInput(e.target.value)}
-                                    placeholder="Set to exact value"
-                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
-                                  <button onClick={() => { if (creditInput === '') return; adminSetCredits(u.id, parseInt(creditInput)); setCreditInput(''); }}
-                                    className="px-3 py-1.5 bg-yellow-500 text-white rounded-lg text-xs font-semibold hover:bg-yellow-600">Set</button>
-                                </div>
-                                <div className="flex gap-2">
-                                  <input type="number" value={deltaInput} onChange={e => setDeltaInput(e.target.value)}
-                                    placeholder="±  Adjust (e.g. +50 or -20)"
-                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
-                                  <input type="text" value={deltaReason} onChange={e => setDeltaReason(e.target.value)}
-                                    placeholder="Reason (optional)"
-                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400" />
-                                  <button onClick={() => { if (deltaInput === '') return; adminAdjustCredits(u.id, parseInt(deltaInput), deltaReason); setDeltaInput(''); setDeltaReason(''); }}
-                                    className="px-3 py-1.5 bg-gray-600 text-white rounded-lg text-xs font-semibold hover:bg-gray-700">Adjust</button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <AdminCreditsCard
+                          user={u}
+                          onSetCredits={amount => adminSetCredits(u.id, amount)}
+                          onAdjustCredits={(delta, reason) => adminAdjustCredits(u.id, delta, reason)}
+                        />
 
                         {/* Canvas Token */}
-                        {(() => {
-                          const [revealed, setRevealed] = React.useState(null); // null = not loaded, '' = no token, string = token
-                          const [newToken, setNewToken] = React.useState('');
-                          const [tokenLoading, setTokenLoading] = React.useState(false);
-                          return (
-                            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                              <h4 className="font-semibold text-gray-700 mb-3 text-sm">Canvas API Token</h4>
-                              <div className="space-y-2">
-                                {revealed === null ? (
-                                  <button onClick={async () => { setTokenLoading(true); const t = await adminViewCanvasToken(u.id); setRevealed(t || ''); setTokenLoading(false); }}
-                                    disabled={tokenLoading}
-                                    className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50">
-                                    {tokenLoading ? 'Loading…' : '🔍 View Token'}
-                                  </button>
-                                ) : revealed === '' ? (
-                                  <p className="text-xs text-gray-400 italic">No token set.</p>
-                                ) : (
-                                  <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all select-all border border-gray-200">{revealed}</div>
-                                )}
-                                <div className="flex gap-2 mt-2">
-                                  <input type="text" value={newToken} onChange={e => setNewToken(e.target.value)}
-                                    placeholder="Paste new Canvas token to replace"
-                                    className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400 font-mono" />
-                                  <button onClick={async () => { if (!newToken.trim()) return; await adminSetCanvasToken(u.id, newToken.trim()); setNewToken(''); setRevealed(null); }}
-                                    className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">Replace</button>
-                                </div>
-                                <button onClick={() => adminClearToken(u.id)}
-                                  className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200">Clear Token</button>
-                              </div>
-                            </div>
-                          );
-                        })()}
+                        <AdminTokenCard
+                          user={u}
+                          onViewToken={() => adminViewCanvasToken(u.id)}
+                          onSetToken={token => adminSetCanvasToken(u.id, token)}
+                          onClearToken={() => adminClearToken(u.id)}
+                        />
 
                         {/* Tasks */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
