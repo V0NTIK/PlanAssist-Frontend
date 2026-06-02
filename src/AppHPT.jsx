@@ -795,6 +795,11 @@ function StudiosPage({ token, hptUser, onStudiosChange }) {
 
 function HubPage({ hptUser, token, studios, onNavigate }) {
   const [hubData, setHubData] = React.useState(null);
+  const [insightIndex, setInsightIndex] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
   const [loading, setLoading] = React.useState(true);
   const [statModal, setStatModal] = React.useState(null); // 'today'|'week'|'studytime'|'accuracy'|'streak'
 
@@ -1007,7 +1012,8 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   else if (insights.length === 0)
     insights.push(`💡 ${studentCount} student${studentCount !== 1 ? 's' : ''} connected across your Studios. Keep an eye on weekly momentum.`);
 
-  const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
+  const idx = insightIndex % insights.length;
+  const insight = insights[idx];
 
   return (
     <div className="max-w-7xl mx-auto p-6 space-y-6">
@@ -1023,7 +1029,7 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
           </div>
           <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
             <p className="text-xs text-yellow-200 font-semibold uppercase tracking-wide mb-1.5">
-              Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${(Math.floor(Date.now() / 1000 / 60 / 10) % insights.length) + 1} of ${insights.length}` : ''}</span>
+              Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${idx + 1} of ${insights.length}` : ''}</span>
             </p>
             <p className="text-sm text-white leading-relaxed">{insight}</p>
           </div>
