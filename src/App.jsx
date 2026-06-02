@@ -711,7 +711,7 @@ const PlanAssist = () => {
   
   // White noise state
   const [whiteNoiseAudio, setWhiteNoiseAudio] = useState(null);
-  const [whiteNoiseType, setWhiteNoiseType] = useState('rain');
+  const [whiteNoiseType, setWhiteNoiseType] = useState('ambience');
   const [whiteNoiseVolume, setWhiteNoiseVolume] = useState(0.5);
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState(
     () => localStorage.getItem('planassist-completion-sound') !== 'false'
@@ -871,6 +871,7 @@ const PlanAssist = () => {
     averageAccuracy: 0,
     streak: 0
   });
+  const [hubInsights, setHubInsights] = useState(null); // global insight data from /api/hub/insights
   const [hubStatModal, setHubStatModal] = useState(null); // 'today' | 'week' | 'studytime' | 'accuracy'
   const [hptMode, setHptMode] = useState(false);
   const [studioBanners, setStudioBanners] = useState([]); // active HPT studio banners for the student
@@ -3006,22 +3007,24 @@ const PlanAssist = () => {
     const label = isTutorial ? '📘 Tutorial' : '🎓 Class';
     const heading = isTutorial ? 'Tutorial Starting!' : 'Class Starting!';
 
+    const pingCss = [
+      '*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;}',
+      'html,body{width:100%;height:100%;overflow:hidden;background:transparent;}',
+      '.wrap{width:100%;height:100%;display:flex;flex-direction:column;background:' + t.bg + ';padding:16px;}',
+      '.badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);color:' + t.text + ';font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:8px;width:fit-content;}',
+      '.head{font-size:20px;font-weight:800;color:' + t.text + ';margin-bottom:3px;line-height:1.15;}',
+      '.zoom{font-size:12px;color:' + t.sub + ';margin-bottom:14px;letter-spacing:.3px;}',
+      '.join{display:block;width:100%;padding:10px;background:#fff;color:' + t.btn + ';font-weight:700;font-size:14px;border:none;border-radius:10px;cursor:pointer;text-align:center;text-decoration:none;transition:opacity .15s;}',
+      '.join:hover{opacity:.88;}',
+      '.close{margin-top:8px;background:transparent;border:none;color:' + t.sub + ';font-size:11px;cursor:pointer;width:100%;text-align:center;padding:2px;}',
+      '.close:hover{color:' + t.text + ';}',
+    ].join('\n');
+
     window.documentPictureInPicture.requestWindow({ width: 320, height: 210 }).then(pipWin => {
       pipWindowRef.current = pipWin;
       setPipActive(true);
 
-      pipWin.document.head.insertAdjacentHTML('beforeend', `<style>
-        *{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;}
-        html,body{width:100%;height:100%;overflow:hidden;background:transparent;}
-        .wrap{width:100%;height:100%;display:flex;flex-direction:column;background:${t.bg};padding:16px;}
-        .badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);color:${t.text};font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:8px;width:fit-content;}
-        .head{font-size:20px;font-weight:800;color:${t.text};margin-bottom:3px;line-height:1.15;}
-        .zoom{font-size:12px;color:${t.sub};margin-bottom:14px;letter-spacing:.3px;}
-        .join{display:block;width:100%;padding:10px;background:#fff;color:${t.btn};font-weight:700;font-size:14px;border:none;border-radius:10px;cursor:pointer;text-align:center;text-decoration:none;transition:opacity .15s;}
-        .join:hover{opacity:.88;}
-        .close{margin-top:8px;background:transparent;border:none;color:${t.sub};font-size:11px;cursor:pointer;width:100%;text-align:center;padding:2px;}
-        .close:hover{color:${t.text};}
-      `}</style>`);
+      pipWin.document.head.insertAdjacentHTML('beforeend', '<style>' + pingCss + '</style>');
 
       pipWin.document.body.innerHTML = `
         <div class="wrap">
@@ -4127,8 +4130,9 @@ const PlanAssist = () => {
   // White noise functions
   const toggleWhiteNoise = () => {
     if (isWhiteNoisePlaying) {
-      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
-        whiteNoiseAudio.context.close();
+      if (whiteNoiseAudio && whiteNoiseAudio.audio) {
+        whiteNoiseAudio.audio.pause();
+        whiteNoiseAudio.audio.currentTime = 0;
       }
       setWhiteNoiseAudio(null);
       setIsWhiteNoisePlaying(false);
@@ -4137,208 +4141,45 @@ const PlanAssist = () => {
     }
   };
 
+  const FOCUS_SOUND_FILES = {
+    ambience:   '/sounds/Ambience.mp3',
+    ocean:      '/sounds/Ocean_Pulses.mp3',
+    nature:     '/sounds/Nature_Sounds.mp3',
+    distortion: '/sounds/Focused_Distortion.mp3',
+    rain:       '/sounds/Gentle_Rain.mp3',
+    whitenoise: '/sounds/White_Noise.mp3',
+  };
+
   const playWhiteNoise = (type) => {
-    if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
-      whiteNoiseAudio.context.close();
+    // Stop any currently playing sound
+    if (whiteNoiseAudio && whiteNoiseAudio.audio) {
+      whiteNoiseAudio.audio.pause();
+      whiteNoiseAudio.audio.currentTime = 0;
     }
 
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const master = ctx.createGain();
-    master.gain.value = whiteNoiseVolume * 0.55;
-    master.connect(ctx.destination);
+    const src = FOCUS_SOUND_FILES[type] || FOCUS_SOUND_FILES.ambience;
+    const audio = new Audio(src);
+    audio.loop = true;
+    audio.volume = whiteNoiseVolume;
+    audio.play().catch(() => {}); // browser autoplay policy — silently ignore if blocked
 
-    // Stereo noise buffer generator
-    const makeNoiseBuf = (color, secs = 6) => {
-      const buf = ctx.createBuffer(2, secs * ctx.sampleRate, ctx.sampleRate);
-      for (let ch = 0; ch < 2; ch++) {
-        const d = buf.getChannelData(ch);
-        if (color === 'white') {
-          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-        } else if (color === 'pink') {
-          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-          for (let i = 0; i < d.length; i++) {
-            const w = Math.random() * 2 - 1;
-            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
-            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
-            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
-            d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
-          }
-        } else {
-          let last = 0;
-          for (let i = 0; i < d.length; i++) {
-            const w = Math.random() * 2 - 1;
-            d[i] = (last + 0.02 * w) / 1.02; last = d[i]; d[i] *= 3.5;
-          }
-        }
-      }
-      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
-      return src;
-    };
-
-    // Impulse-response reverb with dry/wet mix
-    const makeReverb = (decaySecs, wet) => {
-      const conv = ctx.createConvolver();
-      const len = Math.floor(ctx.sampleRate * decaySecs);
-      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
-      for (let ch = 0; ch < 2; ch++) {
-        const d = ir.getChannelData(ch);
-        for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.5);
-      }
-      conv.buffer = ir;
-      return {
-        connect(input, output) {
-          const dryG = ctx.createGain(); dryG.gain.value = 1 - wet;
-          const wetG = ctx.createGain(); wetG.gain.value = wet;
-          input.connect(dryG); dryG.connect(output);
-          input.connect(conv); conv.connect(wetG); wetG.connect(output);
-        }
-      };
-    };
-
-    // Slow oscillating gain (LFO for natural movement)
-    const makeSwell = (rateHz, lo, hi) => {
-      const osc = ctx.createOscillator();
-      const modG = ctx.createGain(); modG.gain.value = (hi - lo) / 2;
-      const dcG  = ctx.createGain(); dcG.gain.value  = (hi + lo) / 2;
-      osc.type = 'sine'; osc.frequency.value = rateHz;
-      osc.connect(modG); osc.start();
-      const target = ctx.createGain();
-      modG.connect(target.gain); dcG.connect(target.gain);
-      return target;
-    };
-
-    switch (type) {
-
-      case 'rain': {
-        const base    = makeNoiseBuf('pink');
-        const drizzle = makeNoiseBuf('pink');
-        const shimmer = makeNoiseBuf('white');
-
-        const bpBase = ctx.createBiquadFilter();
-        bpBase.type = 'bandpass'; bpBase.frequency.value = 900; bpBase.Q.value = 0.6;
-
-        const bpDrizzle = ctx.createBiquadFilter();
-        bpDrizzle.type = 'bandpass'; bpDrizzle.frequency.value = 2400; bpDrizzle.Q.value = 0.5;
-        const drizzleG = ctx.createGain(); drizzleG.gain.value = 0.5;
-
-        const hpShimmer = ctx.createBiquadFilter();
-        hpShimmer.type = 'highpass'; hpShimmer.frequency.value = 7000;
-        const shimmerG = ctx.createGain(); shimmerG.gain.value = 0.1;
-
-        const swell = makeSwell(0.065, 0.5, 1.0);
-        const mix   = ctx.createGain();
-        const rev   = makeReverb(1.0, 0.28);
-
-        base.connect(bpBase); bpBase.connect(mix);
-        drizzle.connect(bpDrizzle); bpDrizzle.connect(drizzleG); drizzleG.connect(mix);
-        shimmer.connect(hpShimmer); hpShimmer.connect(shimmerG); shimmerG.connect(mix);
-        mix.connect(swell);
-        rev.connect(swell, master);
-
-        base.start(); drizzle.start(); shimmer.start();
-        break;
-      }
-
-      case 'ocean': {
-        const noise = makeNoiseBuf('brown');
-        const lp  = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=300;
-        const hp  = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=35;
-
-        const swellA = makeSwell(0.055, 0.1, 1.0);
-        const swellB = makeSwell(0.043, 0.0, 0.7); // offset rate → alternating waves
-
-        const sub = ctx.createOscillator(); sub.type='sine'; sub.frequency.value=38;
-        const subG = ctx.createGain(); subG.gain.value=0;
-        const subSwell = makeSwell(0.038, 0.0, 0.08);
-        sub.connect(subSwell); subSwell.connect(master);
-        sub.start();
-
-        const mix = ctx.createGain(); mix.gain.value = 0.6;
-        const rev = makeReverb(3.0, 0.45);
-
-        noise.connect(hp); hp.connect(lp);
-        lp.connect(swellA); lp.connect(swellB);
-        swellA.connect(mix); swellB.connect(mix);
-        rev.connect(mix, master);
-        noise.start();
-        break;
-      }
-
-      case 'forest': {
-        const stream  = makeNoiseBuf('brown');
-        const wind    = makeNoiseBuf('pink');
-        const insects = makeNoiseBuf('white');
-
-        const streamLP = ctx.createBiquadFilter(); streamLP.type='lowpass';  streamLP.frequency.value=360;
-        const streamG  = ctx.createGain(); streamG.gain.value=0.75;
-
-        const windBP   = ctx.createBiquadFilter(); windBP.type='bandpass'; windBP.frequency.value=1500; windBP.Q.value=0.4;
-        const windSwell = makeSwell(0.07, 0.25, 1.0);
-
-        const insHP   = ctx.createBiquadFilter(); insHP.type='highpass'; insHP.frequency.value=5500;
-        const insG    = ctx.createGain(); insG.gain.value=0.055;
-        const insSwell = makeSwell(0.28, 0.1, 1.0);
-
-        const mix = ctx.createGain();
-        const rev = makeReverb(1.8, 0.32);
-
-        stream.connect(streamLP); streamLP.connect(streamG); streamG.connect(mix);
-        wind.connect(windBP); windBP.connect(windSwell); windSwell.connect(mix);
-        insects.connect(insHP); insHP.connect(insG); insG.connect(insSwell); insSwell.connect(mix);
-        rev.connect(mix, master);
-
-        stream.start(); wind.start(); insects.start();
-        break;
-      }
-
-      case 'brown': {
-        const noise = makeNoiseBuf('brown');
-        const lp    = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=820;
-        const hp    = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=52;
-        const swell = makeSwell(0.08, 0.72, 1.0);
-        const rev   = makeReverb(1.4, 0.2);
-        noise.connect(hp); hp.connect(lp); lp.connect(swell);
-        rev.connect(swell, master);
-        noise.start();
-        break;
-      }
-
-      case 'pink': {
-        const noise = makeNoiseBuf('pink');
-        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=9500;
-        const rev   = makeReverb(0.7, 0.14);
-        noise.connect(lp);
-        rev.connect(lp, master);
-        noise.start();
-        break;
-      }
-
-      default: {
-        const noise = makeNoiseBuf('white');
-        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=11000;
-        noise.connect(lp); lp.connect(master);
-        noise.start();
-        break;
-      }
-    }
-
-    setWhiteNoiseAudio({ context: ctx, gainNode: master });
+    setWhiteNoiseAudio({ audio });
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
 
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
-    if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
-      whiteNoiseAudio.gainNode.gain.value = volume * 0.55;
+    if (whiteNoiseAudio && whiteNoiseAudio.audio) {
+      whiteNoiseAudio.audio.volume = volume;
     }
   };
 
-  // Cleanup white noise on unmount
+  // Cleanup audio on unmount
   useEffect(() => {
     return () => {
-      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
-        whiteNoiseAudio.context.close();
+      if (whiteNoiseAudio && whiteNoiseAudio.audio) {
+        whiteNoiseAudio.audio.pause();
       }
     };
   }, [whiteNoiseAudio]);
@@ -5970,6 +5811,13 @@ const PlanAssist = () => {
     } finally { setAddingCourse(false); }
   };
 
+  const loadHubInsights = async () => {
+    try {
+      const data = await apiCall('/hub/insights', 'GET');
+      setHubInsights(data);
+    } catch (e) { /* non-fatal — insights degrade gracefully */ }
+  };
+
   const calculateHubStats = () => {
     if (!completionHistory || completionHistory.length === 0) {
       setHubStats({
@@ -6064,7 +5912,13 @@ const PlanAssist = () => {
         loadLeaderboard();
         loadCompletionHistory();
         loadStreakData({ silent: true });
+        loadHubInsights();
       }, 120000);
+
+      // Refresh notifications every 15 minutes in the background
+      const notifInterval = setInterval(() => {
+        loadNotifications();
+      }, 15 * 60 * 1000);
 
       // Silent Course Sync every 60 minutes (regardless of page, but not if tab hidden)
       const courseSyncInterval = setInterval(() => {
@@ -6078,6 +5932,7 @@ const PlanAssist = () => {
         clearTimeout(initialDelay);
         clearInterval(interval);
         clearInterval(courseSyncInterval);
+        clearInterval(notifInterval);
       };
     }
   }, [isAuthenticated, user]);
@@ -6110,6 +5965,7 @@ const PlanAssist = () => {
       loadStreakData({ silent: true });
       loadInsignia();
       loadBadges();
+      loadHubInsights();
     }
     if (currentPage === 'marks') {
       runCourseSync(false); // Course Sync with spinner
@@ -7067,43 +6923,119 @@ const PlanAssist = () => {
                 </div>
                 {/* Insight Box */}
                 {(() => {
+                  const ins = hubInsights;
                   const insights = [];
-                  if (hubStats.tasksCompletedToday > 0)
-                    insights.push(`🔥 ${hubStats.tasksCompletedToday} task${hubStats.tasksCompletedToday > 1 ? 's' : ''} done today — keep the momentum!`);
-                  if (hubStats.streak >= 3)
-                    insights.push(`⚡ ${hubStats.streak}-day streak! Consistency is how goals get hit.`);
-                  if (hubStats.tasksCompletedWeek >= 5)
-                    insights.push(`📈 ${hubStats.tasksCompletedWeek} tasks this week — you're in a strong rhythm.`);
+
+                  // ── Global-comparative insights (require hubInsights) ──────
+                  if (ins) {
+                    // 1. Share of global completions today
+                    if (ins.userCompletionsToday > 0 && ins.globalCompletionsToday > 0) {
+                      const pct = Math.round((ins.userCompletionsToday / ins.globalCompletionsToday) * 100);
+                      if (pct >= 1)
+                        insights.push(`🌍 You accounted for ${pct}% of all PlanAssist completions today — ${ins.userCompletionsToday} of ${ins.globalCompletionsToday} global.`);
+                    }
+
+                    // 2. Streak percentile
+                    if (ins.userStreakDays >= 2 && ins.streakPercentile >= 50)
+                      insights.push(`🔥 Your ${ins.userStreakDays}-day streak puts you in the top ${100 - ins.streakPercentile}% of all PlanAssist students.`);
+
+                    // 3. This week vs global average
+                    if (ins.globalAvgWeek > 0 && ins.userCompletionsThisWeek > 0) {
+                      const ratio = ins.userCompletionsThisWeek / ins.globalAvgWeek;
+                      if (ratio >= 1.5)
+                        insights.push(`📈 You've completed ${ins.userCompletionsThisWeek} tasks this week — ${ratio.toFixed(1)}× the global average of ${ins.globalAvgWeek.toFixed(1)}.`);
+                      else if (ratio < 0.6 && ins.userCompletionsThisWeek > 0)
+                        insights.push(`📊 Global average is ${ins.globalAvgWeek.toFixed(1)} tasks this week — you're at ${ins.userCompletionsThisWeek}. Still time to catch up.`);
+                    }
+
+                    // 4. Session length vs global
+                    if (ins.userAvgSessionMins > 0 && ins.globalAvgSessionMins > 0) {
+                      const diff = Math.round(ins.userAvgSessionMins - ins.globalAvgSessionMins);
+                      if (Math.abs(diff) >= 3) {
+                        const dir = diff > 0 ? `${diff} min longer` : `${Math.abs(diff)} min shorter`;
+                        insights.push(`⏱ Your average session is ${dir} than the global average — ${Math.round(ins.userAvgSessionMins)} min vs ${Math.round(ins.globalAvgSessionMins)} min globally.`);
+                      }
+                    }
+
+                    // 5. Grade percentile this week
+                    if (ins.gradePercentile != null && ins.gradePercentile >= 50)
+                      insights.push(`🏆 You're in the top ${100 - ins.gradePercentile}% of your grade on the leaderboard this week.`);
+
+                    // 6. Accuracy trend
+                    if (ins.accuracyDelta != null && Math.abs(ins.accuracyDelta) >= 5) {
+                      if (ins.accuracyDelta > 0)
+                        insights.push(`🎯 Your time estimation accuracy has improved by ${ins.accuracyDelta}% over the last 4 weeks — you're getting sharper.`);
+                      else
+                        insights.push(`⏳ Your time estimation accuracy has dipped by ${Math.abs(ins.accuracyDelta)}% recently — try setting more conservative estimates.`);
+                    }
+
+                    // 7. Week-over-week momentum
+                    if (ins.userCompletionsThisWeek > 0 && ins.userCompletionsLastWeek > 0) {
+                      const ratio = ins.userCompletionsThisWeek / ins.userCompletionsLastWeek;
+                      if (ratio >= 1.5)
+                        insights.push(`🚀 ${ins.userCompletionsThisWeek} tasks this week vs ${ins.userCompletionsLastWeek} last week — ${Math.round((ratio - 1) * 100)}% more output.`);
+                      else if (ratio < 0.5)
+                        insights.push(`📉 You completed fewer tasks than last week (${ins.userCompletionsThisWeek} vs ${ins.userCompletionsLastWeek}). A short session today can turn it around.`);
+                    } else if (ins.userCompletionsThisWeek > 0 && ins.userCompletionsLastWeek === 0) {
+                      insights.push(`⚡ Already ${ins.userCompletionsThisWeek} task${ins.userCompletionsThisWeek > 1 ? 's' : ''} this week — stronger start than last week!`);
+                    }
+
+                    // 8. Best day pattern
+                    if (ins.bestDay)
+                      insights.push(`📅 You complete more tasks on ${ins.bestDay}s than any other day — your most productive day of the week.`);
+
+                    // 9. Peak hour
+                    if (ins.peakHour != null) {
+                      const h = ins.peakHour;
+                      const label = h === 0 ? 'midnight' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h - 12} PM`;
+                      insights.push(`🕐 Historically you finish the most tasks around ${label} — your peak productivity window.`);
+                    }
+                  }
+
+                  // ── Local insights (always available) ────────────────────
                   if (hubStats.averageAccuracy >= 80)
-                    insights.push(`🎯 Your time accuracy is ${hubStats.averageAccuracy}% — you know yourself well.`);
-                  else if (hubStats.averageAccuracy > 0 && hubStats.averageAccuracy < 60)
-                    insights.push(`⏱ Your time estimates are running off — more sessions will improve accuracy.`);
-                  // Goal insights
+                    insights.push(`🎯 ${hubStats.averageAccuracy}% time accuracy — your estimates are consistently on point.`);
+                  else if (hubStats.averageAccuracy > 0 && hubStats.averageAccuracy < 55)
+                    insights.push(`⏱ Time accuracy at ${hubStats.averageAccuracy}% — more sessions will sharpen your estimates.`);
+
                   if (Object.keys(userGoals).length > 0) {
-                    const coursesWithGoals = courses.filter(c => userGoals[String(c.course_id)] != null && c.current_period_score != null && c.enabled !== false);
-                    const onTrack = coursesWithGoals.filter(c => parseFloat(c.current_period_score) >= parseFloat(userGoals[String(c.course_id)]));
-                    const offTrack = coursesWithGoals.filter(c => parseFloat(c.current_period_score) < parseFloat(userGoals[String(c.course_id)]));
+                    const cwg = courses.filter(c => userGoals[String(c.course_id)] != null && c.current_period_score != null && c.enabled !== false);
+                    const onTrack = cwg.filter(c => parseFloat(c.current_period_score) >= parseFloat(userGoals[String(c.course_id)]));
+                    const offTrack = cwg.filter(c => parseFloat(c.current_period_score) < parseFloat(userGoals[String(c.course_id)]));
                     if (onTrack.length > 0)
-                      insights.push(`✅ Hitting your goal in ${onTrack.length} course${onTrack.length > 1 ? 's' : ''}. Don't let up!`);
+                      insights.push(`✅ On track for your grade goal in ${onTrack.length} course${onTrack.length > 1 ? 's' : ''}. Keep the standard up.`);
                     if (offTrack.length > 0) {
                       const closest = [...offTrack].sort((a,b) =>
                         (parseFloat(userGoals[String(a.course_id)]) - parseFloat(a.current_period_score)) -
                         (parseFloat(userGoals[String(b.course_id)]) - parseFloat(b.current_period_score))
                       )[0];
                       const gap = (parseFloat(userGoals[String(closest.course_id)]) - parseFloat(closest.current_period_score)).toFixed(1);
-                      insights.push(`🎯 ${gap}% away from your ${closest.name.split(' ').slice(0,3).join(' ')} goal — your next session could move the needle.`);
+                      insights.push(`🎯 ${gap}% from your goal in ${closest.name.split(' ').slice(0,3).join(' ')} — one focused session could move the needle.`);
                     }
                   }
+
                   const lowCourses = courses.filter(c => c.current_period_score != null && parseFloat(c.current_period_score) < 70 && c.enabled !== false);
                   if (lowCourses.length > 0)
-                    insights.push(`⚠️ ${lowCourses[0].name.split(' ').slice(0,3).join(' ')} needs attention — sitting below 70%.`);
+                    insights.push(`⚠️ ${lowCourses[0].name.split(' ').slice(0,3).join(' ')} is sitting below 70% — worth prioritising this week.`);
+
+                  // Find best accuracy course
+                  const coursesWithScores = courses.filter(c => c.current_period_score != null && c.enabled !== false);
+                  if (coursesWithScores.length > 1) {
+                    const best = [...coursesWithScores].sort((a,b) => parseFloat(b.current_period_score) - parseFloat(a.current_period_score))[0];
+                    if (parseFloat(best.current_period_score) >= 90)
+                      insights.push(`⭐ ${best.name.split(' ').slice(0,3).join(' ')} is your strongest course at ${parseFloat(best.current_period_score).toFixed(1)}% — great work there.`);
+                  }
+
                   if (insights.length === 0)
-                    insights.push('💡 Sync Canvas to get your latest tasks and grades.');
+                    insights.push('💡 Sync Canvas to unlock personalised insights about your study patterns.');
+
                   // Rotate every 10 minutes deterministically
                   const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
                   return (
                     <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
-                      <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
+                      <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">
+                        Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${(Math.floor(Date.now() / 1000 / 60 / 10) % insights.length) + 1} of ${insights.length}` : ''}</span>
+                      </p>
                       <p className="text-sm text-white leading-relaxed">{insight}</p>
                     </div>
                   );
@@ -13557,12 +13489,12 @@ const PlanAssist = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'rain',       label: '🌧️ Rainfall',   desc: 'Layered rain with gust swells' },
-                            { id: 'ocean',      label: '🌊 Ocean Waves', desc: 'Alternating swells, sub-bass' },
-                            { id: 'forest',     label: '🌲 Forest',      desc: 'Stream, wind & insects' },
-                            { id: 'brown',      label: '🎵 Brown Noise', desc: 'Warm low-end hum' },
-                            { id: 'pink',       label: '💗 Pink Noise',  desc: 'Balanced, wide-spectrum' },
-                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Full-spectrum static' }
+                            { id: 'ambience',   label: '🌌 Ambience',           desc: 'Atmospheric background tone' },
+                            { id: 'ocean',      label: '🌊 Ocean Pulses',        desc: 'Rhythmic ocean swells' },
+                            { id: 'nature',     label: '🌿 Nature Sounds',       desc: 'Birds, breeze & outdoors' },
+                            { id: 'distortion', label: '⚡ Focused Distortion',  desc: 'Textured focus static' },
+                            { id: 'rain',       label: '🌧️ Gentle Rain',         desc: 'Soft steady rainfall' },
+                            { id: 'whitenoise', label: '📻 White Noise',         desc: 'Full-spectrum static' },
                           ].map(sound => (
                             <button
                               key={sound.id}
