@@ -314,6 +314,8 @@ const StudiosPaneWidget = ({ myStudios, loadMyStudios, apiCall, user, renderInsi
     </div>
   );
 };
+
+const AdminCreditsCard = ({ user, onSetCredits, onAdjustCredits }) => {
   const [creditInput, setCreditInput] = React.useState('');
   const [deltaInput, setDeltaInput] = React.useState('');
   const [deltaReason, setDeltaReason] = React.useState('');
