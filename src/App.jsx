@@ -205,6 +205,111 @@ function getCampusTodayStr(campus) {
   const offsetHours = getCampusOffsetHours(campus);
   return utcToCampusDateStr(new Date().toISOString(), offsetHours);
 }
+const StudiosPaneWidget = ({ myStudios, loadMyStudios, apiCall, user, renderInsigniaName }) => {
+  const [selectedStudio, setSelectedStudio] = React.useState(null);
+  const [studioLb, setStudioLb] = React.useState(null);
+  const [studioLbLoading, setStudioLbLoading] = React.useState(false);
+
+  const loadLb = async (studio) => {
+    if (selectedStudio?.id === studio.id) { setSelectedStudio(null); setStudioLb(null); return; }
+    setSelectedStudio(studio);
+    setStudioLb(null);
+    setStudioLbLoading(true);
+    try {
+      const data = await apiCall(`/studios/${studio.id}/leaderboard`, 'GET');
+      setStudioLb(Array.isArray(data) ? data : []);
+    } catch (e) { setStudioLb([]); }
+    finally { setStudioLbLoading(false); }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
+        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Click a Studio to see its weekly leaderboard.</p>
+      </div>
+
+      {/* Join by key */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
+        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
+        <p className="text-xs text-gray-400 mt-2">Your teacher will provide you with the Studio Key. You cannot leave a Studio once joined.</p>
+      </div>
+
+      {/* My Studios + leaderboard */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
+        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
+        {myStudios.length === 0 ? (
+          <div className="text-center py-8">
+            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {myStudios.map(studio => {
+              const isOpen = selectedStudio?.id === studio.id;
+              return (
+                <div key={studio.id}>
+                  <button
+                    onClick={() => loadLb(studio)}
+                    className={`w-full flex items-center gap-4 p-4 rounded-xl border text-left transition-colors ${isOpen ? 'border-purple-300 bg-purple-50' : 'border-gray-100 hover:bg-gray-50'}`}>
+                    <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">
+                        {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
+                        {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
+                      </p>
+                    </div>
+                    <ChevronDown className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {isOpen && (
+                    <div className="mt-2 border border-purple-100 rounded-xl overflow-hidden">
+                      <div className="px-4 py-3 bg-purple-50 border-b border-purple-100">
+                        <p className="text-xs font-bold text-purple-700 uppercase tracking-widest">{studio.name} — Weekly Leaderboard</p>
+                        <p className="text-xs text-purple-500 mt-0.5">This week's task completions</p>
+                      </div>
+                      {studioLbLoading ? (
+                        <div className="flex items-center justify-center py-8">
+                          <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
+                        </div>
+                      ) : !studioLb || studioLb.length === 0 ? (
+                        <p className="text-sm text-gray-400 text-center py-6">No activity this week yet.</p>
+                      ) : (
+                        <div className="divide-y divide-gray-50">
+                          {studioLb.map(entry => {
+                            const isSelf = entry.user_id === user?.id;
+                            const medal = entry.rank === 1 ? '🥇' : entry.rank === 2 ? '🥈' : entry.rank === 3 ? '🥉' : null;
+                            return (
+                              <div key={entry.user_id} className={`flex items-center gap-3 px-4 py-3 ${isSelf ? 'bg-purple-50' : ''}`}>
+                                <span className="w-7 text-center text-sm flex-shrink-0">
+                                  {medal || <span className="text-xs text-gray-400">{entry.rank}</span>}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  {renderInsigniaName
+                                    ? renderInsigniaName(entry.user_name, entry.insignia_selected, { fontSize: '0.875rem' })
+                                    : <span className="text-sm font-medium text-gray-800">{entry.user_name}</span>}
+                                  {isSelf && <span className="ml-1.5 text-[10px] text-purple-600 font-bold">you</span>}
+                                </div>
+                                <span className="text-sm font-bold text-gray-700 flex-shrink-0">{entry.tasks_completed}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const AdminCreditsCard = ({ user, onSetCredits, onAdjustCredits }) => {
   const [creditInput, setCreditInput] = React.useState('');
   const [deltaInput, setDeltaInput] = React.useState('');
@@ -1472,6 +1577,7 @@ const PlanAssist = () => {
         // Set up 15-minute activity refresh interval for this session
         const refreshInterval = setInterval(() => {
           runActivityRefresh().then(() => loadActivityData()).catch(() => {});
+          loadHubInsights();
         }, 15 * 60 * 1000);
         // Store interval ref so logout can clear it
         window._planassist_activityInterval = refreshInterval;
@@ -4018,10 +4124,20 @@ const PlanAssist = () => {
   };
 
   // White noise functions
+  const FOCUS_SOUND_FILES = {
+    whitenoise: '/sounds/White Noise.mp3',
+    rain:       '/sounds/Gentle Rain.mp3',
+    ocean:      '/sounds/Ocean Pulses.mp3',
+    nature:     '/sounds/Nature Sounds.mp3',
+    distortion: '/sounds/Focused Distortion.mp3',
+    ambience:   '/sounds/Ambience.mp3',
+  };
+
   const toggleWhiteNoise = () => {
     if (isWhiteNoisePlaying) {
-      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
-        whiteNoiseAudio.context.close();
+      if (whiteNoiseAudio) {
+        whiteNoiseAudio.pause();
+        whiteNoiseAudio.src = '';
       }
       setWhiteNoiseAudio(null);
       setIsWhiteNoisePlaying(false);
@@ -4031,207 +4147,33 @@ const PlanAssist = () => {
   };
 
   const playWhiteNoise = (type) => {
-    if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
-      whiteNoiseAudio.context.close();
+    if (whiteNoiseAudio) {
+      whiteNoiseAudio.pause();
+      whiteNoiseAudio.src = '';
     }
-
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const master = ctx.createGain();
-    master.gain.value = whiteNoiseVolume * 0.55;
-    master.connect(ctx.destination);
-
-    // Stereo noise buffer generator
-    const makeNoiseBuf = (color, secs = 6) => {
-      const buf = ctx.createBuffer(2, secs * ctx.sampleRate, ctx.sampleRate);
-      for (let ch = 0; ch < 2; ch++) {
-        const d = buf.getChannelData(ch);
-        if (color === 'white') {
-          for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
-        } else if (color === 'pink') {
-          let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0;
-          for (let i = 0; i < d.length; i++) {
-            const w = Math.random() * 2 - 1;
-            b0=0.99886*b0+w*0.0555179; b1=0.99332*b1+w*0.0750759;
-            b2=0.96900*b2+w*0.1538520; b3=0.86650*b3+w*0.3104856;
-            b4=0.55000*b4+w*0.5329522; b5=-0.7616*b5-w*0.0168980;
-            d[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11; b6=w*0.115926;
-          }
-        } else {
-          let last = 0;
-          for (let i = 0; i < d.length; i++) {
-            const w = Math.random() * 2 - 1;
-            d[i] = (last + 0.02 * w) / 1.02; last = d[i]; d[i] *= 3.5;
-          }
-        }
-      }
-      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
-      return src;
-    };
-
-    // Impulse-response reverb with dry/wet mix
-    const makeReverb = (decaySecs, wet) => {
-      const conv = ctx.createConvolver();
-      const len = Math.floor(ctx.sampleRate * decaySecs);
-      const ir = ctx.createBuffer(2, len, ctx.sampleRate);
-      for (let ch = 0; ch < 2; ch++) {
-        const d = ir.getChannelData(ch);
-        for (let i = 0; i < len; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/len, 2.5);
-      }
-      conv.buffer = ir;
-      return {
-        connect(input, output) {
-          const dryG = ctx.createGain(); dryG.gain.value = 1 - wet;
-          const wetG = ctx.createGain(); wetG.gain.value = wet;
-          input.connect(dryG); dryG.connect(output);
-          input.connect(conv); conv.connect(wetG); wetG.connect(output);
-        }
-      };
-    };
-
-    // Slow oscillating gain (LFO for natural movement)
-    const makeSwell = (rateHz, lo, hi) => {
-      const osc = ctx.createOscillator();
-      const modG = ctx.createGain(); modG.gain.value = (hi - lo) / 2;
-      const dcG  = ctx.createGain(); dcG.gain.value  = (hi + lo) / 2;
-      osc.type = 'sine'; osc.frequency.value = rateHz;
-      osc.connect(modG); osc.start();
-      const target = ctx.createGain();
-      modG.connect(target.gain); dcG.connect(target.gain);
-      return target;
-    };
-
-    switch (type) {
-
-      case 'rain': {
-        const base    = makeNoiseBuf('pink');
-        const drizzle = makeNoiseBuf('pink');
-        const shimmer = makeNoiseBuf('white');
-
-        const bpBase = ctx.createBiquadFilter();
-        bpBase.type = 'bandpass'; bpBase.frequency.value = 900; bpBase.Q.value = 0.6;
-
-        const bpDrizzle = ctx.createBiquadFilter();
-        bpDrizzle.type = 'bandpass'; bpDrizzle.frequency.value = 2400; bpDrizzle.Q.value = 0.5;
-        const drizzleG = ctx.createGain(); drizzleG.gain.value = 0.5;
-
-        const hpShimmer = ctx.createBiquadFilter();
-        hpShimmer.type = 'highpass'; hpShimmer.frequency.value = 7000;
-        const shimmerG = ctx.createGain(); shimmerG.gain.value = 0.1;
-
-        const swell = makeSwell(0.065, 0.5, 1.0);
-        const mix   = ctx.createGain();
-        const rev   = makeReverb(1.0, 0.28);
-
-        base.connect(bpBase); bpBase.connect(mix);
-        drizzle.connect(bpDrizzle); bpDrizzle.connect(drizzleG); drizzleG.connect(mix);
-        shimmer.connect(hpShimmer); hpShimmer.connect(shimmerG); shimmerG.connect(mix);
-        mix.connect(swell);
-        rev.connect(swell, master);
-
-        base.start(); drizzle.start(); shimmer.start();
-        break;
-      }
-
-      case 'ocean': {
-        const noise = makeNoiseBuf('brown');
-        const lp  = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=300;
-        const hp  = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=35;
-
-        const swellA = makeSwell(0.055, 0.1, 1.0);
-        const swellB = makeSwell(0.043, 0.0, 0.7); // offset rate → alternating waves
-
-        const sub = ctx.createOscillator(); sub.type='sine'; sub.frequency.value=38;
-        const subG = ctx.createGain(); subG.gain.value=0;
-        const subSwell = makeSwell(0.038, 0.0, 0.08);
-        sub.connect(subSwell); subSwell.connect(master);
-        sub.start();
-
-        const mix = ctx.createGain(); mix.gain.value = 0.6;
-        const rev = makeReverb(3.0, 0.45);
-
-        noise.connect(hp); hp.connect(lp);
-        lp.connect(swellA); lp.connect(swellB);
-        swellA.connect(mix); swellB.connect(mix);
-        rev.connect(mix, master);
-        noise.start();
-        break;
-      }
-
-      case 'forest': {
-        const stream  = makeNoiseBuf('brown');
-        const wind    = makeNoiseBuf('pink');
-        const insects = makeNoiseBuf('white');
-
-        const streamLP = ctx.createBiquadFilter(); streamLP.type='lowpass';  streamLP.frequency.value=360;
-        const streamG  = ctx.createGain(); streamG.gain.value=0.75;
-
-        const windBP   = ctx.createBiquadFilter(); windBP.type='bandpass'; windBP.frequency.value=1500; windBP.Q.value=0.4;
-        const windSwell = makeSwell(0.07, 0.25, 1.0);
-
-        const insHP   = ctx.createBiquadFilter(); insHP.type='highpass'; insHP.frequency.value=5500;
-        const insG    = ctx.createGain(); insG.gain.value=0.055;
-        const insSwell = makeSwell(0.28, 0.1, 1.0);
-
-        const mix = ctx.createGain();
-        const rev = makeReverb(1.8, 0.32);
-
-        stream.connect(streamLP); streamLP.connect(streamG); streamG.connect(mix);
-        wind.connect(windBP); windBP.connect(windSwell); windSwell.connect(mix);
-        insects.connect(insHP); insHP.connect(insG); insG.connect(insSwell); insSwell.connect(mix);
-        rev.connect(mix, master);
-
-        stream.start(); wind.start(); insects.start();
-        break;
-      }
-
-      case 'brown': {
-        const noise = makeNoiseBuf('brown');
-        const lp    = ctx.createBiquadFilter(); lp.type='lowpass';  lp.frequency.value=820;
-        const hp    = ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=52;
-        const swell = makeSwell(0.08, 0.72, 1.0);
-        const rev   = makeReverb(1.4, 0.2);
-        noise.connect(hp); hp.connect(lp); lp.connect(swell);
-        rev.connect(swell, master);
-        noise.start();
-        break;
-      }
-
-      case 'pink': {
-        const noise = makeNoiseBuf('pink');
-        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=9500;
-        const rev   = makeReverb(0.7, 0.14);
-        noise.connect(lp);
-        rev.connect(lp, master);
-        noise.start();
-        break;
-      }
-
-      default: {
-        const noise = makeNoiseBuf('white');
-        const lp    = ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value=11000;
-        noise.connect(lp); lp.connect(master);
-        noise.start();
-        break;
-      }
-    }
-
-    setWhiteNoiseAudio({ context: ctx, gainNode: master });
+    const src = FOCUS_SOUND_FILES[type] || FOCUS_SOUND_FILES.whitenoise;
+    const audio = new Audio(src);
+    audio.loop = true;
+    audio.volume = whiteNoiseVolume * 0.55;
+    audio.play().catch(() => {});
+    setWhiteNoiseAudio(audio);
     setIsWhiteNoisePlaying(true);
     setWhiteNoiseType(type);
   };
 
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
-    if (whiteNoiseAudio && whiteNoiseAudio.gainNode) {
-      whiteNoiseAudio.gainNode.gain.value = volume * 0.55;
+    if (whiteNoiseAudio) {
+      whiteNoiseAudio.volume = volume * 0.55;
     }
   };
 
   // Cleanup white noise on unmount
   useEffect(() => {
     return () => {
-      if (whiteNoiseAudio && whiteNoiseAudio.context && whiteNoiseAudio.context.state !== 'closed') {
-        whiteNoiseAudio.context.close();
+      if (whiteNoiseAudio) {
+        whiteNoiseAudio.pause();
+        whiteNoiseAudio.src = '';
       }
     };
   }, [whiteNoiseAudio]);
@@ -9975,7 +9917,7 @@ const PlanAssist = () => {
                     { id: 'streak',  label: 'Streak',  icon: Zap },
                     { id: 'feedlabel', label: 'Insignia', icon: MessageSquare },
                     { id: 'gallery', label: 'Gallery', icon: Award },
-                    ...(user?.isAdmin ? [{ id: 'studios', label: 'Studios', icon: Users }] : []),
+                    { id: 'studios', label: 'Studios', icon: Users },
                     { id: 'help', label: 'Help', icon: HelpCircle },
                   ].map(({ id, label, icon: Icon }) => (
                     <button
@@ -11605,53 +11547,15 @@ const PlanAssist = () => {
                 })()}
 
                 {/* ── STUDIOS TAB (admin only during testing) ── */}
-                {accountTab === 'studios' && user?.isAdmin && (() => {
-                  return (
-                    <div className="space-y-6">
-                      <div>
-                        <h2 className="text-lg font-bold text-gray-900 mb-1">Studios</h2>
-                        <p className="text-sm text-gray-500 mb-5">Studios are teacher-managed groups you've been added to. Enter a Studio Key to join a key-based Studio.</p>
-                      </div>
-
-                      {/* Join by key */}
-                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
-                        <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
-                      </div>
-
-                      {/* My Studios list */}
-                      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
-                        <h3 className="text-sm font-semibold text-gray-700 mb-4">My Studios</h3>
-                        {myStudios.length === 0 ? (
-                          <div className="text-center py-8">
-                            <Users className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                            <p className="text-sm text-gray-400">You haven't been added to any Studios yet.</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {myStudios.map(studio => (
-                              <div key={studio.id} className="flex items-center gap-4 p-4 rounded-xl border border-gray-100 hover:bg-gray-50">
-                                <div className="w-3 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: studio.color || '#7C3AED' }} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="font-semibold text-gray-900 text-sm">{studio.name}</p>
-                                  <p className="text-xs text-gray-500 mt-0.5">
-                                    {studio.teacher_name && `Teacher: ${studio.teacher_name} · `}
-                                    {studio.setup_type === 'course' ? 'Course Studio' : `Key: ${studio.studio_key}`}
-                                  </p>
-                                </div>
-                                {studio.activeBanner && !studio.activeBanner.dismissed && (
-                                  <span className="flex items-center gap-1 text-xs bg-purple-50 text-purple-600 font-medium px-2.5 py-1 rounded-full flex-shrink-0">
-                                    <Bell className="w-3 h-3" /> Active banner
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })()}
+                {accountTab === 'studios' && (
+                  <StudiosPaneWidget
+                    myStudios={myStudios}
+                    loadMyStudios={loadMyStudios}
+                    apiCall={apiCall}
+                    user={user}
+                    renderInsigniaName={renderInsigniaName}
+                  />
+                )}
 
                 {/* ── HELP TAB ── */}
                 {accountTab === 'help' && (
