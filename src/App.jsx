@@ -205,6 +205,15 @@ function getCampusTodayStr(campus) {
   const offsetHours = getCampusOffsetHours(campus);
   return utcToCampusDateStr(new Date().toISOString(), offsetHours);
 }
+const FOCUS_SOUND_FILES = {
+  ambience:   '/sounds/Ambience.mp3',
+  ocean:      '/sounds/Ocean_Pulses.mp3',
+  nature:     '/sounds/Nature_Sounds.mp3',
+  distortion: '/sounds/Focused_Distortion.mp3',
+  rain:       '/sounds/Gentle_Rain.mp3',
+  whitenoise: '/sounds/White_Noise.mp3',
+};
+
 const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
   const [form, setForm] = React.useState({
     name: user.name || '',
@@ -4139,15 +4148,6 @@ const PlanAssist = () => {
     } else {
       playWhiteNoise(whiteNoiseType);
     }
-  };
-
-  const FOCUS_SOUND_FILES = {
-    ambience:   '/sounds/Ambience.mp3',
-    ocean:      '/sounds/Ocean_Pulses.mp3',
-    nature:     '/sounds/Nature_Sounds.mp3',
-    distortion: '/sounds/Focused_Distortion.mp3',
-    rain:       '/sounds/Gentle_Rain.mp3',
-    whitenoise: '/sounds/White_Noise.mp3',
   };
 
   const playWhiteNoise = (type) => {
