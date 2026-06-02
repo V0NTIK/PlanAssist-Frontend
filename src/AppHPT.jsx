@@ -7,6 +7,7 @@ import {
   Info, RefreshCw, Check, ChevronDown, ChevronRight, ChevronUp, Search,
   AlertCircle, Copy, Zap, Target, BarChart3, Activity, Clock,
   TrendingUp, TrendingDown, AlertTriangle, Eye, Monitor, Award,
+  Settings, Moon, Sun,
 } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
@@ -1028,9 +1029,7 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
             <p className="text-yellow-100">Here's how your students are doing today</p>
           </div>
           <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
-            <p className="text-xs text-yellow-200 font-semibold uppercase tracking-wide mb-1.5">
-              Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${idx + 1} of ${insights.length}` : ''}</span>
-            </p>
+            <p className="text-xs text-yellow-200 font-semibold uppercase tracking-wide mb-1.5">Insight</p>
             <p className="text-sm text-white leading-relaxed">{insight}</p>
           </div>
         </div>
@@ -1535,7 +1534,8 @@ function MonitorPage({ token, studios }) {
 
                   {/* Expanded detail */}
                   {isExpanded && (
-                    <div className="border-t border-gray-100 px-5 pb-5 pt-4 grid grid-cols-1 md:grid-cols-3 gap-5">
+                    <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
 
                       {/* Active session detail */}
                       <div>
@@ -1651,6 +1651,81 @@ function MonitorPage({ token, studios }) {
                         )}
                       </div>
 
+                    </div>{/* end 3-column grid */}
+
+                      {/* Agenda Section — shown when student has an active or recent agenda */}
+                      {(student.activeAgenda || (student.agendaHistory && student.agendaHistory.length > 0)) && (() => {
+                        const AgendaView = () => {
+                          const [showHistory, setShowHistory] = React.useState(false);
+                          const [selectedHistory, setSelectedHistory] = React.useState(null);
+                          const agenda = showHistory && selectedHistory
+                            ? student.agendaHistory.find(a => a.id === selectedHistory)
+                            : student.activeAgenda;
+                          const rows = agenda?.rows || [];
+                          const currentRow = agenda?.currentRow ?? 0;
+                          return (
+                            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <Zap className="w-4 h-4 text-indigo-600" />
+                                  <p className="text-xs font-bold text-indigo-800 uppercase tracking-wide">
+                                    {showHistory && selectedHistory ? 'Agenda History' : student.activeAgenda ? `Active Agenda — ${student.activeAgenda.name}` : 'Recent Agenda'}
+                                  </p>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {student.agendaHistory && student.agendaHistory.length > 0 && (
+                                    <select
+                                      className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white text-indigo-700"
+                                      value={selectedHistory || ''}
+                                      onChange={e => { const v = e.target.value; setShowHistory(!!v); setSelectedHistory(v ? parseInt(v) : null); }}
+                                    >
+                                      <option value="">Current</option>
+                                      {student.agendaHistory.map(a => (
+                                        <option key={a.id} value={a.id}>{a.name} — {new Date(a.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </div>
+                              </div>
+                              {rows.length === 0 ? (
+                                <p className="text-xs text-indigo-400 italic">No rows in this agenda.</p>
+                              ) : (
+                                <div className="space-y-1.5 max-h-64 overflow-y-auto">
+                                  {rows.map((row, idx) => {
+                                    const isDone = idx < currentRow;
+                                    const isActive = idx === currentRow && !showHistory;
+                                    const isFuture = idx > currentRow;
+                                    return (
+                                      <div key={idx} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs ${
+                                        isActive ? 'bg-indigo-600 text-white' :
+                                        isDone ? 'bg-white text-gray-400 opacity-70' :
+                                        'bg-white text-gray-700'
+                                      }`}>
+                                        <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px] ${
+                                          isActive ? 'bg-white text-indigo-600' :
+                                          isDone ? 'bg-green-100 text-green-600' :
+                                          'bg-gray-100 text-gray-500'
+                                        }`}>
+                                          {isDone ? '✓' : idx + 1}
+                                        </span>
+                                        <span className={`flex-1 truncate font-medium ${isDone ? 'line-through' : ''}`}>{row.task || `Row ${idx + 1}`}</span>
+                                        {row.zone && <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-600'}`}>{row.zone}</span>}
+                                        <span className={`flex-shrink-0 ${isActive ? 'text-indigo-200' : 'text-gray-400'}`}>{row.timeMins || 25}m</span>
+                                        {isActive && agenda?.currentRowCountdown != null && (
+                                          <span className="text-white/80 font-mono text-[10px]">
+                                            {String(Math.floor(agenda.currentRowCountdown / 60)).padStart(2,'0')}:{String(agenda.currentRowCountdown % 60).padStart(2,'0')} left
+                                          </span>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        };
+                        return <AgendaView />;
+                      })()}
                     </div>
                   )}
                 </div>
@@ -2098,8 +2173,9 @@ export default function AppHPT({ onBack }) {
     { id: 'marks',    label: 'Marks',    icon: BarChart3 },
   ];
 
-  // Inject scrollbar CSS into document.head — must be above any conditional returns
-  // (Rules of Hooks: hooks cannot be called after a conditional return).
+  const [darkMode, setDarkMode] = React.useState(() => localStorage.getItem('planassist-hpt-dark') === 'true');
+
+  // Inject scrollbar CSS + dark mode into document.head
   React.useEffect(() => {
     const id = 'planassist-hpt-styles';
     let el = document.getElementById(id);
@@ -2108,17 +2184,37 @@ export default function AppHPT({ onBack }) {
       el.id = id;
       document.head.appendChild(el);
     }
+    const dark = darkMode;
     el.textContent = `
       html, body { overflow: hidden; margin: 0; padding: 0; }
       .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
-      .planassist-hpt ::-webkit-scrollbar-track { background: #f1f5f9; }
-      .planassist-hpt ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-      .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: #7c3aed; }
-      .planassist-hpt * { scrollbar-color: #cbd5e1 #f1f5f9; scrollbar-width: thin; }
+      .planassist-hpt ::-webkit-scrollbar-track { background: ${dark ? '#0d0d14' : '#f1f5f9'}; }
+      .planassist-hpt ::-webkit-scrollbar-thumb { background: ${dark ? '#3d3d6b' : '#cbd5e1'}; border-radius: 4px; }
+      .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: ${dark ? '#7c4dff' : '#7c3aed'}; }
+      .planassist-hpt * { scrollbar-color: ${dark ? '#3d3d6b #0d0d14' : '#cbd5e1 #f1f5f9'}; scrollbar-width: thin; }
       .planassist-hpt .scrollbar-stable { scrollbar-gutter: stable; }
+      ${dark ? `
+      .planassist-hpt { background: #0d0d14 !important; color: #e2e8f0 !important; }
+      .planassist-hpt nav { background: #13131f !important; border-color: #2d2d4a !important; }
+      .planassist-hpt .bg-white { background: #13131f !important; }
+      .planassist-hpt .bg-gray-50 { background: #1a1a2e !important; }
+      .planassist-hpt .bg-gray-100 { background: #1e1e30 !important; }
+      .planassist-hpt .border-gray-100 { border-color: #2d2d4a !important; }
+      .planassist-hpt .border-gray-200 { border-color: #3d3d6b !important; }
+      .planassist-hpt .text-gray-900 { color: #f1f5f9 !important; }
+      .planassist-hpt .text-gray-800 { color: #e2e8f0 !important; }
+      .planassist-hpt .text-gray-700 { color: #cbd5e1 !important; }
+      .planassist-hpt .text-gray-600 { color: #b39ddb !important; }
+      .planassist-hpt .text-gray-500 { color: #94a3b8 !important; }
+      .planassist-hpt .text-gray-400 { color: #64748b !important; }
+      .planassist-hpt .hover\\:bg-gray-100:hover { background: #1e1e30 !important; }
+      .planassist-hpt .hover\\:bg-gray-50:hover { background: #1a1a2e !important; }
+      .planassist-hpt .shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important; }
+      ` : ''}
     `;
+    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
     return () => { el.textContent = ''; };
-  }, []);
+  }, [darkMode]);
 
   useEffect(() => {
     if (!token) return;
@@ -2156,7 +2252,7 @@ export default function AppHPT({ onBack }) {
             </div>
           </div>
 
-          {/* RIGHT: nav buttons + logout */}
+          {/* RIGHT: nav buttons + account + logout */}
           <div className="flex items-center gap-2">
             {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
               <button
@@ -2168,6 +2264,13 @@ export default function AppHPT({ onBack }) {
                 <span className="font-medium">{label}</span>
               </button>
             ))}
+            <button
+              onClick={() => setCurrentPage('account')}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
+              title="Account"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
             <button
               onClick={handleLogout}
               className="px-4 py-2 rounded-lg flex items-center gap-2 text-red-600 hover:bg-red-50"
@@ -2185,6 +2288,46 @@ export default function AppHPT({ onBack }) {
         {currentPage === 'studios' && <StudiosPage token={token} hptUser={hptUser} onStudiosChange={setStudios} />}
         {currentPage === 'monitor' && <MonitorPage token={token} studios={studios} />}
         {currentPage === 'marks'   && <MarksPage   token={token} studios={studios} />}
+        {currentPage === 'account' && (
+          <div className="p-6 max-w-2xl mx-auto">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 bg-purple-600 rounded-xl flex items-center justify-center">
+                <Settings className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Account</h1>
+                <p className="text-sm text-gray-500">{hptUser.name}</p>
+              </div>
+            </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+              <h2 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <Settings className="w-4 h-4 text-gray-500" /> Settings
+              </h2>
+              <div className="space-y-4">
+                {/* Dark Mode */}
+                <div className="flex items-center justify-between py-3 border-b border-gray-100">
+                  <div className="flex items-center gap-3">
+                    {darkMode ? <Moon className="w-5 h-5 text-indigo-400" /> : <Sun className="w-5 h-5 text-amber-500" />}
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">Dark Mode</p>
+                      <p className="text-xs text-gray-500">{darkMode ? 'Dark theme active' : 'Light theme active'}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      const next = !darkMode;
+                      setDarkMode(next);
+                      localStorage.setItem('planassist-hpt-dark', String(next));
+                    }}
+                    className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${darkMode ? 'bg-purple-600' : 'bg-gray-200'}`}
+                  >
+                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${darkMode ? 'translate-x-6' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
