@@ -880,6 +880,7 @@ const PlanAssist = () => {
     averageAccuracy: 0,
     streak: 0
   });
+  const [insightIndex, setInsightIndex] = useState(0);
   const [hubInsights, setHubInsights] = useState(null); // global insight data from /api/hub/insights
   const [hubStatModal, setHubStatModal] = useState(null); // 'today' | 'week' | 'studytime' | 'accuracy'
   const [hptMode, setHptMode] = useState(false);
@@ -4158,10 +4159,13 @@ const PlanAssist = () => {
     }
 
     const src = FOCUS_SOUND_FILES[type] || FOCUS_SOUND_FILES.ambience;
+    console.log('[FocusSound] Playing:', type, '→', src);
     const audio = new Audio(src);
     audio.loop = true;
     audio.volume = whiteNoiseVolume;
-    audio.play().catch(() => {}); // browser autoplay policy — silently ignore if blocked
+    audio.play().catch(err => {
+      console.error('[FocusSound] play() failed for', src, err);
+    });
 
     setWhiteNoiseAudio({ audio });
     setIsWhiteNoisePlaying(true);
@@ -5954,6 +5958,14 @@ const PlanAssist = () => {
     return () => ro.disconnect();
   }, []);
 
+  // Cycle through insights every 10 minutes
+  useEffect(() => {
+    const id = setInterval(() => {
+      setInsightIndex(prev => prev + 1);
+    }, 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // Scroll to top when navigating to Hub; reload all Hub data when landing on Hub page
   useEffect(() => {
     if (currentPage === 'hub') {
@@ -7030,11 +7042,12 @@ const PlanAssist = () => {
                     insights.push('💡 Sync Canvas to unlock personalised insights about your study patterns.');
 
                   // Rotate every 10 minutes deterministically
-                  const insight = insights[Math.floor(Date.now() / 1000 / 60 / 10) % insights.length];
+                  const idx = insightIndex % insights.length;
+                  const insight = insights[idx];
                   return (
                     <div className="bg-white bg-opacity-15 backdrop-blur-sm rounded-xl px-5 py-4 max-w-xs flex-shrink-0 border border-white border-opacity-20">
                       <p className="text-xs text-purple-200 font-semibold uppercase tracking-wide mb-1.5">
-                        Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${(Math.floor(Date.now() / 1000 / 60 / 10) % insights.length) + 1} of ${insights.length}` : ''}</span>
+                        Insight <span className="opacity-60 normal-case font-normal tracking-normal ml-1">{insights.length > 1 ? `${idx + 1} of ${insights.length}` : ''}</span>
                       </p>
                       <p className="text-sm text-white leading-relaxed">{insight}</p>
                     </div>
