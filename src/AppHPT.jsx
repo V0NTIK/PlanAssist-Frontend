@@ -796,11 +796,6 @@ function StudiosPage({ token, hptUser, onStudiosChange }) {
 
 function HubPage({ hptUser, token, studios, onNavigate }) {
   const [hubData, setHubData] = React.useState(null);
-  const [insightIndex, setInsightIndex] = React.useState(0);
-  React.useEffect(() => {
-    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
   const [loading, setLoading] = React.useState(true);
   const [statModal, setStatModal] = React.useState(null); // 'today'|'week'|'studytime'|'accuracy'|'streak'
 
@@ -947,72 +942,30 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const firstName = hptUser.name?.split(' ')[0] || 'Teacher';
 
   // Insight for header
-  const globalCompletionsToday = hubData?.globalCompletionsToday || 0;
-  const globalAvgWeek = hubData?.globalAvgWeek || 0;
-  const globalAvgAccuracy = hubData?.globalAvgAccuracy || 0;
-  const perStudentWeek = hubData?.perStudentWeek || 0;
-
   const insights = [];
-
-  // 1. Cohort share of global completions today
-  if (stats.tasksToday > 0 && globalCompletionsToday > 0) {
-    const pct = Math.round((stats.tasksToday / globalCompletionsToday) * 100);
-    if (pct >= 1)
-      insights.push(`🌍 Your students contributed ${pct}% of all PlanAssist completions today — ${stats.tasksToday} of ${globalCompletionsToday} global.`);
-  }
-
-  // 2. Per-student week vs global average
-  if (perStudentWeek > 0 && globalAvgWeek > 0) {
-    const ratio = perStudentWeek / globalAvgWeek;
-    if (ratio >= 1.3)
-      insights.push(`📈 Your students average ${perStudentWeek.toFixed(1)} tasks each this week — ${ratio.toFixed(1)}× the global average of ${globalAvgWeek.toFixed(1)}.`);
-    else if (ratio < 0.7)
-      insights.push(`📊 Global average is ${globalAvgWeek.toFixed(1)} tasks per student this week — your cohort is at ${perStudentWeek.toFixed(1)}. Consider encouraging more sessions.`);
-    else
-      insights.push(`📊 Your students are completing ${perStudentWeek.toFixed(1)} tasks each this week, in line with the ${globalAvgWeek.toFixed(1)} global average.`);
-  }
-
-  // 3. Cohort accuracy vs global
-  if (stats.accuracy > 0 && globalAvgAccuracy > 0) {
-    const diff = stats.accuracy - globalAvgAccuracy;
-    if (diff >= 5)
-      insights.push(`🎯 Your cohort's time accuracy (${stats.accuracy}%) is ${diff}% above the global average — students are estimating their sessions well.`);
-    else if (diff <= -5)
-      insights.push(`⏱ Cohort accuracy (${stats.accuracy}%) is ${Math.abs(diff)}% below the global average of ${globalAvgAccuracy}% — encourage students to use time estimates more.`);
-    else
-      insights.push(`🎯 Time accuracy at ${stats.accuracy}% — tracking closely with the global average of ${globalAvgAccuracy}%.`);
-  }
-
-  // 4. Group streak
-  if (stats.streak >= 5)
-    insights.push(`🔥 ${stats.streak}-day consecutive group streak — your cohort hasn't missed a weekday in ${stats.streak} days.`);
-  else if (stats.streak >= 2)
-    insights.push(`⚡ ${stats.streak}-day group streak! Keep encouraging daily completions to build the chain.`);
-
-  // 5. Total tasks this week with per-student breakdown
+  if (stats.tasksToday > 0 && studentCount > 0)
+    insights.push(`🔥 ${stats.tasksToday} task${stats.tasksToday !== 1 ? 's' : ''} completed across your ${studentCount} student${studentCount !== 1 ? 's' : ''} today.`);
+  if (stats.streak >= 3)
+    insights.push(`⚡ ${stats.streak}-day group streak — your students haven't missed a day in ${stats.streak} days.`);
   if (stats.tasksWeek > 0 && studentCount > 0) {
     const avg = (stats.tasksWeek / studentCount).toFixed(1);
-    insights.push(`📋 ${stats.tasksWeek} tasks completed by your ${studentCount} student${studentCount !== 1 ? 's' : ''} this week — ${avg} per student on average.`);
+    insights.push(`📈 ${stats.tasksWeek} tasks this week — ${avg} per student on average.`);
   }
-
-  // 6. Active session momentum
+  if (stats.accuracy >= 80)
+    insights.push(`🎯 ${stats.accuracy}% time accuracy — students are estimating their sessions well.`);
+  else if (stats.accuracy > 0 && stats.accuracy < 55)
+    insights.push(`⏱ Time accuracy at ${stats.accuracy}% — encourage students to use time estimates more.`);
   if (hubData?.inProgress > 0)
-    insights.push(`⚡ ${hubData.inProgress} student${hubData.inProgress !== 1 ? 's' : ''} currently in an active work session right now.`);
-
-  // 7. Study time highlight
+    insights.push(`⚡ ${hubData.inProgress} student${hubData.inProgress !== 1 ? 's' : ''} currently in an active work session.`);
   if (stats.totalStudyMins >= 60) {
-    const h = Math.floor(stats.totalStudyMins / 60);
-    const m = stats.totalStudyMins % 60;
+    const h = Math.floor(stats.totalStudyMins / 60), m = stats.totalStudyMins % 60;
     const perStudent = (stats.totalStudyMins / Math.max(studentCount, 1)).toFixed(0);
-    insights.push(`⏱ Your students have logged ${h}h ${m}m of total study time — an average of ${perStudent} min per student.`);
+    insights.push(`⏱ ${h}h ${m}m total study time logged — ${perStudent} min per student.`);
   }
-
-  // 8. No students edge case
   if (studentCount === 0)
     insights.push('💡 No students connected yet — create a Studio and share the key or course ID.');
   else if (insights.length === 0)
-    insights.push(`💡 ${studentCount} student${studentCount !== 1 ? 's' : ''} connected across your Studios. Keep an eye on weekly momentum.`);
-
+    insights.push(`💡 ${studentCount} student${studentCount !== 1 ? 's' : ''} connected across your Studios.`);
   const idx = insightIndex % insights.length;
   const insight = insights[idx];
 
@@ -1477,8 +1430,8 @@ function MonitorPage({ token, studios }) {
                       <p className="text-xs text-gray-400">Grade {student.user.grade || '—'}</p>
                     </div>
 
-                    {/* Status pill */}
-                    <div className="w-24 flex-shrink-0">
+                    {/* Status pill + priorities badge */}
+                    <div className="flex flex-col gap-1 w-28 flex-shrink-0">
                       {student.isActive ? (
                         <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full border border-green-200">
                           <Activity className="w-3 h-3" /> Active
@@ -1486,6 +1439,15 @@ function MonitorPage({ token, studios }) {
                       ) : (
                         <span className="inline-flex items-center gap-1 bg-gray-50 text-gray-400 text-xs font-medium px-2.5 py-1 rounded-full border border-gray-200">
                           Idle
+                        </span>
+                      )}
+                      {student.priorities.length > 0 ? (
+                        <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-purple-200">
+                          <Zap className="w-2.5 h-2.5" /> {student.priorities.length} focus
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 bg-gray-50 text-gray-300 text-[10px] font-medium px-2 py-0.5 rounded-full border border-gray-100">
+                          no focus set
                         </span>
                       )}
                     </div>
@@ -1533,201 +1495,210 @@ function MonitorPage({ token, studios }) {
                   </button>
 
                   {/* Expanded detail */}
-                  {isExpanded && (
-                    <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-5">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                  {isExpanded && (() => {
+                    // Local state for agenda history selector inside expanded row
+                    const [agendaHistoryId, setAgendaHistoryId] = React.useState(null);
+                    const shownAgenda = agendaHistoryId
+                      ? (student.agendaHistory || []).find(a => a.id === agendaHistoryId)
+                      : student.activeAgenda;
+                    const agendaRows = shownAgenda?.rows || [];
+                    const agendaCurrentRow = agendaHistoryId ? (shownAgenda?.current_row ?? 0) : (student.activeAgenda?.currentRow ?? 0);
+                    return (
+                      <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
 
-                      {/* Active session detail */}
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Active Session</p>
-                        {student.isActive && student.activeTask ? (
-                          <div className="bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
-                            <p className="font-semibold text-gray-900 text-sm">{student.activeTask.title}</p>
-                            <p className="text-xs text-gray-500">{student.activeTask.class}</p>
-                            <div className="grid grid-cols-2 gap-2 mt-2">
-                              <div className="bg-white rounded-lg p-2 text-center">
-                                <p className="text-base font-bold text-gray-900">{formatMins(accum)}</p>
-                                <p className="text-xs text-gray-400">Logged</p>
-                              </div>
-                              <div className="bg-white rounded-lg p-2 text-center">
-                                <p className="text-base font-bold text-gray-900">{formatMins(est)}</p>
-                                <p className="text-xs text-gray-400">Estimated</p>
-                              </div>
-                            </div>
-                            {progress !== null && (
-                              <div>
-                                <div className="flex items-center justify-between mb-1">
-                                  <span className="text-xs text-gray-500">Progress</span>
-                                  <span className="text-xs font-semibold text-green-700">{progress}%</span>
-                                </div>
-                                <div className="w-full bg-gray-200 rounded-full h-2">
-                                  <div className="h-2 rounded-full bg-green-400" style={{ width: `${progress}%` }} />
-                                </div>
-                              </div>
-                            )}
-                            <p className="text-xs text-gray-400">
-                              Due: {student.activeTask.deadline_date
-                                ? new Date(String(student.activeTask.deadline_date).slice(0,10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                                : '—'}
-                              {student.activeTask.session_heartbeat &&
-                                <span className="ml-2 text-green-600">● {timeSinceHeartbeat(student.activeTask.session_heartbeat)}</span>}
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 text-center">
-                            <p className="text-sm text-gray-400">No active session</p>
-                            {student.user.lastSync && (
-                              <p className="text-xs text-gray-300 mt-1">
-                                Last sync: {new Date(student.user.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
+                        {/* Top row: session + priorities + urgent */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
 
-                      {/* Today's priorities */}
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                          Today's Priorities ({student.priorities.length})
-                        </p>
-                        {student.priorities.length === 0 ? (
-                          <div className="bg-gray-50 rounded-xl p-4 border border-gray-200 text-center">
-                            <p className="text-sm text-gray-400">No priorities set today</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                            {student.priorities.map((t, i) => (
-                              <div key={t.id} className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg text-xs ${
-                                t.completed ? 'bg-gray-50 opacity-60' : 'bg-white border border-gray-100'
-                              }`}>
-                                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0 mt-0.5 ${
-                                  t.completed ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'
-                                }`}>{t.completed ? '✓' : i + 1}</span>
-                                <div className="min-w-0">
-                                  <p className={`font-medium truncate ${t.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.title}</p>
-                                  <p className="text-gray-400 truncate">{t.class}</p>
-                                </div>
-                                <span className="flex-shrink-0 text-gray-400 ml-auto">
-                                  {formatMins(t.user_estimated_time || t.estimated_time)}
-                                </span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Urgent tasks */}
-                      <div>
-                        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                          Urgent / Overdue ({student.urgentTasks.length})
-                        </p>
-                        {student.urgentTasks.length === 0 ? (
-                          <div className="bg-green-50 rounded-xl p-4 border border-green-200 text-center">
-                            <Check className="w-5 h-5 text-green-500 mx-auto mb-1" />
-                            <p className="text-sm text-green-700 font-medium">All caught up!</p>
-                          </div>
-                        ) : (
-                          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                            {student.urgentTasks.map(t => {
-                              const due = new Date(String(t.deadline_date).slice(0,10) + 'T00:00:00');
-                              const today = new Date(); today.setHours(0,0,0,0);
-                              const overdue = due < today;
-                              return (
-                                <div key={t.id} className={`flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs border ${
-                                  overdue ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'
-                                }`}>
-                                  <AlertTriangle className={`w-3.5 h-3.5 flex-shrink-0 mt-0.5 ${overdue ? 'text-red-500' : 'text-amber-500'}`} />
-                                  <div className="min-w-0 flex-1">
-                                    <p className={`font-medium truncate ${overdue ? 'text-red-800' : 'text-amber-800'}`}>{t.title}</p>
-                                    <p className={`truncate ${overdue ? 'text-red-500' : 'text-amber-500'}`}>
-                                      {t.class} · Due {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                                      {overdue && <span className="font-semibold"> (OVERDUE)</span>}
-                                    </p>
+                          {/* Active session */}
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Active Session</p>
+                            {student.isActive && student.activeTask ? (
+                              <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-gray-900 text-sm truncate">{student.activeTask.title}</p>
+                                    <p className="text-xs text-gray-500 truncate">{student.activeTask.class}</p>
                                   </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-
-                    </div>{/* end 3-column grid */}
-
-                      {/* Agenda Section — shown when student has an active or recent agenda */}
-                      {(student.activeAgenda || (student.agendaHistory && student.agendaHistory.length > 0)) && (() => {
-                        const AgendaView = () => {
-                          const [showHistory, setShowHistory] = React.useState(false);
-                          const [selectedHistory, setSelectedHistory] = React.useState(null);
-                          const agenda = showHistory && selectedHistory
-                            ? student.agendaHistory.find(a => a.id === selectedHistory)
-                            : student.activeAgenda;
-                          const rows = agenda?.rows || [];
-                          const currentRow = agenda?.currentRow ?? 0;
-                          return (
-                            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-                              <div className="flex items-center justify-between mb-3">
-                                <div className="flex items-center gap-2">
-                                  <Zap className="w-4 h-4 text-indigo-600" />
-                                  <p className="text-xs font-bold text-indigo-800 uppercase tracking-wide">
-                                    {showHistory && selectedHistory ? 'Agenda History' : student.activeAgenda ? `Active Agenda — ${student.activeAgenda.name}` : 'Recent Agenda'}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  {student.agendaHistory && student.agendaHistory.length > 0 && (
-                                    <select
-                                      className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white text-indigo-700"
-                                      value={selectedHistory || ''}
-                                      onChange={e => { const v = e.target.value; setShowHistory(!!v); setSelectedHistory(v ? parseInt(v) : null); }}
-                                    >
-                                      <option value="">Current</option>
-                                      {student.agendaHistory.map(a => (
-                                        <option key={a.id} value={a.id}>{a.name} — {new Date(a.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</option>
-                                      ))}
-                                    </select>
+                                  {student.activeTask.session_heartbeat && (
+                                    <span className="text-[10px] text-green-600 font-semibold flex-shrink-0 bg-green-100 px-1.5 py-0.5 rounded-full">
+                                      ● {timeSinceHeartbeat(student.activeTask.session_heartbeat)}
+                                    </span>
                                   )}
                                 </div>
-                              </div>
-                              {rows.length === 0 ? (
-                                <p className="text-xs text-indigo-400 italic">No rows in this agenda.</p>
-                              ) : (
-                                <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                                  {rows.map((row, idx) => {
-                                    const isDone = idx < currentRow;
-                                    const isActive = idx === currentRow && !showHistory;
-                                    const isFuture = idx > currentRow;
-                                    return (
-                                      <div key={idx} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs ${
-                                        isActive ? 'bg-indigo-600 text-white' :
-                                        isDone ? 'bg-white text-gray-400 opacity-70' :
-                                        'bg-white text-gray-700'
-                                      }`}>
-                                        <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px] ${
-                                          isActive ? 'bg-white text-indigo-600' :
-                                          isDone ? 'bg-green-100 text-green-600' :
-                                          'bg-gray-100 text-gray-500'
-                                        }`}>
-                                          {isDone ? '✓' : idx + 1}
-                                        </span>
-                                        <span className={`flex-1 truncate font-medium ${isDone ? 'line-through' : ''}`}>{row.task || `Row ${idx + 1}`}</span>
-                                        {row.zone && <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-600'}`}>{row.zone}</span>}
-                                        <span className={`flex-shrink-0 ${isActive ? 'text-indigo-200' : 'text-gray-400'}`}>{row.timeMins || 25}m</span>
-                                        {isActive && agenda?.currentRowCountdown != null && (
-                                          <span className="text-white/80 font-mono text-[10px]">
-                                            {String(Math.floor(agenda.currentRowCountdown / 60)).padStart(2,'0')}:{String(agenda.currentRowCountdown % 60).padStart(2,'0')} left
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })}
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                                    <p className="text-base font-bold text-gray-900">{formatMins(accum)}</p>
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Logged</p>
+                                  </div>
+                                  <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                                    <p className="text-base font-bold text-gray-900">{formatMins(est)}</p>
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Est.</p>
+                                  </div>
                                 </div>
+                                {progress !== null && (
+                                  <div>
+                                    <div className="flex justify-between mb-1">
+                                      <span className="text-[10px] text-gray-500 uppercase tracking-wide">Progress</span>
+                                      <span className="text-[10px] font-bold text-green-700">{progress}%</span>
+                                    </div>
+                                    <div className="w-full bg-green-100 rounded-full h-1.5">
+                                      <div className="h-1.5 rounded-full bg-green-500 transition-all" style={{ width: `${progress}%` }} />
+                                    </div>
+                                  </div>
+                                )}
+                                <p className="text-[10px] text-gray-400">
+                                  Due: {student.activeTask.deadline_date
+                                    ? new Date(String(student.activeTask.deadline_date).slice(0,10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                    : '—'}
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
+                                <p className="text-sm text-gray-400">No active session</p>
+                                {student.user.lastSync && (
+                                  <p className="text-xs text-gray-300 mt-1">
+                                    Synced {new Date(student.user.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Focus list */}
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+                              Focus List ({student.priorities.length})
+                            </p>
+                            {student.priorities.length === 0 ? (
+                              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
+                                <p className="text-sm text-gray-400">No focus list set today</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-1 max-h-44 overflow-y-auto">
+                                {student.priorities.map((t, i) => (
+                                  <div key={t.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.completed ? 'bg-gray-50 opacity-60' : 'bg-white border border-gray-100'}`}>
+                                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${t.completed ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'}`}>
+                                      {t.completed ? '✓' : i + 1}
+                                    </span>
+                                    <p className={`flex-1 truncate font-medium ${t.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.title}</p>
+                                    <span className="text-gray-400 flex-shrink-0">{formatMins(t.user_estimated_time || t.estimated_time)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Urgent tasks */}
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+                              Urgent / Overdue ({student.urgentTasks.length})
+                            </p>
+                            {student.urgentTasks.length === 0 ? (
+                              <div className="bg-green-50 rounded-xl p-3 border border-green-200 text-center">
+                                <Check className="w-4 h-4 text-green-500 mx-auto mb-1" />
+                                <p className="text-xs text-green-700 font-semibold">All caught up</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-1 max-h-44 overflow-y-auto">
+                                {student.urgentTasks.map(t => {
+                                  const due = new Date(String(t.deadline_date).slice(0,10) + 'T00:00:00');
+                                  const today = new Date(); today.setHours(0,0,0,0);
+                                  const overdue = due < today;
+                                  return (
+                                    <div key={t.id} className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${overdue ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+                                      <AlertTriangle className={`w-3 h-3 flex-shrink-0 mt-0.5 ${overdue ? 'text-red-500' : 'text-amber-500'}`} />
+                                      <div className="min-w-0">
+                                        <p className={`font-medium truncate ${overdue ? 'text-red-800' : 'text-amber-800'}`}>{t.title}</p>
+                                        <p className={`text-[10px] truncate ${overdue ? 'text-red-500' : 'text-amber-600'}`}>
+                                          {t.class} · Due {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{overdue && ' — OVERDUE'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Agenda section */}
+                        {(student.activeAgenda || (student.agendaHistory?.length > 0)) && (
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <Zap className="w-4 h-4 text-indigo-600" />
+                                <p className="text-xs font-bold text-indigo-800 uppercase tracking-widest">
+                                  {agendaHistoryId ? 'Agenda History' : student.activeAgenda ? `Active — ${student.activeAgenda.name}` : 'Recent Agenda'}
+                                </p>
+                                {!agendaHistoryId && student.activeAgenda && (
+                                  <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-semibold">
+                                    Row {agendaCurrentRow + 1} of {agendaRows.length}
+                                  </span>
+                                )}
+                              </div>
+                              {student.agendaHistory?.length > 0 && (
+                                <select
+                                  className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white text-indigo-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                  value={agendaHistoryId || ''}
+                                  onChange={e => setAgendaHistoryId(e.target.value ? parseInt(e.target.value) : null)}
+                                >
+                                  <option value="">{student.activeAgenda ? '▶ Current' : 'Select…'}</option>
+                                  {student.agendaHistory.map(a => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name} — {new Date(a.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    </option>
+                                  ))}
+                                </select>
                               )}
                             </div>
-                          );
-                        };
-                        return <AgendaView />;
-                      })()}
-                    </div>
-                  )}
+
+                            {agendaRows.length === 0 ? (
+                              <p className="text-xs text-indigo-400 italic">No rows in this agenda.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                                {agendaRows.map((row, rowIdx) => {
+                                  const isDone   = rowIdx < agendaCurrentRow;
+                                  const isActive = !agendaHistoryId && rowIdx === agendaCurrentRow;
+                                  return (
+                                    <div key={rowIdx} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors ${
+                                      isActive ? 'bg-indigo-600 text-white shadow-sm'
+                                      : isDone  ? 'bg-white text-gray-400 opacity-70'
+                                      : 'bg-white text-gray-700 border border-indigo-100'
+                                    }`}>
+                                      <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px] ${
+                                        isActive ? 'bg-white text-indigo-600'
+                                        : isDone  ? 'bg-green-100 text-green-600'
+                                        : 'bg-indigo-100 text-indigo-500'
+                                      }`}>
+                                        {isDone ? '✓' : rowIdx + 1}
+                                      </span>
+                                      <span className={`flex-1 font-medium truncate ${isDone ? 'line-through' : ''}`}>
+                                        {row.task || `Row ${rowIdx + 1}`}
+                                      </span>
+                                      {row.zone && (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${
+                                          isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-600'
+                                        }`}>{row.zone}</span>
+                                      )}
+                                      <span className={`flex-shrink-0 font-mono text-[10px] ${isActive ? 'text-indigo-200' : 'text-gray-400'}`}>
+                                        {row.timeMins || 25}m
+                                      </span>
+                                      {isActive && student.activeAgenda?.currentRowCountdown != null && (
+                                        <span className="text-white/80 font-mono text-[10px] flex-shrink-0 bg-white/10 px-1.5 rounded">
+                                          {String(Math.floor(student.activeAgenda.currentRowCountdown / 60)).padStart(2,'0')}:{String(student.activeAgenda.currentRowCountdown % 60).padStart(2,'0')} left
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })
@@ -2174,45 +2145,78 @@ export default function AppHPT({ onBack }) {
   ];
 
   const [darkMode, setDarkMode] = React.useState(() => localStorage.getItem('planassist-hpt-dark') === 'true');
+  const [insightIndex, setInsightIndex] = React.useState(0);
 
-  // Inject scrollbar CSS + dark mode into document.head
   React.useEffect(() => {
-    const id = 'planassist-hpt-styles';
-    let el = document.getElementById(id);
-    if (!el) {
-      el = document.createElement('style');
-      el.id = id;
-      document.head.appendChild(el);
-    }
-    const dark = darkMode;
+    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Full dark theme matching regular PlanAssist's Dark colour theme exactly
+  React.useEffect(() => {
+    const styleId = 'planassist-hpt-styles';
+    let el = document.getElementById(styleId);
+    if (!el) { el = document.createElement('style'); el.id = styleId; document.head.appendChild(el); }
+    const d = darkMode;
     el.textContent = `
       html, body { overflow: hidden; margin: 0; padding: 0; }
       .planassist-hpt ::-webkit-scrollbar { width: 7px; height: 7px; }
-      .planassist-hpt ::-webkit-scrollbar-track { background: ${dark ? '#0d0d14' : '#f1f5f9'}; }
-      .planassist-hpt ::-webkit-scrollbar-thumb { background: ${dark ? '#3d3d6b' : '#cbd5e1'}; border-radius: 4px; }
-      .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: ${dark ? '#7c4dff' : '#7c3aed'}; }
-      .planassist-hpt * { scrollbar-color: ${dark ? '#3d3d6b #0d0d14' : '#cbd5e1 #f1f5f9'}; scrollbar-width: thin; }
+      .planassist-hpt ::-webkit-scrollbar-track { background: ${d ? '#0d0d14' : '#f1f5f9'}; }
+      .planassist-hpt ::-webkit-scrollbar-thumb { background: ${d ? '#3d3d6b' : '#cbd5e1'}; border-radius: 4px; }
+      .planassist-hpt ::-webkit-scrollbar-thumb:hover { background: ${d ? '#7c4dff' : '#7c3aed'}; }
+      .planassist-hpt * { scrollbar-color: ${d ? '#3d3d6b #0d0d14' : '#cbd5e1 #f1f5f9'}; scrollbar-width: thin; }
       .planassist-hpt .scrollbar-stable { scrollbar-gutter: stable; }
-      ${dark ? `
-      .planassist-hpt { background: #0d0d14 !important; color: #e2e8f0 !important; }
-      .planassist-hpt nav { background: #13131f !important; border-color: #2d2d4a !important; }
-      .planassist-hpt .bg-white { background: #13131f !important; }
-      .planassist-hpt .bg-gray-50 { background: #1a1a2e !important; }
-      .planassist-hpt .bg-gray-100 { background: #1e1e30 !important; }
-      .planassist-hpt .border-gray-100 { border-color: #2d2d4a !important; }
-      .planassist-hpt .border-gray-200 { border-color: #3d3d6b !important; }
-      .planassist-hpt .text-gray-900 { color: #f1f5f9 !important; }
-      .planassist-hpt .text-gray-800 { color: #e2e8f0 !important; }
-      .planassist-hpt .text-gray-700 { color: #cbd5e1 !important; }
-      .planassist-hpt .text-gray-600 { color: #b39ddb !important; }
-      .planassist-hpt .text-gray-500 { color: #94a3b8 !important; }
-      .planassist-hpt .text-gray-400 { color: #64748b !important; }
-      .planassist-hpt .hover\\:bg-gray-100:hover { background: #1e1e30 !important; }
-      .planassist-hpt .hover\\:bg-gray-50:hover { background: #1a1a2e !important; }
+      ${d ? `
+      .planassist-hpt, .planassist-hpt main { background: #0d0d14 !important; color: #e8eaf6 !important; }
+      .planassist-hpt nav { background-color: #09090f !important; border-color: #1e1e30 !important; }
+      .planassist-hpt .bg-white { background-color: #13131f !important; }
+      .planassist-hpt .bg-gray-50 { background-color: #181828 !important; }
+      .planassist-hpt .bg-gray-100 { background-color: #1e1e30 !important; }
+      .planassist-hpt .bg-gray-200 { background-color: #282840 !important; }
+      .planassist-hpt .from-yellow-50 { --tw-gradient-from: #0d0d14 !important; }
+      .planassist-hpt .via-purple-50 { --tw-gradient-via: #13131f !important; }
+      .planassist-hpt .to-blue-50 { --tw-gradient-to: #0f0f1e !important; }
+      .planassist-hpt .bg-gradient-to-br { background-image: linear-gradient(135deg, #0d0d14, #13131f) !important; }
+      .planassist-hpt .text-gray-900 { color: #e8eaf6 !important; }
+      .planassist-hpt .text-gray-800 { color: #c5cbe8 !important; }
+      .planassist-hpt .text-gray-700 { color: #9fa8c8 !important; }
+      .planassist-hpt .text-gray-600 { color: #7986a8 !important; }
+      .planassist-hpt .text-gray-500 { color: #5c6694 !important; }
+      .planassist-hpt .text-gray-400 { color: #434878 !important; }
+      .planassist-hpt .text-gray-300 { color: #2e3260 !important; }
+      .planassist-hpt .border-gray-100 { border-color: #1e1e30 !important; }
+      .planassist-hpt .border-gray-200 { border-color: #282840 !important; }
+      .planassist-hpt .border-gray-300 { border-color: #32325a !important; }
+      .planassist-hpt .border-t, .planassist-hpt .border-b, .planassist-hpt .border-r, .planassist-hpt .border-l { border-color: #1e1e30 !important; }
+      .planassist-hpt .divide-y > * + * { border-color: #1e1e30 !important; }
+      .planassist-hpt .hover\\:bg-gray-50:hover { background-color: #1e1e30 !important; }
+      .planassist-hpt .hover\\:bg-gray-100:hover { background-color: #24243a !important; }
       .planassist-hpt .shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important; }
+      .planassist-hpt .bg-purple-100 { background-color: #1e1e30 !important; }
+      .planassist-hpt .bg-purple-50 { background-color: #181828 !important; }
+      .planassist-hpt .bg-green-50 { background-color: #0a1a0c !important; }
+      .planassist-hpt .bg-green-100 { background-color: #0e2210 !important; }
+      .planassist-hpt .bg-red-50 { background-color: #1a0808 !important; }
+      .planassist-hpt .bg-amber-50 { background-color: #1a1400 !important; }
+      .planassist-hpt .bg-indigo-50 { background-color: #0f0f2a !important; }
+      .planassist-hpt .border-green-200 { border-color: #14301a !important; }
+      .planassist-hpt .border-red-200 { border-color: #3a1414 !important; }
+      .planassist-hpt .border-amber-200 { border-color: #2e2500 !important; }
+      .planassist-hpt .border-indigo-200 { border-color: #1a1a45 !important; }
+      .planassist-hpt .text-purple-700 { color: #b39ddb !important; }
+      .planassist-hpt .text-purple-600 { color: #9575cd !important; }
+      .planassist-hpt .text-green-700 { color: #a5d6a7 !important; }
+      .planassist-hpt .text-green-600 { color: #81c784 !important; }
+      .planassist-hpt .text-red-600 { color: #ef9a9a !important; }
+      .planassist-hpt .text-amber-600 { color: #ffca28 !important; }
+      .planassist-hpt .text-indigo-800 { color: #c5caf0 !important; }
+      .planassist-hpt .text-indigo-600 { color: #9fa8da !important; }
+      .planassist-hpt input, .planassist-hpt select, .planassist-hpt textarea {
+        background-color: #181828 !important; color: #e8eaf6 !important; border-color: #282840 !important;
+      }
       ` : ''}
     `;
-    document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+    document.documentElement.style.colorScheme = d ? 'dark' : 'light';
     return () => { el.textContent = ''; };
   }, [darkMode]);
 
@@ -2255,26 +2259,19 @@ export default function AppHPT({ onBack }) {
           {/* RIGHT: nav buttons + account + logout */}
           <div className="flex items-center gap-2">
             {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-              <button
-                key={id}
-                onClick={() => setCurrentPage(id)}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === id ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
-              >
+              <button key={id} onClick={() => setCurrentPage(id)}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === id ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}>
                 <Icon className="w-5 h-5" />
                 <span className="font-medium">{label}</span>
               </button>
             ))}
-            <button
-              onClick={() => setCurrentPage('account')}
+            <button onClick={() => setCurrentPage('account')}
               className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'account' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}
-              title="Account"
-            >
+              title="Account">
               <Settings className="w-5 h-5" />
             </button>
-            <button
-              onClick={handleLogout}
-              className="px-4 py-2 rounded-lg flex items-center gap-2 text-red-600 hover:bg-red-50"
-            >
+            <button onClick={handleLogout}
+              className="px-4 py-2 rounded-lg flex items-center gap-2 text-red-600 hover:bg-red-50">
               <LogOut className="w-5 h-5" />
             </button>
           </div>
@@ -2300,30 +2297,35 @@ export default function AppHPT({ onBack }) {
               </div>
             </div>
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
-              <h2 className="text-base font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <Settings className="w-4 h-4 text-gray-500" /> Settings
+              <h2 className="text-base font-bold text-gray-900 mb-5 flex items-center gap-2">
+                <Settings className="w-4 h-4 text-gray-400" /> Settings
               </h2>
-              <div className="space-y-4">
-                {/* Dark Mode */}
-                <div className="flex items-center justify-between py-3 border-b border-gray-100">
-                  <div className="flex items-center gap-3">
-                    {darkMode ? <Moon className="w-5 h-5 text-indigo-400" /> : <Sun className="w-5 h-5 text-amber-500" />}
-                    <div>
-                      <p className="text-sm font-semibold text-gray-900">Dark Mode</p>
-                      <p className="text-xs text-gray-500">{darkMode ? 'Dark theme active' : 'Light theme active'}</p>
-                    </div>
+              <div className="flex items-center justify-between py-3">
+                <div className="flex items-center gap-3">
+                  {darkMode
+                    ? <Moon className="w-5 h-5 text-indigo-400" />
+                    : <Sun className="w-5 h-5 text-amber-500" />}
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">Dark Mode</p>
+                    <p className="text-xs text-gray-500">{darkMode ? 'Dark theme active' : 'Light theme active'}</p>
                   </div>
-                  <button
-                    onClick={() => {
-                      const next = !darkMode;
+                </div>
+                {/* Toggle — controlled via hidden checkbox for reliable click handling */}
+                <label className="relative inline-flex items-center cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={darkMode}
+                    onChange={e => {
+                      const next = e.target.checked;
                       setDarkMode(next);
                       localStorage.setItem('planassist-hpt-dark', String(next));
                     }}
-                    className={`relative w-12 h-6 rounded-full transition-colors duration-200 ${darkMode ? 'bg-purple-600' : 'bg-gray-200'}`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${darkMode ? 'translate-x-6' : 'translate-x-0.5'}`} />
-                  </button>
-                </div>
+                  />
+                  <div className={`w-12 h-6 rounded-full transition-colors duration-200 ${darkMode ? 'bg-purple-600' : 'bg-gray-200'}`}>
+                    <div className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform duration-200 ${darkMode ? 'translate-x-6' : 'translate-x-0'}`} />
+                  </div>
+                </label>
               </div>
             </div>
           </div>
