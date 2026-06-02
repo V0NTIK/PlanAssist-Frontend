@@ -6799,22 +6799,43 @@ const PlanAssist = () => {
                 };
 
                 const renderRow = (n) => {
-                  const cfg = typeConfig(n.type);
+                  const isHacked = n.type === 'insignia' && n.title?.includes('Hacked PlanAssist');
+                  const cfg = {
+                    ...typeConfig(n.type),
+                    ...(isHacked ? { icon: '⚠', label: 'Insignia', color: 'text-green-600' } : {}),
+                  };
                   const isUnread = n.is_unread;
+                  const titleContent = (n.type === 'insignia' && n.body)
+                    ? (() => {
+                        // Extract the insignia label from the body if present, render animated
+                        const label = n.body;
+                        if (INSIGNIA_STYLES[label]) {
+                          return (
+                            <span className="flex items-center gap-1.5 flex-wrap">
+                              <span className={`text-xs ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
+                                {n.title?.replace(label, '').trim() || 'Insignia unlocked:'}
+                              </span>
+                              {renderInsigniaName(label, label, { fontSize: '0.875rem' })}
+                            </span>
+                          );
+                        }
+                        return n.title;
+                      })()
+                    : n.title;
                   return (
                     <div
                       key={n.id}
                       className={`group px-4 py-3 flex items-start gap-3 transition-colors relative
-                        ${isUnread ? (dark ? 'bg-purple-900 bg-opacity-25' : 'bg-purple-50') : ''}
+                        ${isUnread ? (isHacked ? 'bg-green-950 bg-opacity-30' : dark ? 'bg-purple-900 bg-opacity-25' : 'bg-purple-50') : ''}
                         ${n.link_url ? 'cursor-pointer' : ''}`}
                       onClick={() => n.link_url && window.open(n.link_url, '_blank')}
                     >
                       <span className="text-lg flex-shrink-0 mt-0.5">{cfg.icon}</span>
                       <div className="flex-1 min-w-0">
                         <p className={`text-sm font-semibold leading-snug ${!isUnread ? (dark ? 'text-gray-400' : 'text-gray-500') : (dark ? 'text-gray-100' : 'text-gray-900')}`}>
-                          {n.title}
+                          {titleContent}
                         </p>
-                        {n.body && (
+                        {n.body && n.type !== 'insignia' && (
                           <p className={`text-xs mt-0.5 leading-relaxed line-clamp-2 ${dark ? 'text-gray-500' : 'text-gray-400'}`}>
                             {n.body}
                           </p>
@@ -6995,8 +7016,19 @@ const PlanAssist = () => {
 
       {/* Insignia unlock toast */}
       {insigniaNewUnlock && (
-        <div className="fixed top-20 right-4 bg-purple-600 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2">
-          🎉 New Insignia unlocked: <span className="font-bold">"{insigniaNewUnlock}"</span>
+        <div className={`fixed top-20 right-4 px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2
+          ${insigniaNewUnlock === 'Hacked PlanAssist'
+            ? 'bg-black border border-green-800'
+            : 'bg-purple-600 text-white'}`}>
+          {insigniaNewUnlock === 'Hacked PlanAssist' ? (
+            <>
+              <span style={{ fontFamily: "'Courier New',monospace", color: '#00ff41', fontSize: '0.85rem' }}>⚠</span>
+              <span style={{ fontFamily: "'Courier New',monospace", color: '#004d14', fontSize: '0.75rem' }}>INSIGNIA GRANTED:</span>
+              <span style={{ display: 'inline-block' }}>{renderInsigniaName(insigniaNewUnlock, insigniaNewUnlock, { fontSize: '0.875rem' })}</span>
+            </>
+          ) : (
+            <>🎉 New Insignia unlocked: <span className="font-bold">"{insigniaNewUnlock}"</span></>
+          )}
         </div>
       )}
 
@@ -11138,19 +11170,36 @@ const PlanAssist = () => {
                             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">🎖️ Insignia</p>
                             <div className="space-y-2">
                               {INSIGNIA_THRESHOLDS.filter(([, label]) => label !== 'Default').map(([threshold, label]) => {
+                                const isAdminOnly = threshold === null;
                                 const unlocked = (activityData.insignia || []).find(i => i.label === label)
-                                              || insigniaUnlocked.includes(label) && { label, unlocked_at: null };
+                                              || (insigniaUnlocked.some?.(u => (u.label || u) === label) ? { label, unlocked_at: null } : null);
+                                // Admin-only insignias are invisible unless the user has it
+                                if (isAdminOnly && !unlocked) return null;
+                                const isHacked = label === 'Hacked PlanAssist';
                                 return (
-                                  <div key={label} className={`flex items-center justify-between p-3 rounded-xl border ${unlocked ? 'bg-amber-50 border-amber-200' : 'bg-gray-50 border-gray-200 opacity-50'}`}>
+                                  <div key={label} className={`flex items-center justify-between p-3 rounded-xl border ${
+                                    isHacked && unlocked
+                                      ? 'bg-black border-green-900'
+                                      : unlocked
+                                        ? 'bg-amber-50 border-amber-200'
+                                        : 'bg-gray-50 border-gray-200 opacity-50'
+                                  }`}>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-lg">{unlocked ? '🎖️' : '🔒'}</span>
+                                      <span className="text-lg">{isHacked && unlocked ? '⚠' : unlocked ? '🎖️' : '🔒'}</span>
                                       <div>
-                                        <p className={`text-sm font-semibold ${unlocked ? 'text-amber-800' : 'text-gray-500'}`}>{label}</p>
-                                        <p className="text-xs text-gray-400">{threshold} completion day{threshold !== 1 ? 's' : ''}</p>
+                                        {unlocked
+                                          ? renderInsigniaName(label, label, { fontSize: '0.875rem' })
+                                          : <p className="text-sm font-semibold text-gray-500">{label}</p>
+                                        }
+                                        <p className={`text-xs ${isHacked && unlocked ? 'text-green-900' : 'text-gray-400'}`}>
+                                          {isAdminOnly ? '⚠ Admin-granted' : `${threshold} completion day${threshold !== 1 ? 's' : ''}`}
+                                        </p>
                                       </div>
                                     </div>
                                     {unlocked?.unlocked_at && (
-                                      <p className="text-xs text-amber-600">{new Date(unlocked.unlocked_at).toLocaleDateString()}</p>
+                                      <p className={`text-xs ${isHacked ? 'text-green-700 font-mono' : 'text-amber-600'}`}>
+                                        {new Date(unlocked.unlocked_at).toLocaleDateString()}
+                                      </p>
                                     )}
                                   </div>
                                 );
@@ -12045,6 +12094,8 @@ const PlanAssist = () => {
                         <option value="joined_oldest">Oldest First</option>
                         <option value="grade_asc">Grade ↑</option>
                         <option value="grade_desc">Grade ↓</option>
+                        <option value="credits_desc">Most Credits</option>
+                        <option value="credits_asc">Least Credits</option>
                         <option value="active_tasks_desc">Most Tasks</option>
                         <option value="active_tasks_asc">Fewest Tasks</option>
                         <option value="completions_desc">Most Completions</option>
@@ -12096,6 +12147,8 @@ const PlanAssist = () => {
                           case 'grade_desc': return (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0);
                           case 'active_tasks_desc': return (parseInt(b.active_tasks) || 0) - (parseInt(a.active_tasks) || 0);
                           case 'active_tasks_asc': return (parseInt(a.active_tasks) || 0) - (parseInt(b.active_tasks) || 0);
+                          case 'credits_desc': return (parseInt(b.credits) || 0) - (parseInt(a.credits) || 0);
+                          case 'credits_asc': return (parseInt(a.credits) || 0) - (parseInt(b.credits) || 0);
                           case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
                           case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
                           case 'health_desc': {
