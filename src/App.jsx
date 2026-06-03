@@ -233,7 +233,6 @@ const StudiosPaneWidget = ({ myStudios, loadMyStudios, apiCall, user, renderInsi
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
         <h3 className="text-sm font-semibold text-gray-700 mb-3">Join a Studio</h3>
         <JoinStudioWidget onJoined={loadMyStudios} apiCall={apiCall} />
-        <p className="text-xs text-gray-400 mt-2">Your teacher will provide you with the Studio Key. You cannot leave a Studio once joined.</p>
       </div>
 
       {/* My Studios + leaderboard */}
@@ -379,9 +378,11 @@ const AdminTokenCard = ({ user, onViewToken, onSetToken, onClearToken }) => {
 const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
   const [form, setForm] = React.useState({
     name: user.name || '',
+    email: user.email || '',
     grade: user.grade || '',
     campus: user.campus || 'Ashland',
     is_admin: user.is_admin || false,
+    password: '',
   });
   const [campusInput, setCampusInput] = React.useState(user.campus || 'Ashland');
   const [campusSuggestions, setCampusSuggestions] = React.useState([]);
@@ -394,8 +395,20 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
             className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
         </div>
         <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+          <input value={form.email} onChange={e => setForm(p => ({...p, email: e.target.value}))}
+            type="email"
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
+        <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">Grade</label>
           <input value={form.grade} onChange={e => setForm(p => ({...p, grade: e.target.value}))}
+            className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">New Password <span className="text-gray-400 font-normal">(leave blank to keep)</span></label>
+          <input value={form.password} onChange={e => setForm(p => ({...p, password: e.target.value}))}
+            type="password" placeholder="••••••••"
             className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:ring-1 focus:ring-red-500" />
         </div>
         <div className="relative">
@@ -420,7 +433,7 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
         <div className="flex items-center gap-2 pt-4">
           <input type="checkbox" id="isAdminCheck" checked={form.is_admin}
             onChange={e => {
-              if (!e.target.checked && user.id === currentUserId) return; // no self-demotion
+              if (!e.target.checked && user.id === currentUserId) return;
               setForm(p => ({...p, is_admin: e.target.checked}));
             }}
             className="w-4 h-4 text-red-600 rounded" />
@@ -430,7 +443,11 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
-        <button onClick={() => onSave(form)} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
+        <button onClick={() => {
+          const payload = { name: form.name, email: form.email, grade: form.grade, campus: form.campus, is_admin: form.is_admin };
+          if (form.password.trim()) payload.password = form.password.trim();
+          onSave(payload);
+        }} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
       </div>
     </div>
   );
