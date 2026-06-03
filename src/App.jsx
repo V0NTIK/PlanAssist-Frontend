@@ -4504,7 +4504,7 @@ const PlanAssist = () => {
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins; // negative = period already started
         // Show banner from period start up to 1 minute after start (0/+1 window)
-        if (diff >= -1 && diff <= 0) {
+        if (diff >= 0 && diff <= 1) {
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
