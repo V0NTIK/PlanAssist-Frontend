@@ -1737,9 +1737,13 @@ const PlanAssist = () => {
   const loadRewardsStatus = async () => {
     setRewardsLoading(true);
     try {
-      const data = await apiCall('/rewards/status', 'GET');
-      setRewardsStatus(data);
-      setCredits(data.credits ?? 0);
+      const [statusData, creditsData] = await Promise.all([
+        apiCall('/rewards/status', 'GET'),
+        apiCall('/credits', 'GET'),
+      ]);
+      setRewardsStatus(statusData);
+      setCredits(statusData.credits ?? 0);
+      if (creditsData) setCreditsShop(creditsData.shop || []);
     } catch (e) { /* silently ignore */ }
     finally { setRewardsLoading(false); }
   };
@@ -11118,7 +11122,7 @@ const PlanAssist = () => {
                           {chestAvailable && <span className="ml-auto bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">Ready!</span>}
                         </div>
                         <p className="text-xs text-gray-400 mb-4">
-                          Open a chest once per day for a random amount of Credits (0–50). Resets at midnight in your local timezone.
+                          Open a chest once per day for a random amount of Credits (0–50). Resets at midnight UTC.
                         </p>
                         {lastChestPrize !== null && (
                           <div className={`mb-3 p-3 rounded-xl text-center font-bold ${lastChestPrize > 0 ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'}`}>
@@ -11455,7 +11459,7 @@ const PlanAssist = () => {
                                     try {
                                       const r = await apiCall('/credits/buy-insignia', 'POST', { label: item.label });
                                       setCredits(r.credits);
-                                      await loadInsignia();
+                                      await Promise.all([loadInsignia(), loadCredits()]);
                                     } catch (err) { alert(err.message || 'Purchase failed'); }
                                   }}
                                   className={`text-xs font-bold px-3 py-1 rounded-lg transition-colors ${canAfford ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
