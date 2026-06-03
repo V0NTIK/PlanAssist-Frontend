@@ -2885,7 +2885,151 @@ const PlanAssist = () => {
     }).catch(err => console.error('Agenda PiP launch failed:', err));
   };
 
-  // ── Sync Session PiP DOM on every timer / loading-state tick ────────────
+  // ── Zoom Ping — Document PiP notification when a Zoom period starts ────────
+  const launchZoomPing = (zoomNumber, isTutorial, theme) => {
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+    // Close any existing PiP without triggering Save & Exit
+    pipIntentionalCloseRef.current = true;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipWindowRef.current = null;
+    pipIntentionalCloseRef.current = false;
+    setPipActive(false);
+
+    const t = getPipTheme(theme);
+    const bg   = `linear-gradient(135deg,${t.grad1},${t.grad2})`;
+    const text  = '#ffffff';
+    const sub   = t.topSubtext;
+    const btn   = t.grad1;
+
+    const label   = isTutorial ? '📘 Tutorial' : '🎓 Class';
+    const heading = isTutorial ? 'Tutorial Starting!' : 'Class Starting!';
+    const zoomUrl = `https://oneschoolglobal.zoom.us/j/${zoomNumber.replace(/[\s\-]/g, '')}`;
+
+    const pingCss = [
+      '*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;}',
+      'html,body{width:100%;height:100%;overflow:hidden;background:transparent;}',
+      '.wrap{width:100%;height:100%;display:flex;flex-direction:column;background:' + bg + ';padding:16px;}',
+      '.badge{display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.18);color:' + text + ';font-size:11px;font-weight:600;padding:3px 10px;border-radius:99px;margin-bottom:8px;width:fit-content;}',
+      '.head{font-size:20px;font-weight:800;color:' + text + ';margin-bottom:3px;line-height:1.15;}',
+      '.zoom{font-size:12px;color:' + sub + ';margin-bottom:14px;letter-spacing:.3px;}',
+      '.join{display:block;width:100%;padding:10px;background:#fff;color:' + btn + ';font-weight:700;font-size:14px;border:none;border-radius:10px;cursor:pointer;text-align:center;text-decoration:none;transition:opacity .15s;}',
+      '.join:hover{opacity:.88;}',
+      '.close{margin-top:8px;background:transparent;border:none;color:' + sub + ';font-size:11px;cursor:pointer;width:100%;text-align:center;padding:2px;}',
+      '.close:hover{color:' + text + ';}',
+    ].join('\n');
+
+    window.documentPictureInPicture.requestWindow({ width: 320, height: 210 }).then(pipWin => {
+      pipWindowRef.current = pipWin;
+      setPipActive(true);
+
+      pipWin.document.head.insertAdjacentHTML('beforeend', '<style>' + pingCss + '</style>');
+      pipWin.document.body.innerHTML =
+        '<div class="wrap">' +
+          '<div class="badge">' + label + '</div>' +
+          '<div class="head">' + heading + '</div>' +
+          '<div class="zoom">Zoom: ' + zoomNumber + '</div>' +
+          '<a class="join" id="join-btn" href="' + zoomUrl + '" target="_blank" rel="noopener noreferrer">🎥 Join Zoom</a>' +
+          '<button class="close" id="close-btn">Dismiss</button>' +
+        '</div>';
+
+      const dismiss = () => {
+        pipIntentionalCloseRef.current = true;
+        pipWin.close();
+        pipWindowRef.current = null;
+        pipIntentionalCloseRef.current = false;
+        setPipActive(false);
+      };
+      pipWin.document.getElementById('close-btn').addEventListener('click', dismiss);
+
+      pipWin.addEventListener('pagehide', () => {
+        if (pipIntentionalCloseRef.current) return;
+        pipWindowRef.current = null;
+        setPipActive(false);
+      });
+    }).catch(err => console.error('Zoom Ping PiP failed:', err));
+  };
+
+  // ── Agenda Ping — Document PiP notification when an agenda row timer expires ─
+  const launchAgendaPing = () => {
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+    // Close any existing PiP without triggering Save & Exit
+    pipIntentionalCloseRef.current = true;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipWindowRef.current = null;
+    pipIntentionalCloseRef.current = false;
+    setPipActive(false);
+
+    const taskName = window.__pa_pipAgendaTask
+      ? (window.__pa_pipAgendaTask.title || window.__pa_pipAgendaTask)
+      : 'Task';
+
+    const css = [
+      '*{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',sans-serif;}',
+      'html,body{width:100%;height:100%;overflow:hidden;background:transparent;}',
+      '.wrap{width:100%;height:100%;display:flex;flex-direction:column;justify-content:space-between;background:#1e293b;padding:16px;}',
+      '.top{display:flex;align-items:center;gap:8px;margin-bottom:10px;}',
+      '.icon{font-size:22px;animation:shake 0.5s ease-in-out infinite;}',
+      '.head{font-size:17px;font-weight:800;color:#fff;line-height:1.2;}',
+      '.task{font-size:12px;color:#94a3b8;margin-bottom:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
+      '.dismiss{display:block;width:100%;padding:10px;background:#f97316;color:#fff;font-weight:700;font-size:13px;border:none;border-radius:10px;cursor:pointer;}',
+      '.dismiss:hover{opacity:.88;}',
+      '@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-3px)}75%{transform:translateX(3px)}}',
+    ].join('');
+
+    window.documentPictureInPicture.requestWindow({ width: 300, height: 180 }).then(pipWin => {
+      pipWindowRef.current = pipWin;
+      setPipActive(true);
+
+      pipWin.document.head.insertAdjacentHTML('beforeend', '<style>' + css + '</style>');
+      pipWin.document.body.innerHTML =
+        '<div class="wrap">' +
+          '<div>' +
+            '<div class="top"><span class="icon">⏰</span><div class="head">Time\'s Up!</div></div>' +
+            '<div class="task">' + taskName + '</div>' +
+          '</div>' +
+          '<button class="dismiss" id="dismiss-btn">Dismiss</button>' +
+        '</div>';
+
+      const dismiss = () => {
+        pipIntentionalCloseRef.current = true;
+        pipWin.close();
+        pipWindowRef.current = null;
+        pipIntentionalCloseRef.current = false;
+        setPipActive(false);
+      };
+      pipWin.document.getElementById('dismiss-btn').addEventListener('click', dismiss);
+
+      // Looping buzz sound — two-tone square wave, every 2 seconds
+      const buzzScript = pipWin.document.createElement('script');
+      buzzScript.textContent = '(function(){' +
+        'const ctx=new(window.AudioContext||window.webkitAudioContext)();' +
+        'function buzz(){' +
+          'const o=ctx.createOscillator(),g=ctx.createGain();' +
+          'o.connect(g);g.connect(ctx.destination);' +
+          'o.type="square";o.frequency.value=180;' +
+          'g.gain.setValueAtTime(0.12,ctx.currentTime);' +
+          'g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.3);' +
+          'o.start(ctx.currentTime);o.stop(ctx.currentTime+0.3);' +
+          'const o2=ctx.createOscillator(),g2=ctx.createGain();' +
+          'o2.connect(g2);g2.connect(ctx.destination);' +
+          'o2.type="square";o2.frequency.value=140;' +
+          'g2.gain.setValueAtTime(0.10,ctx.currentTime+0.15);' +
+          'g2.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.45);' +
+          'o2.start(ctx.currentTime+0.15);o2.stop(ctx.currentTime+0.45);' +
+        '}' +
+        'buzz();' +
+        'const id=setInterval(buzz,2000);' +
+        'window.addEventListener("pagehide",function(){clearInterval(id);});' +
+      '})();';
+      pipWin.document.body.appendChild(buzzScript);
+
+      pipWin.addEventListener('pagehide', () => {
+        if (pipIntentionalCloseRef.current) return;
+        pipWindowRef.current = null;
+        setPipActive(false);
+      });
+    }).catch(err => console.error('Agenda Ping PiP failed:', err));
+  };
   useEffect(() => {
     const pipWin = pipWindowRef.current;
     if (!pipWin || pipWin.closed) return;
@@ -3110,8 +3254,10 @@ const PlanAssist = () => {
   };
 
   // ── Active agenda timer logic ──────────────────────────────────────────────
+  const agendaPingFiredRef = React.useRef(false); // prevents multiple pings for same expiry
   const agendaStartTimer = (baseElapsed, baseCountdown) => {
     if (agendaTimerRef.current) clearInterval(agendaTimerRef.current.intervalRef);
+    agendaPingFiredRef.current = false; // reset for each new timer start
     const wallStart = Date.now();
     const intervalId = setInterval(() => {
       const wallSecs = Math.floor((Date.now() - wallStart) / 1000);
@@ -3120,6 +3266,10 @@ const PlanAssist = () => {
       if (remaining <= 0) {
         setAgendaCountdown(0);
         setAgendaCountdownFlash(true);
+        if (!agendaPingFiredRef.current) {
+          agendaPingFiredRef.current = true;
+          launchAgendaPing();
+        }
       } else {
         setAgendaCountdown(remaining);
         setAgendaCountdownFlash(false);
@@ -4353,8 +4503,8 @@ const PlanAssist = () => {
         if (period < rangeStart || period > rangeEnd) continue;
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins; // negative = period already started
-        // Show banner from 5 min before start up to 2 min after start
-        if (diff >= -2 && diff <= 5) {
+        // Show banner from period start up to 1 minute after start (0/+1 window)
+        if (diff >= -1 && diff <= 0) {
           const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
           const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
@@ -4362,6 +4512,7 @@ const PlanAssist = () => {
           const zoomNumber = tutorial?.zoom_number || lesson?.zoom_number || null;
           if (zoomNumber) {
             setZoomBanner({ period, zoomNumber, isTutorial: !!tutorial?.zoom_number });
+            launchZoomPing(zoomNumber, !!tutorial?.zoom_number, colorTheme);
           }
           break;
         }
