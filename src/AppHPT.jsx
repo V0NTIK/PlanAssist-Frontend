@@ -1482,7 +1482,8 @@ function MonitorPage({ token, studios }) {
     if (!studioId) return;
     setLoading(true);
     try {
-      const d = await apiCall(`/hpt/studios/${studioId}/monitor`, 'GET', null, token);
+      const localDate = new Date().toLocaleDateString('en-CA');
+      const d = await apiCall(`/hpt/studios/${studioId}/monitor?date=${localDate}`, 'GET', null, token);
       setData(Array.isArray(d) ? d : []);
       setLastRefresh(new Date());
     } catch (e) { console.error('Monitor load error:', e.message); }
