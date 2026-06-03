@@ -798,6 +798,12 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const [hubData, setHubData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [statModal, setStatModal] = React.useState(null); // 'today'|'week'|'studytime'|'accuracy'|'streak'
+  const [insightIndex, setInsightIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const load = React.useCallback(async () => {
     try {
@@ -2145,12 +2151,6 @@ export default function AppHPT({ onBack }) {
   ];
 
   const [darkMode, setDarkMode] = React.useState(() => localStorage.getItem('planassist-hpt-dark') === 'true');
-  const [insightIndex, setInsightIndex] = React.useState(0);
-
-  React.useEffect(() => {
-    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   // Full dark theme matching regular PlanAssist's Dark colour theme exactly
   React.useEffect(() => {
