@@ -11,7 +11,7 @@ const API_URL = 'https://planassist-api.onrender.com/api';
 const CAMPUS_PERIODS = {
   'Ashland':        '2-6',
   'Barbados':       '1-5',
-  'Calgary':        '4-8',
+  'Calgary':        '3-7',
   'Chesapeake':     '2-6',
   'Chicago':        '3-7',
   'Council Bluffs': '3-7',
@@ -51,7 +51,7 @@ const CAMPUS_PERIODS = {
 const CAMPUS_PERIODS_DST = {
   'Ashland':        '2-6',
   'Barbados':       '2-6',
-  'Calgary':        '4-8',
+  'Calgary':        '3-7',
   'Chesapeake':     '2-6',
   'Chicago':        '3-7',
   'Council Bluffs': '3-7',
@@ -702,6 +702,7 @@ const PlanAssist = () => {
   const [pipPopupSelectorOpen, setPipPopupSelectorOpen] = useState(false);
   const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
   const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
+  const zoomPingAudioRef = React.useRef(null);     // looping alert sound for Zoom Pings
 
   // ── Itinerary & Enhance Schedule state ───────────────────────────────────
   const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
@@ -749,6 +750,8 @@ const PlanAssist = () => {
   const [editingUser, setEditingUser] = useState(null);
   const [adminHelpContent, setAdminHelpContent] = useState('');
   const [adminHelpSaving, setAdminHelpSaving] = useState(false);
+  const [adminLogContent, setAdminLogContent] = useState('');
+  const [adminLogSaving, setAdminLogSaving] = useState(false);
   const [adminHptUsers, setAdminHptUsers] = useState([]);
   const [adminSelectedHptUser, setAdminSelectedHptUser] = useState(null);
   const [hptLoading, setHptLoading] = useState(false);
@@ -1871,6 +1874,17 @@ const PlanAssist = () => {
     }
   };
 
+  const saveAdminLog = async () => {
+    setAdminLogSaving(true);
+    try {
+      await apiCall('/admin/log', 'PUT', { content: adminLogContent });
+    } catch (err) {
+      alert('Failed to save log: ' + err.message);
+    } finally {
+      setAdminLogSaving(false);
+    }
+  };
+
   // OSG GPA scale: score → GPA points
   const scoreToGPA = (score) => {
     if (score == null) return null;
@@ -2895,6 +2909,42 @@ const PlanAssist = () => {
     pipIntentionalCloseRef.current = false;
     setPipActive(false);
 
+    // Play a distinctive alarm-like tone sequence using Web Audio API (no file dependency)
+    // Stops when the user dismisses. Stored in ref so dismiss can cancel it.
+    if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
+    (() => {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        let stopped = false;
+        // Two-tone ascending alarm: 880Hz → 1100Hz, repeating
+        const playAlarm = () => {
+          if (stopped) return;
+          const tones = [880, 1100, 880, 1100];
+          let t = ctx.currentTime;
+          tones.forEach(freq => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, t);
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(0.35, t + 0.02);
+            gain.gain.setValueAtTime(0.35, t + 0.18);
+            gain.gain.linearRampToValueAtTime(0, t + 0.22);
+            osc.start(t);
+            osc.stop(t + 0.22);
+            t += 0.25;
+          });
+          // Pause then repeat
+          const loopId = setTimeout(playAlarm, tones.length * 250 + 600);
+          ctx.__loopId = loopId;
+        };
+        playAlarm();
+        // Expose stop mechanism via ref
+        zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
+      } catch(e) { zoomPingAudioRef.current = null; }
+    })();
+
     const t = getPipTheme(theme);
     const bg   = `linear-gradient(135deg,${t.grad1},${t.grad2})`;
     const text  = '#ffffff';
@@ -2938,6 +2988,8 @@ const PlanAssist = () => {
         pipWindowRef.current = null;
         pipIntentionalCloseRef.current = false;
         setPipActive(false);
+        // Stop looping alert sound
+        if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} zoomPingAudioRef.current = null; }
       };
       pipWin.document.getElementById('close-btn').addEventListener('click', dismiss);
 
@@ -2945,6 +2997,8 @@ const PlanAssist = () => {
         if (pipIntentionalCloseRef.current) return;
         pipWindowRef.current = null;
         setPipActive(false);
+        // Stop looping alert sound if PiP closed externally
+        if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} zoomPingAudioRef.current = null; }
       });
     }).catch(err => console.error('Zoom Ping PiP failed:', err));
   };
@@ -4621,6 +4675,18 @@ const PlanAssist = () => {
 
 
   // ── Theme CSS injection ──────────────────────────────────────────────────
+  useEffect(() => {
+    // Inject insignia keyframes once at mount so they're always ready,
+    // preventing the brief "solid color box" flash on first render.
+    const insigniaStyleId = 'planassist-insignia-keyframes';
+    if (!document.getElementById(insigniaStyleId)) {
+      const el = document.createElement('style');
+      el.id = insigniaStyleId;
+      el.textContent = INSIGNIA_KEYFRAMES;
+      document.head.appendChild(el);
+    }
+  }, []);
+
   useEffect(() => {
     // color-scheme on html for browser native elements
     document.documentElement.style.colorScheme = (colorTheme === 'dark' || colorTheme === 'cool') ? 'dark' : 'light';
@@ -6482,17 +6548,23 @@ const PlanAssist = () => {
               <UserCircle className="w-5 h-5" />
             </button>
             <button
-              onClick={() => !navLocked && openNotifSidebar()}
-              disabled={navLocked}
-              className={`px-4 py-2 rounded-lg flex items-center gap-2 relative ${notifSidebarOpen ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}
+              onClick={() => !navLocked && !activityRefreshLoading && openNotifSidebar()}
+              disabled={navLocked || activityRefreshLoading}
+              className={`px-4 py-2 rounded-lg flex items-center gap-2 relative ${notifSidebarOpen ? 'bg-purple-100 text-purple-700' : navLocked || activityRefreshLoading ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}
               title="Notifications"
             >
               <span className="relative">
-                <Bell className="w-5 h-5" />
-                {notifUnreadCount > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
-                    {notifUnreadCount > 99 ? '99+' : notifUnreadCount}
-                  </span>
+                {activityRefreshLoading ? (
+                  <div className="w-5 h-5 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <Bell className="w-5 h-5" />
+                    {notifUnreadCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 leading-none">
+                        {notifUnreadCount > 99 ? '99+' : notifUnreadCount}
+                      </span>
+                    )}
+                  </>
                 )}
               </span>
             </button>
@@ -7092,9 +7164,20 @@ const PlanAssist = () => {
           </div>
         </div>
       )}
-      <div>
+      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
         {currentPage === 'hub' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full">
+          <div className="h-full overflow-y-auto scrollbar-stable w-full">
+            {isLoadingTasks ? (
+              <div className="max-w-7xl mx-auto p-6 space-y-6">
+                <div className="bg-gradient-to-r from-purple-300 to-blue-300 rounded-xl p-8 animate-pulse h-32" />
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  {[...Array(5)].map((_,i) => <div key={i} className="bg-gray-200 rounded-xl h-24 animate-pulse" />)}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {[...Array(3)].map((_,i) => <div key={i} className="bg-gray-200 rounded-xl h-48 animate-pulse" />)}
+                </div>
+              </div>
+            ) : (
             <div className="max-w-7xl mx-auto p-6 space-y-6">
             {/* Welcome Header */}
             <div className="bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl p-8 shadow-lg">
@@ -7543,14 +7626,26 @@ const PlanAssist = () => {
               </div>
             )}
             </div>
+            </div>
+          </div>
+            )}
           </div>
         )}
         {currentPage === 'tasks' && (
-          <div className="flex h-[calc(100vh-73px)] overflow-hidden">
+          <div className="flex h-full overflow-hidden">
             {/* Main Task List */}
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
                 <div className="max-w-4xl mx-auto">
+                  {isLoadingTasks ? (
+                    <div className="bg-white rounded-xl shadow-md p-6 space-y-4">
+                      <div className="flex items-center justify-between mb-6">
+                        <div className="space-y-2"><div className="h-7 w-32 bg-gray-200 rounded animate-pulse"/><div className="h-4 w-48 bg-gray-100 rounded animate-pulse"/></div>
+                        <div className="h-9 w-24 bg-gray-200 rounded animate-pulse"/>
+                      </div>
+                      {[...Array(6)].map((_,i) => <div key={i} className="h-16 bg-gray-100 rounded-lg animate-pulse"/>)}
+                    </div>
+                  ) : (
                   <div className="bg-white rounded-xl shadow-md p-6">
                     {/* Header */}
                     <div className="flex items-center justify-between mb-6">
@@ -7800,6 +7895,7 @@ const PlanAssist = () => {
                     </div>
 
                   </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -8083,7 +8179,7 @@ const PlanAssist = () => {
           };
 
           return (
-            <div className="h-[calc(100vh-73px)] bg-gray-50 flex flex-col overflow-hidden">
+            <div className="h-full bg-gray-50 flex flex-col overflow-hidden">
               {/* Header bar — fixed height, never scrolls */}
               <div className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between flex-shrink-0">
                 <div>
@@ -8677,7 +8773,7 @@ const PlanAssist = () => {
 
                 {currentPage === 'agendas' && (() => {
                   return (
-                    <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
+                    <div className="h-full overflow-y-auto scrollbar-stable">
                     <div className="max-w-3xl mx-auto p-6">
                       <div className="flex items-center justify-between mb-6">
                         <h2 className="text-2xl font-bold text-gray-900">Agendas</h2>
@@ -9337,7 +9433,18 @@ const PlanAssist = () => {
 
 
           return (
-            <div className="flex flex-col h-[calc(100vh-73px)] bg-gradient-to-br from-gray-50 to-blue-50">
+            isLoadingTasks ? (
+              <div className="flex flex-col h-full bg-gradient-to-br from-gray-50 to-blue-50 p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="h-8 w-48 bg-gray-200 rounded animate-pulse"/>
+                  <div className="h-8 w-32 bg-gray-200 rounded animate-pulse"/>
+                </div>
+                <div className="grid grid-cols-7 gap-2 flex-1">
+                  {[...Array(35)].map((_,i) => <div key={i} className="bg-white rounded-lg h-24 animate-pulse border border-gray-100"/>)}
+                </div>
+              </div>
+            ) : (
+            <div className="flex flex-col h-full bg-gradient-to-br from-gray-50 to-blue-50">
 
               {/* Header */}
               <div className="px-6 py-4 bg-white border-b border-gray-200 flex items-center justify-between">
@@ -9506,6 +9613,7 @@ const PlanAssist = () => {
                 ))}
               </div>
             </div>
+            )
           );
         })()}
 
@@ -9573,7 +9681,7 @@ const PlanAssist = () => {
           const availableAgendas = agendas.filter(a => !a.finished);
 
           return (
-            <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable">
+            <div className="h-full overflow-y-auto scrollbar-stable">
             <div className="max-w-3xl mx-auto p-6">
               {/* Header with inline date navigation */}
               <div className="flex items-center justify-between mb-6">
@@ -9811,7 +9919,7 @@ const PlanAssist = () => {
           // Only show enabled courses on the Marks page
           const enabledCourses = courses.filter(c => c.enabled !== false);
           return (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full">
+          <div className="h-full overflow-y-auto scrollbar-stable w-full">
           <div className="max-w-6xl mx-auto p-6 relative">
               {/* Course Sync loading overlay for Marks page */}
               {courseSyncLoading && (
@@ -10064,7 +10172,7 @@ const PlanAssist = () => {
           );
         })()}
         {currentPage === 'account' && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
+          <div className="h-full overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
             {/* Header */}
             <div className="flex items-center gap-4 mb-6">
               <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-700 rounded-2xl flex items-center justify-center shadow-md">
@@ -11155,10 +11263,13 @@ const PlanAssist = () => {
                 {/* ── REWARDS TAB ── */}
                 {accountTab === 'rewards' && (() => {
                   const SPIN_PRIZES = [0, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 25, 30, 35, 40];
-                  // Use UTC date to match server — prevents timezone exploit
-                  const todayUTC = new Date().toISOString().slice(0, 10);
-                  const lastChestDate = rewardsStatus?.lastDailyChest ? String(rewardsStatus.lastDailyChest).slice(0,10) : null;
-                  const chestAvailable = lastChestDate !== todayUTC;
+                  // 24-hour cooldown — compare against the stored timestamp, server-authoritative
+                  const lastChestTs = rewardsStatus?.lastDailyChest ? new Date(rewardsStatus.lastDailyChest).getTime() : 0;
+                  const msElapsed = Date.now() - lastChestTs;
+                  const chestAvailable = !lastChestTs || msElapsed >= 24 * 60 * 60 * 1000;
+                  const chestMsRemaining = chestAvailable ? 0 : (24 * 60 * 60 * 1000 - msElapsed);
+                  const chestHrsLeft = Math.floor(chestMsRemaining / 3600000);
+                  const chestMinsLeft = Math.floor((chestMsRemaining % 3600000) / 60000);
                   const spinsAvailable = rewardsStatus?.spinsAvailable ?? 0;
                   const unclaimedReactions = rewardsStatus?.unclaimedReactions ?? 0;
                   const weeklyEntry = rewardsStatus?.weeklyEntry;
@@ -11290,11 +11401,11 @@ const PlanAssist = () => {
                           {chestAvailable && <span className="ml-auto bg-amber-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">Ready!</span>}
                         </div>
                         <p className="text-xs text-gray-400 mb-4">
-                          Open a chest once per day for a random amount of Credits (0–50). Resets at midnight UTC.
+                          Open a chest once every 24 hours for a random amount of Credits (0–50).
                         </p>
                         {lastChestPrize !== null && (
                           <div className={`mb-3 p-3 rounded-xl text-center font-bold ${lastChestPrize > 0 ? 'bg-amber-50 text-amber-700' : 'bg-gray-50 text-gray-500'}`}>
-                            {lastChestPrize > 0 ? `🎉 You got ${lastChestPrize} Credits!` : `Empty chest — come back tomorrow!`}
+                            {lastChestPrize > 0 ? `🎉 You got ${lastChestPrize} Credits!` : `Empty chest — try again in 24 hours!`}
                           </div>
                         )}
                         {chestAvailable ? (
@@ -11317,7 +11428,7 @@ const PlanAssist = () => {
                           </button>
                         ) : (
                           <div className="bg-gray-50 rounded-xl p-4 text-center">
-                            <p className="text-gray-400 text-sm">Already opened today. Come back tomorrow!</p>
+                            <p className="text-gray-400 text-sm">Next chest available in {chestHrsLeft}h {chestMinsLeft}m</p>
                           </div>
                         )}
                       </div>
@@ -11758,7 +11869,7 @@ const PlanAssist = () => {
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
         {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-[calc(100vh-73px)] overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
+          <div className="h-full overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
             <div className="flex items-center gap-3 mb-6">
               <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
                 <Shield className="w-6 h-6 text-white" />
@@ -11779,6 +11890,7 @@ const PlanAssist = () => {
                 { id: 'audit', label: 'Audit Log', icon: FileText },
                 { id: 'feedback', label: 'Feedback', icon: MessageSquare },
                 { id: 'help', label: 'Help Page', icon: HelpCircle },
+                { id: 'log', label: 'Log', icon: FileText },
               ].map(({ id, label, icon: Icon }) => (
                 <button
                   key={id}
@@ -11790,6 +11902,7 @@ const PlanAssist = () => {
                     if (id === 'announcements') loadAdminAnnouncements();
                     if (id === 'feedback') loadAdminFeedback();
                     if (id === 'help') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); }
+                    if (id === 'log') { apiCall('/admin/log').then(d => setAdminLogContent(d.content || '')); }
                     if (id === 'hpt') loadAdminHptUsers();
                   }}
                   className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
@@ -11846,6 +11959,8 @@ const PlanAssist = () => {
                         <option value="completions_asc">Fewest Completions</option>
                         <option value="health_desc">Healthiest First</option>
                         <option value="health_asc">Needs Attention First</option>
+                        <option value="credits_desc">Most Credits</option>
+                        <option value="credits_asc">Least Credits</option>
                       </select>
                     </div>
                     {/* Active filter summary */}
@@ -11901,6 +12016,8 @@ const PlanAssist = () => {
                             const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.round(Math.min(100,Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25))+(u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)))); };
                             return hs(a) - hs(b);
                           }
+                          case 'credits_desc': return (parseInt(b.credits) || 0) - (parseInt(a.credits) || 0);
+                          case 'credits_asc': return (parseInt(a.credits) || 0) - (parseInt(b.credits) || 0);
                           default: return (a.name || '').localeCompare(b.name || '');
                         }
                       };
@@ -12628,24 +12745,69 @@ const PlanAssist = () => {
                 <div className="flex items-center justify-between mb-4">
                   <div>
                     <h3 className="font-bold text-gray-900">User Feedback & Bug Reports</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">{adminFeedback.length} submission{adminFeedback.length !== 1 ? 's' : ''}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">{adminFeedback.length} submission{adminFeedback.length !== 1 ? 's' : ''} · {adminFeedback.filter(f => !f.checked).length} unchecked</p>
                   </div>
                   <button onClick={loadAdminFeedback} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh</button>
                 </div>
                 <div className="space-y-3 max-h-[600px] overflow-y-auto">
                   {adminFeedback.length === 0 && <p className="text-gray-400 text-sm">No feedback submitted yet.</p>}
                   {adminFeedback.map(fb => (
-                    <div key={fb.id} className="p-4 bg-gray-50 rounded-xl border border-gray-100">
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-sm text-gray-900">{fb.user_name || '(unknown)'}</span>
-                          <span className="text-xs text-gray-400">{fb.user_email}</span>
+                    <div key={fb.id} className={`p-4 rounded-xl border transition-colors ${fb.checked ? 'bg-green-50 border-green-200 opacity-70' : 'bg-gray-50 border-gray-100'}`}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 flex-1 min-w-0">
+                          <button
+                            onClick={async () => {
+                              const newVal = !fb.checked;
+                              try {
+                                await apiCall(`/admin/feedback/${fb.id}/checked`, 'PATCH', { checked: newVal });
+                                setAdminFeedback(prev => prev.map(f => f.id === fb.id ? { ...f, checked: newVal } : f));
+                              } catch (err) { alert('Failed to update: ' + err.message); }
+                            }}
+                            className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${fb.checked ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}
+                            title={fb.checked ? 'Mark unchecked' : 'Mark checked'}
+                          >
+                            {fb.checked && <Check className="w-3 h-3 text-white" />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-sm text-gray-900">{fb.user_name || '(unknown)'}</span>
+                              <span className="text-xs text-gray-400">{fb.user_email}</span>
+                            </div>
+                            <p className={`text-sm whitespace-pre-wrap leading-relaxed ${fb.checked ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{fb.feedback_text}</p>
+                          </div>
                         </div>
                         <span className="text-xs text-gray-400 flex-shrink-0">{new Date(fb.created_at).toLocaleString()}</span>
                       </div>
-                      <p className="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{fb.feedback_text}</p>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* ── ADMIN LOG ── */}
+            {adminSection === 'log' && (
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="font-bold text-gray-900">Admin Log</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">Shared notes, tasks, and issues for admins. Auto-saves when you click Save.</p>
+                  </div>
+                </div>
+                <textarea
+                  value={adminLogContent}
+                  onChange={e => setAdminLogContent(e.target.value)}
+                  placeholder="Track tasks, issues, notes, and anything else here. This document is shared across all admins."
+                  className="w-full h-[500px] px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:ring-2 focus:ring-red-500 font-mono"
+                />
+                <div className="flex justify-between items-center mt-3">
+                  <p className="text-xs text-gray-400">{adminLogContent.length} characters</p>
+                  <button
+                    onClick={saveAdminLog}
+                    disabled={adminLogSaving}
+                    className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
+                  >
+                    {adminLogSaving ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : 'Save Log'}
+                  </button>
                 </div>
               </div>
             )}
@@ -12929,7 +13091,7 @@ const PlanAssist = () => {
           title = 'Time Estimation Accuracy';
           color = 'green';
           icon = <Target className="w-5 h-5 text-green-600" />;
-          const recentWithBoth = tasksWithBoth.slice(-10).reverse();
+          const recentWithBoth = tasksWithBoth.slice(0, 10).reverse();
           content = tasksWithBoth.length === 0
             ? <p className="text-gray-500 text-sm">No data yet — accuracy is calculated once you have tasks with both an estimated and actual time.</p>
             : <>
@@ -13556,12 +13718,12 @@ const PlanAssist = () => {
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           {[
-                            { id: 'rain',       label: '🌧️ Rainfall',   desc: 'Layered rain with gust swells' },
-                            { id: 'ocean',      label: '🌊 Ocean Waves', desc: 'Alternating swells, sub-bass' },
-                            { id: 'forest',     label: '🌲 Forest',      desc: 'Stream, wind & insects' },
-                            { id: 'brown',      label: '🎵 Brown Noise', desc: 'Warm low-end hum' },
-                            { id: 'pink',       label: '💗 Pink Noise',  desc: 'Balanced, wide-spectrum' },
-                            { id: 'whitenoise', label: '📻 White Noise', desc: 'Full-spectrum static' }
+                            { id: 'whitenoise',  label: '📻 White Noise',        desc: 'Full-spectrum static' },
+                            { id: 'rain',        label: '🌧️ Gentle Rain',        desc: 'Layered rain with gust swells' },
+                            { id: 'ocean',       label: '🌊 Ocean Pulses',        desc: 'Alternating swells, sub-bass' },
+                            { id: 'nature',      label: '🌲 Nature Sounds',       desc: 'Stream, wind & insects' },
+                            { id: 'distortion',  label: '🎸 Focused Distortion', desc: 'Ambient guitar texture' },
+                            { id: 'ambience',    label: '✨ Ambience',            desc: 'Soft atmospheric pad' },
                           ].map(sound => (
                             <button
                               key={sound.id}
