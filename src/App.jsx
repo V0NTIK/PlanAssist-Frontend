@@ -2923,22 +2923,12 @@ const PlanAssist = () => {
 
   // ── Zoom Ping — Document PiP notification when a Zoom period starts ────────
   const launchZoomPing = (zoomNumber, isTutorial, theme) => {
-    if (typeof window.documentPictureInPicture === 'undefined') return;
-    // Close any existing PiP without triggering Save & Exit
-    pipIntentionalCloseRef.current = true;
-    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
-    pipWindowRef.current = null;
-    pipIntentionalCloseRef.current = false;
-    setPipActive(false);
-
-    // Play a distinctive alarm-like tone sequence using Web Audio API (no file dependency)
-    // Stops when the user dismisses. Stored in ref so dismiss can cancel it.
+    // Play alarm sound first — independent of PiP support
     if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
     if (pingSoundEnabled) (() => {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         let stopped = false;
-        // Two-tone ascending alarm: 880Hz → 1100Hz, repeating
         const playAlarm = () => {
           if (stopped) return;
           const tones = [880, 1100, 880, 1100];
@@ -2957,15 +2947,25 @@ const PlanAssist = () => {
             osc.stop(t + 0.22);
             t += 0.25;
           });
-          // Pause then repeat
           const loopId = setTimeout(playAlarm, tones.length * 250 + 600);
           ctx.__loopId = loopId;
         };
         playAlarm();
-        // Expose stop mechanism via ref
         zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
       } catch(e) { zoomPingAudioRef.current = null; }
     })();
+
+    // Auto-dismiss banner after 3 minutes
+    setTimeout(() => setZoomBanner(null), 3 * 60 * 1000);
+
+    // PiP window — only on supported browsers (Chrome). Sound already started above.
+    if (typeof window.documentPictureInPicture === 'undefined') return;
+    // Close any existing PiP without triggering Save & Exit
+    pipIntentionalCloseRef.current = true;
+    if (pipWindowRef.current) { try { pipWindowRef.current.close(); } catch(e){} }
+    pipWindowRef.current = null;
+    pipIntentionalCloseRef.current = false;
+    setPipActive(false);
 
     const t = getPipTheme(theme);
     const bg   = `linear-gradient(135deg,${t.grad1},${t.grad2})`;
