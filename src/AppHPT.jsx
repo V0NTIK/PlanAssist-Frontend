@@ -798,10 +798,17 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const [hubData, setHubData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [statModal, setStatModal] = React.useState(null); // 'today'|'week'|'studytime'|'accuracy'|'streak'
+  const [insightIndex, setInsightIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   const load = React.useCallback(async () => {
     try {
-      const d = await apiCall('/hpt/hub', 'GET', null, token);
+      const localDate = new Date().toLocaleDateString('en-CA');
+      const d = await apiCall(`/hpt/hub?date=${localDate}`, 'GET', null, token);
       if (d && d.error) {
         console.error('[HPT HUB] server error:', d.error, d.details || '');
       } else {
@@ -2145,12 +2152,6 @@ export default function AppHPT({ onBack }) {
   ];
 
   const [darkMode, setDarkMode] = React.useState(() => localStorage.getItem('planassist-hpt-dark') === 'true');
-  const [insightIndex, setInsightIndex] = React.useState(0);
-
-  React.useEffect(() => {
-    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   // Full dark theme matching regular PlanAssist's Dark colour theme exactly
   React.useEffect(() => {
@@ -2333,6 +2334,26 @@ export default function AppHPT({ onBack }) {
       .planassist-hpt .prose { color: #9fa8c8 !important; }
       .planassist-hpt .prose h1, .planassist-hpt .prose h2, .planassist-hpt .prose h3 { color: #e8eaf6 !important; }
       .planassist-hpt .bg-white.text-blue-600 { background-color: #e8eaf6 !important; color: #1565c0 !important; }
+      /* ── Additional tokens ───────────────────────────────── */
+      .planassist-hpt .bg-blue-600 { background-color: #2979ff !important; }
+      .planassist-hpt .bg-green-400 { background-color: #388e3c !important; }
+      .planassist-hpt .bg-green-500 { background-color: #2e7d32 !important; }
+      .planassist-hpt .bg-red-600 { background-color: #c62828 !important; }
+      .planassist-hpt .bg-opacity-40 { background-color: rgba(0,0,0,0.55) !important; }
+      .planassist-hpt .bg-gradient-to-r { background-image: linear-gradient(90deg, var(--tw-gradient-from), var(--tw-gradient-to)) !important; }
+      .planassist-hpt .from-yellow-400 { --tw-gradient-from: #b8860b !important; }
+      .planassist-hpt .from-yellow-500 { --tw-gradient-from: #9a7200 !important; }
+      .planassist-hpt .to-purple-700 { --tw-gradient-to: #651fff !important; }
+      .planassist-hpt .text-amber-500 { color: #ffca28 !important; }
+      .planassist-hpt .text-gray-200 { color: #1e2048 !important; }
+      .planassist-hpt .text-indigo-400 { color: #7986cb !important; }
+      .planassist-hpt .text-indigo-700 { color: #b3baf5 !important; }
+      .planassist-hpt .text-orange-600 { color: #ffb74d !important; }
+      .planassist-hpt .text-purple-500 { color: #7e57c2 !important; }
+      .planassist-hpt .text-red-500 { color: #e57373 !important; }
+      .planassist-hpt .text-yellow-100 { color: #fff9c4 !important; }
+      .planassist-hpt .text-yellow-200 { color: #fff176 !important; }
+      .planassist-hpt .border-orange-100 { border-color: #221610 !important; }
       ` : ''}
     `;
     document.documentElement.style.colorScheme = d ? 'dark' : 'light';
