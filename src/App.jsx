@@ -887,6 +887,12 @@ const PlanAssist = () => {
   const [completionSoundEnabled, setCompletionSoundEnabled] = useState(
     () => localStorage.getItem('planassist-completion-sound') !== 'false'
   );
+  const [pingSoundEnabled, setPingSoundEnabled] = useState(
+    () => localStorage.getItem('planassist-ping-sound') !== 'false'
+  );
+  const [profileModal, setProfileModal] = useState(null); // { userId, name } | null
+  const [profileModalData, setProfileModalData] = useState(null); // fetched profile data
+  const [profileModalLoading, setProfileModalLoading] = useState(false);
   const [isWhiteNoisePlaying, setIsWhiteNoisePlaying] = useState(false);
   
   // ── Count-up wall-clock timer for sessions ─────────────────────────────
@@ -2912,7 +2918,7 @@ const PlanAssist = () => {
     // Play a distinctive alarm-like tone sequence using Web Audio API (no file dependency)
     // Stops when the user dismisses. Stored in ref so dismiss can cancel it.
     if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
-    (() => {
+    if (pingSoundEnabled) (() => {
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         let stopped = false;
@@ -3053,7 +3059,8 @@ const PlanAssist = () => {
       };
       pipWin.document.getElementById('dismiss-btn').addEventListener('click', dismiss);
 
-      // Looping buzz sound — two-tone square wave, every 2 seconds
+      // Looping buzz sound — two-tone square wave, every 2 seconds (only if ping sounds enabled)
+      if (pingSoundEnabled) {
       const buzzScript = pipWin.document.createElement('script');
       buzzScript.textContent = '(function(){' +
         'const ctx=new(window.AudioContext||window.webkitAudioContext)();' +
@@ -3076,6 +3083,7 @@ const PlanAssist = () => {
         'window.addEventListener("pagehide",function(){clearInterval(id);});' +
       '})();';
       pipWin.document.body.appendChild(buzzScript);
+      } // end pingSoundEnabled
 
       pipWin.addEventListener('pagehide', () => {
         if (pipIntentionalCloseRef.current) return;
@@ -5352,6 +5360,8 @@ const PlanAssist = () => {
   };
 
   const INSIGNIA_KEYFRAMES = `
+    /* ── Fade-in to hide background-clip:text paint flash on first render ── */
+    @keyframes ins-fadein { from { opacity:0 } to { opacity:1 } }
     /* ── Earned tier animations ─────────────────────────────────────── */
     @keyframes ins-sweep { 0%{background-position:0% center} 100%{background-position:300% center} }
     @keyframes ins-obsidian-shift { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
@@ -5660,7 +5670,7 @@ const PlanAssist = () => {
 
     // ── All other tiers: single span with CSS class ───────────────────────
     return (
-      <span className={s.animClass || ''} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block', ...rest }}>
+      <span className={s.animClass || ''} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block', animation: `ins-fadein 0.15s ease-out${s.animClass ? '' : ''}`, ...rest }}>
         {name}
       </span>
     );
@@ -5989,6 +5999,20 @@ const PlanAssist = () => {
       setCompletionFeed(data || []);
     } catch (error) {
       // Silently ignore - backend may be cold-starting on Render free tier
+    }
+  };
+
+  const openProfile = async (userId, displayName) => {
+    setProfileModal({ userId, name: displayName });
+    setProfileModalData(null);
+    setProfileModalLoading(true);
+    try {
+      const data = await apiCall(`/users/${userId}/profile`, 'GET');
+      setProfileModalData(data);
+    } catch (err) {
+      setProfileModalData({ error: err.message || 'Profile unavailable' });
+    } finally {
+      setProfileModalLoading(false);
     }
   };
 
@@ -6893,6 +6917,61 @@ const PlanAssist = () => {
       )}
 
       {/* Insignia unlock toast */}
+
+      {/* ── User Profile Modal ───────────────────────────────────────── */}
+      {profileModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setProfileModal(null)}>
+          <div className="absolute inset-0 bg-black bg-opacity-40" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setProfileModal(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl">✕</button>
+            {profileModalLoading ? (
+              <div className="flex flex-col items-center py-8 gap-3">
+                <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-gray-500">Loading profile…</p>
+              </div>
+            ) : profileModalData?.error ? (
+              <div className="text-center py-8">
+                <p className="text-gray-500 text-sm">{profileModalData.error === 'Profile is private' ? '🔒 This profile is private.' : 'Profile unavailable.'}</p>
+              </div>
+            ) : profileModalData ? (
+              <div className="space-y-4">
+                <div className="flex flex-col items-center gap-2 pb-4 border-b border-gray-100">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-2xl font-bold">
+                    {profileModalData.name?.charAt(0) || '?'}
+                  </div>
+                  <div className="text-center">
+                    {renderInsigniaName(profileModalData.name, profileModalData.insignia, { fontSize:'1.1rem', fontWeight:700 })}
+                    <p className="text-xs text-gray-400 mt-1">{profileModalData.grade ? `Grade ${profileModalData.grade}` : ''}{profileModalData.grade && profileModalData.campus ? ' · ' : ''}{profileModalData.campus || ''}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  {[
+                    { label: 'Tasks Done', value: profileModalData.totalCompletions ?? 0 },
+                    { label: 'This Week', value: profileModalData.weeklyCompletions ?? 0 },
+                    { label: 'Badges', value: profileModalData.badgeCount ?? 0 },
+                  ].map(s => (
+                    <div key={s.label} className="bg-gray-50 rounded-xl p-3">
+                      <p className="text-lg font-bold text-gray-900">{s.value}</p>
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wide">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+                {profileModalData.badges?.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Recent Badges</p>
+                    <div className="flex flex-wrap gap-2">
+                      {profileModalData.badges.slice(0,6).map(b => (
+                        <span key={b.badge_key} className="bg-purple-50 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full border border-purple-200">{b.badge_key.replace(/_/g,' ')}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
       {insigniaNewUnlock && (
         <div className="fixed top-20 right-4 bg-purple-600 text-white px-5 py-3 rounded-xl shadow-xl text-sm z-50 flex items-center gap-2">
           🎉 New Insignia unlocked: <span className="font-bold">"{insigniaNewUnlock}"</span>
@@ -7433,12 +7512,14 @@ const PlanAssist = () => {
                         const REACTION_EMOJIS = ['👏','⚡','🔥','💯','🎯'];
                         return (
                           <div key={item.id || index} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
-                            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0">
+                            <div onClick={() => item.user_id && openProfile(item.user_id, item.user_name)} className={`w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center flex-shrink-0 ${item.user_id ? 'cursor-pointer hover:opacity-80' : ''}`}>
                               <Check className="w-4 h-4 text-white" />
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm text-gray-900">
-                                {renderInsigniaName(item.user_name.split(' ')[0], feedInsignia, { fontSize:'0.875rem' })}
+                                <span onClick={() => item.user_id && openProfile(item.user_id, item.user_name)} className={item.user_id ? 'cursor-pointer hover:opacity-70' : ''}>
+                                  {renderInsigniaName(item.user_name.split(' ')[0], feedInsignia, { fontSize:'0.875rem' })}
+                                </span>
                                 {item.user_grade && <span className="text-gray-500"> (Grade {item.user_grade})</span>}
                                 {' '}<span className="text-gray-600">completed</span>{' '}
                                 <span className="font-medium text-purple-600">{item.task_title}</span>
@@ -7557,10 +7638,11 @@ const PlanAssist = () => {
                           return (
                             <div 
                               key={index} 
+                              onClick={() => !isCurrentUser && entry.user_id && openProfile(entry.user_id, entry.user_name)}
                               className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
                                 isCurrentUser 
                                   ? 'bg-purple-100 border-2 border-purple-300' 
-                                  : 'bg-gray-50 hover:bg-gray-100'
+                                  : 'bg-gray-50 hover:bg-gray-100 cursor-pointer'
                               }`}
                             >
                               <div className="w-8 text-center font-bold text-gray-900">
@@ -10660,6 +10742,20 @@ const PlanAssist = () => {
                                   <p className="text-xs text-gray-500 mt-1">When enabled, other students will see when you complete tasks on the Hub page. Only your name and grade are shown.</p>
                                 </div>
                               </div>
+                              <div className="border-t border-gray-100 pt-4 flex items-start gap-3">
+                                <input type="checkbox" checked={user?.profilePublic !== false}
+                                  onChange={async (e) => {
+                                    const newVal = e.target.checked;
+                                    setUser(prev => ({ ...prev, profilePublic: newVal }));
+                                    try { await apiCall('/user/profile-public', 'PUT', { profilePublic: newVal }); }
+                                    catch (err) { setUser(prev => ({ ...prev, profilePublic: !newVal })); console.error(err); }
+                                  }}
+                                  className="mt-1 w-4 h-4 text-purple-600 rounded focus:ring-purple-500" />
+                                <div>
+                                  <p className="font-medium text-gray-900">Allow others to view my profile</p>
+                                  <p className="text-xs text-gray-500 mt-1">When enabled, other students can click your name in the Live Feed or Leaderboard to view your profile — including your streak, badges, and grade.</p>
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -10702,7 +10798,7 @@ const PlanAssist = () => {
                           {/* Sounds */}
                           <div>
                             <h3 className="text-sm font-semibold text-gray-700 mb-3">Sounds</h3>
-                            <div className="border border-gray-200 rounded-xl p-4">
+                            <div className="border border-gray-200 rounded-xl p-4 space-y-4">
                               <div className="flex items-center justify-between gap-3">
                                 <div>
                                   <p className="font-medium text-gray-900 text-sm">Task completion sound</p>
@@ -10717,6 +10813,22 @@ const PlanAssist = () => {
                                   className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${completionSoundEnabled ? 'bg-purple-600' : 'bg-gray-200'}`}
                                 >
                                   <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${completionSoundEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </button>
+                              </div>
+                              <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-gray-900 text-sm">Ping sounds</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">Plays an alarm tone when a Zoom Ping or Agenda Ping is triggered.</p>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    const next = !pingSoundEnabled;
+                                    setPingSoundEnabled(next);
+                                    localStorage.setItem('planassist-ping-sound', String(next));
+                                  }}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${pingSoundEnabled ? 'bg-purple-600' : 'bg-gray-200'}`}
+                                >
+                                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${pingSoundEnabled ? 'translate-x-5' : 'translate-x-0'}`} />
                                 </button>
                               </div>
                             </div>
@@ -13720,8 +13832,8 @@ const PlanAssist = () => {
                             { id: 'rain',        label: '🌧️ Gentle Rain',        desc: 'Layered rain with gust swells' },
                             { id: 'ocean',       label: '🌊 Ocean Pulses',        desc: 'Alternating swells, sub-bass' },
                             { id: 'nature',      label: '🌲 Nature Sounds',       desc: 'Stream, wind & insects' },
-                            { id: 'distortion',  label: '🎸 Focused Distortion', desc: 'Ambient guitar texture' },
-                            { id: 'ambience',    label: '✨ Ambience',            desc: 'Soft atmospheric pad' },
+                            { id: 'distortion',  label: '🎸 Focused Distortion', desc: 'Deep, cryptic industrial noises' },
+                            { id: 'ambience',    label: '✨ Ambience',            desc: 'Coffee shop / busy office background' },
                           ].map(sound => (
                             <button
                               key={sound.id}
