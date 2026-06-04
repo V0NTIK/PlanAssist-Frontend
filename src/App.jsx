@@ -703,6 +703,7 @@ const PlanAssist = () => {
   const pipSessionActiveRef = React.useRef(false); // true while session/agenda is running — synchronous, no render lag
   const pipIntentionalCloseRef = React.useRef(false); // set true just before WE close the window, suppresses pagehide Save & Exit
   const zoomPingAudioRef = React.useRef(null);     // looping alert sound for Zoom Pings
+  const firedPeriodsRef = React.useRef({});         // tracks period+date keys already pinged today
 
   // ── Itinerary & Enhance Schedule state ───────────────────────────────────
   const [scheduleEnhanced, setScheduleEnhanced] = useState(false);
@@ -747,11 +748,17 @@ const PlanAssist = () => {
   const [newAnnouncementType, setNewAnnouncementType] = useState('info');
   const [banReason, setBanReason] = useState('');
   const [showBanDialog, setShowBanDialog] = useState(null);
+  const [showOptionsModal, setShowOptionsModal] = useState(null); // user object
+  const [optionsExpanded, setOptionsExpanded] = useState({}); // { auth, token, credits, features }
   const [editingUser, setEditingUser] = useState(null);
   const [adminHelpContent, setAdminHelpContent] = useState('');
   const [adminHelpSaving, setAdminHelpSaving] = useState(false);
   const [adminLogContent, setAdminLogContent] = useState('');
   const [adminLogSaving, setAdminLogSaving] = useState(false);
+  const [ipBlacklist, setIpBlacklist] = useState([]);
+  const [ipBlacklistLoading, setIpBlacklistLoading] = useState(false);
+  const [newIpAddress, setNewIpAddress] = useState('');
+  const [newIpReason, setNewIpReason] = useState('');
   const [adminHptUsers, setAdminHptUsers] = useState([]);
   const [adminSelectedHptUser, setAdminSelectedHptUser] = useState(null);
   const [hptLoading, setHptLoading] = useState(false);
@@ -1889,6 +1896,15 @@ const PlanAssist = () => {
     } finally {
       setAdminLogSaving(false);
     }
+  };
+
+  const loadIpBlacklist = async () => {
+    setIpBlacklistLoading(true);
+    try {
+      const data = await apiCall('/admin/ip-blacklist', 'GET');
+      setIpBlacklist(Array.isArray(data) ? data : []);
+    } catch (err) { console.error('Failed to load IP blacklist:', err.message); }
+    finally { setIpBlacklistLoading(false); }
   };
 
   // OSG GPA scale: score → GPA points
@@ -4546,7 +4562,7 @@ const PlanAssist = () => {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [isTimerRunning, currentSessionTask, sessionElapsed, agendaRunning]);
 
-  // Feature 1: Period Zoom banner — check every 30s if a period is starting within 2 min or started within 5 min
+  // Feature 1: Period Zoom banner — check every 30s if a period is starting within 1 min
   useEffect(() => {
     if (!isAuthenticated || !accountSetup.campus) return;
     const PERIOD_TIMES_UTC = {
@@ -4557,19 +4573,27 @@ const PlanAssist = () => {
     const check = () => {
       const now = new Date();
       const nowUTCMins = now.getUTCHours() * 60 + now.getUTCMinutes();
-      // Use server-authoritative tzPeriods (UTC-based DST) for period range
+      const todayStr = now.toISOString().slice(0, 10);
+      // Reset fired log at midnight UTC
+      const firedKeys = firedPeriodsRef.current;
+      if (firedKeys.__date !== todayStr) {
+        firedPeriodsRef.current = { __date: todayStr };
+      }
       const periodRange = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus);
       const [rangeStart, rangeEnd] = periodRange.split('-').map(Number);
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
         const period = parseInt(p);
         if (period < rangeStart || period > rangeEnd) continue;
         const periodMins = t.h * 60 + t.m;
-        const diff = periodMins - nowUTCMins; // negative = period already started
-        // Show banner from period start up to 1 minute after start (0/+1 window)
+        const diff = periodMins - nowUTCMins;
+        // Window: 0 to 1 minute before period start
         if (diff >= 0 && diff <= 1) {
-          const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
-          const tutorial = tutorials[`${todayStr}-${period}`];
+          const key = `${todayStr}-${period}`;
+          // Skip if already fired for this period today
+          if (firedPeriodsRef.current[key]) break;
+          firedPeriodsRef.current[key] = true;
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+          const tutorial = tutorials[`${todayStr}-${period}`];
           const lesson = scheduleLessons.find(sl => sl.day === todayName && sl.period === period);
           const zoomNumber = tutorial?.zoom_number || lesson?.zoom_number || null;
           if (zoomNumber) {
@@ -4580,8 +4604,8 @@ const PlanAssist = () => {
         }
       }
     };
-    check(); // run immediately on mount / when deps change
-    const interval = setInterval(check, 30000); // check every 30s for tighter window
+    // Do NOT run immediately — only on interval to prevent stale firings on dep changes
+    const interval = setInterval(check, 30000);
     return () => clearInterval(interval);
   }, [isAuthenticated, accountSetup.campus, scheduleLessons, tutorials]);
 
@@ -6888,7 +6912,7 @@ const PlanAssist = () => {
               className="bg-white text-blue-600 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
               Join Zoom
             </a>
-            <button onClick={() => setZoomBanner(null)} className="text-blue-200 hover:text-white"><X className="w-5 h-5" /></button>
+            <button onClick={() => { setZoomBanner(null); if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} zoomPingAudioRef.current = null; } }} className="text-blue-200 hover:text-white"><X className="w-5 h-5" /></button>
           </div>
         </div>
       )}
@@ -12007,7 +12031,7 @@ const PlanAssist = () => {
                   onClick={() => {
                     setAdminSection(id);
                     if (id === 'users' && adminUsers.length === 0) loadAdminUsers();
-                    if (id === 'diagnostics') loadAdminDiagnostics();
+                    if (id === 'diagnostics') { loadAdminDiagnostics(); loadIpBlacklist(); }
                     if (id === 'audit') loadAdminAuditLog();
                     if (id === 'announcements') loadAdminAnnouncements();
                     if (id === 'feedback') loadAdminFeedback();
@@ -12224,45 +12248,9 @@ const PlanAssist = () => {
                               <button onClick={() => setEditingUser(u.id)} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1">
                                 <Edit2 className="w-3.5 h-3.5" />Edit
                               </button>
-                              <button onClick={() => adminClearToken(u.id)} className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 flex items-center gap-1">
-                                <X className="w-3.5 h-3.5" />Clear Token
+                              <button onClick={() => { setShowOptionsModal(u); setOptionsExpanded({}); }} className="text-xs px-3 py-1.5 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 flex items-center gap-1">
+                                <Settings className="w-3.5 h-3.5" />Options
                               </button>
-                              <button onClick={async () => {
-                                try {
-                                  const r = await apiCall(`/admin/users/${u.id}/grant-shield`, 'POST', {});
-                                  alert(`✅ Shield granted to ${u.name}. They now have ${r.shields} shield(s).`);
-                                  loadAdminUsers();
-                                } catch (err) { alert('Failed: ' + err.message); }
-                              }} className="text-xs px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 flex items-center gap-1">
-                                🛡️ Grant Shield {u.streak_shields_available > 0 && <span className="ml-1 font-bold">({u.streak_shields_available})</span>}
-                              </button>
-                              {u.is_banned ? (
-                                <button onClick={() => adminUnbanUser(u.id)} className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 flex items-center gap-1">
-                                  <UserCheck className="w-3.5 h-3.5" />Unblock
-                                </button>
-                              ) : (
-                                <button onClick={() => setShowBanDialog(u.id)} className="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center gap-1">
-                                  <Ban className="w-3.5 h-3.5" />Block Account
-                                </button>
-                              )}
-                              {/* Hacked PlanAssist insignia grant/revoke */}
-                              {(adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist') ? (
-                                <button onClick={async () => {
-                                  if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
-                                  try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
-                                  catch (err) { alert('Failed: ' + err.message); }
-                                }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
-                                  ⚠ Revoke Hack
-                                </button>
-                              ) : (
-                                <button onClick={async () => {
-                                  if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}?`)) return;
-                                  try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ Granted to ${u.name}.`); }
-                                  catch (err) { alert('Failed: ' + err.message); }
-                                }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
-                                  ⚠ Grant Hack
-                                </button>
-                              )}
                             </div>
                           )}
 
@@ -12272,21 +12260,6 @@ const PlanAssist = () => {
                             </p>
                           )}
                         </div>
-
-                        {/* Credits */}
-                        <AdminCreditsCard
-                          user={u}
-                          onSetCredits={amount => adminSetCredits(u.id, amount)}
-                          onAdjustCredits={(delta, reason) => adminAdjustCredits(u.id, delta, reason)}
-                        />
-
-                        {/* Canvas Token */}
-                        <AdminTokenCard
-                          user={u}
-                          onViewToken={() => adminViewCanvasToken(u.id)}
-                          onSetToken={token => adminSetCanvasToken(u.id, token)}
-                          onClearToken={() => adminClearToken(u.id)}
-                        />
 
                         {/* Tasks */}
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -12430,86 +12403,64 @@ const PlanAssist = () => {
             {/* ── DIAGNOSTICS ── */}
             {adminSection === 'diagnostics' && (
               <div className="space-y-6">
-
                 {adminLoading && <div className="text-center py-10 text-gray-400">Loading diagnostics...</div>}
                 {adminDiagnostics && (() => {
                   const d = adminDiagnostics;
                   return (
                     <div className="space-y-5">
-                      {/* New user signups */}
+
+                      {/* 1. New Signups */}
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                           <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
                           New Signups — Last 3 Days ({d.newUsers.length})
                         </h4>
                         {d.newUsers.length === 0 && <p className="text-gray-400 text-sm">No new signups</p>}
-                        <div className="space-y-1.5">
-                          {d.newUsers.map(u => (
-                            <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded-lg">
-                              <div>
+                        <div className={`space-y-1.5 ${d.newUsers.length > 10 ? 'max-h-64 overflow-y-auto' : ''}`}>
+                          {d.newUsers.slice(0, 10).map(u => (
+                            <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded-lg gap-2">
+                              <div className="min-w-0">
                                 <span className="font-semibold text-gray-800">{u.name || '(unnamed)'}</span>
                                 <span className="text-gray-500 ml-2">{u.email}</span>
                               </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-400">Gr {u.grade || '?'}</span>
-                                {u.is_new_user && <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-xs font-medium">Setup pending</span>}
-                                <span className="text-gray-400">{new Date(u.created_at).toLocaleDateString()}</span>
+                              <div className="flex items-center gap-2 flex-shrink-0 flex-wrap justify-end">
+                                <span className="text-gray-500">Gr {u.grade || '?'}</span>
+                                <span className="text-gray-400">{u.campus || '—'}</span>
+                                {u.is_new_user && <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">Setup pending</span>}
+                                <span className="text-gray-400">{new Date(u.created_at).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' })}</span>
                               </div>
                             </div>
                           ))}
+                          {d.newUsers.length > 10 && <p className="text-xs text-gray-400 text-center pt-1">+ {d.newUsers.length - 10} more</p>}
                         </div>
                       </div>
 
-                      {/* Grade stats */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3">Completion Stats by Grade</h4>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          {d.gradeStats.map(g => (
-                            <div key={g.grade} className="p-3 bg-gray-50 rounded-lg text-center">
-                              <p className="text-lg font-bold text-purple-600">Grade {g.grade}</p>
-                              <p className="text-xs text-gray-500">{g.user_count} users</p>
-                              <p className="text-sm font-semibold text-gray-700">{g.total_completions} completions</p>
-                              <p className="text-xs text-gray-400">Avg {g.avg_actual_min}m actual / {g.avg_estimated_min}m est</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* No token */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                          No Canvas Token ({d.noToken.length})
-                        </h4>
-                        {d.noToken.length === 0 && <p className="text-green-600 text-sm">All set up ✓</p>}
-                        <div className="space-y-1.5">
-                          {d.noToken.map(u => (
-                            <div key={u.id} className="flex justify-between text-xs p-2 bg-yellow-50 rounded-lg">
-                              <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
-                              <span className="text-gray-400">Gr {u.grade}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Stale syncs */}
+                      {/* 2. Stale Syncs */}
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                         <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                           <AlertTriangle className="w-4 h-4 text-orange-500" />
                           Stale Syncs — No activity in 7+ days ({d.staleSyncs.length})
                         </h4>
                         {d.staleSyncs.length === 0 && <p className="text-green-600 text-sm">All users syncing ✓</p>}
-                        <div className="space-y-1.5">
-                          {d.staleSyncs.map(u => (
-                            <div key={u.id} className="flex justify-between text-xs p-2 bg-orange-50 rounded-lg">
-                              <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
-                              <span className="text-gray-400">{u.last_sync ? new Date(u.last_sync).toLocaleDateString() : 'never'}</span>
+                        <div className={`space-y-1.5 ${d.staleSyncs.length > 10 ? 'max-h-64 overflow-y-auto' : ''}`}>
+                          {d.staleSyncs.slice(0, 10).map(u => (
+                            <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-orange-50 rounded-lg gap-2">
+                              <div className="min-w-0">
+                                <span className="font-semibold text-gray-800">{u.name}</span>
+                                <span className="text-gray-500 ml-2">{u.email}</span>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-gray-400">{u.campus || '—'}</span>
+                                <span className="text-gray-400">Gr {u.grade}</span>
+                                <span className="text-orange-600 font-medium">{u.last_sync ? new Date(u.last_sync).toLocaleDateString() : 'never synced'}</span>
+                              </div>
                             </div>
                           ))}
+                          {d.staleSyncs.length > 10 && <p className="text-xs text-gray-400 text-center pt-1">+ {d.staleSyncs.length - 10} more</p>}
                         </div>
                       </div>
 
-                      {/* Duplicates */}
+                      {/* 3. Duplicate Tasks */}
                       {d.duplicates.length > 0 && (
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                           <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
@@ -12528,28 +12479,25 @@ const PlanAssist = () => {
                         </div>
                       )}
 
-                      {/* Bad tasks */}
-                      {d.badTasks.length > 0 && (
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                            Tasks Missing Deadlines ({d.badTasks.length})
-                          </h4>
-                          <div className="space-y-1.5">
-                            {d.badTasks.map(t => (
-                              <div key={t.id} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
-                                <span className="font-medium text-gray-800">{t.title}</span>
-                                <span className="text-gray-400">{t.user_name} · Gr {t.grade}</span>
-                              </div>
-                            ))}
-                          </div>
+                      {/* 4. Completion Stats by Grade */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-3">Completion Stats by Grade</h4>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                          {d.gradeStats.map(g => (
+                            <div key={g.grade} className="p-3 bg-gray-50 rounded-lg text-center">
+                              <p className="text-lg font-bold text-purple-600">Grade {g.grade}</p>
+                              <p className="text-xs text-gray-500">{g.user_count} users</p>
+                              <p className="text-sm font-semibold text-gray-700">{g.total_completions} completions</p>
+                              <p className="text-xs text-gray-400">Avg {g.avg_actual_min}m / {g.avg_estimated_min}m est</p>
+                            </div>
+                          ))}
                         </div>
-                      )}
+                      </div>
 
-                      {/* Activity Heatmap — time-of-day across all days */}
+                      {/* 5. Activity Heatmap */}
                       {d.activityHeatmap && (
                         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-bold text-gray-900 mb-3">Activity Heatmap — Time of Day (your local time, all days combined)</h4>
+                          <h4 className="font-bold text-gray-900 mb-3">Activity Heatmap — Time of Day (all days combined)</h4>
                           <div className="flex items-end gap-1 h-20">
                             {d.activityHeatmap.map((bucket) => {
                               const max = Math.max(...d.activityHeatmap.map(b => b.count), 1);
@@ -12565,18 +12513,38 @@ const PlanAssist = () => {
                         </div>
                       )}
 
-                      {/* Bulk Actions */}
+                      {/* 6. Blacklisted IPs */}
                       <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3">Bulk Actions</h4>
-                        <button onClick={async () => {
-                          if (!window.confirm('Grant a Streak Shield to ALL users?')) return;
-                          try {
-                            const r = await apiCall('/admin/grant-shields-all', 'POST', {});
-                            alert(`✅ Granted shields to ${r.affected} users.`);
-                          } catch (err) { alert('Failed: ' + err.message); }
-                        }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold transition-colors">
-                          🛡️ Grant Streak Shield to All Users
-                        </button>
+                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-red-500" />
+                          Blacklisted IPs
+                          <button onClick={loadIpBlacklist} className="ml-auto text-xs text-gray-400 hover:text-gray-600 underline font-normal">Refresh</button>
+                        </h4>
+                        {ipBlacklistLoading ? (
+                          <div className="flex justify-center py-4"><div className="w-5 h-5 border-2 border-red-500 border-t-transparent rounded-full animate-spin"/></div>
+                        ) : ipBlacklist.length === 0 ? (
+                          <p className="text-gray-400 text-sm">No IPs currently blocked.</p>
+                        ) : (
+                          <div className={`space-y-1.5 ${ipBlacklist.length > 10 ? 'max-h-64 overflow-y-auto' : ''}`}>
+                            {ipBlacklist.map(entry => (
+                              <div key={entry.id} className="flex items-center justify-between text-xs p-2 bg-red-50 rounded-lg gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <code className="font-bold text-red-700 flex-shrink-0">{entry.ip_address}</code>
+                                  {entry.reason && <span className="text-gray-500 truncate">{entry.reason}</span>}
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  <span className="text-gray-400">{entry.blocked_by_name || 'Admin'}</span>
+                                  <span className="text-gray-400">{new Date(entry.created_at).toLocaleDateString()}</span>
+                                  <button onClick={async () => {
+                                    if (!confirm(`Unblock ${entry.ip_address}?`)) return;
+                                    try { await apiCall(`/admin/ip-blacklist/${entry.id}`, 'DELETE'); await loadIpBlacklist(); }
+                                    catch (err) { alert('Failed: ' + err.message); }
+                                  }} className="text-red-500 hover:text-red-700 font-semibold">Unblock</button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
 
                       <div className="text-right">
@@ -12588,7 +12556,7 @@ const PlanAssist = () => {
               </div>
             )}
 
-            {/* ── HPT CONTROL ── */}
+                        {/* ── HPT CONTROL ── */}
             {adminSection === 'hpt' && (
               <div className="space-y-6">
                 <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
@@ -12952,6 +12920,112 @@ const PlanAssist = () => {
           </div>
         )}
 
+        {/* ── Options Modal ── */}
+        {showOptionsModal && (() => {
+          const ou = showOptionsModal;
+          const expanded = optionsExpanded;
+          const toggle = key => setOptionsExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+          const hasHack = (adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist');
+          const Section = ({ id, label, color, children }) => (
+            <div className="border border-gray-200 rounded-xl overflow-hidden">
+              <button onClick={() => toggle(id)} className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left">
+                <span className={`font-semibold text-sm ${color || 'text-gray-800'}`}>{label}</span>
+                <ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${expanded[id] ? 'rotate-180' : ''}`} />
+              </button>
+              {expanded[id] && <div className="px-4 py-4 space-y-3 bg-white">{children}</div>}
+            </div>
+          );
+          return (
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" onClick={() => setShowOptionsModal(null)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-5 border-b border-gray-100">
+                  <div>
+                    <h3 className="font-bold text-gray-900 text-lg">{ou.name}</h3>
+                    <p className="text-xs text-gray-400">Grade {ou.grade} · {ou.campus || 'No campus'} · {ou.email}</p>
+                  </div>
+                  <button onClick={() => setShowOptionsModal(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="p-5 space-y-3">
+
+                  {/* Authorization */}
+                  <Section id="auth" label="Authorization" color="text-red-700">
+                    {ou.is_banned ? (
+                      <div className="space-y-2">
+                        <div className="bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 text-xs text-orange-700">
+                          <p className="font-semibold">Account is blocked</p>
+                          {ou.ban_reason && <p className="mt-0.5">Reason: {ou.ban_reason}</p>}
+                        </div>
+                        <button onClick={async () => { await adminUnbanUser(ou.id); setShowOptionsModal(prev => ({ ...prev, is_banned: false, ban_reason: null })); }} className="w-full py-2 bg-green-100 text-green-700 rounded-lg text-sm font-semibold hover:bg-green-200">Unblock Account</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => { setShowOptionsModal(null); setShowBanDialog(ou.id); }} className="w-full py-2 bg-red-100 text-red-700 rounded-lg text-sm font-semibold hover:bg-red-200 flex items-center justify-center gap-2"><Ban className="w-4 h-4" />Block Account</button>
+                    )}
+                    <div className="border-t border-gray-100 pt-3">
+                      <p className="text-xs text-gray-500 mb-2">Ban by IP address — blocks all requests from this user's IP.</p>
+                      <div className="flex gap-2">
+                        <input id="ip-ban-input" placeholder="Enter IP address" className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs font-mono focus:ring-1 focus:ring-red-400 focus:outline-none" />
+                        <input id="ip-ban-reason" placeholder="Reason" className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400 focus:outline-none" />
+                        <button onClick={async () => {
+                          const ip = document.getElementById('ip-ban-input').value.trim();
+                          const reason = document.getElementById('ip-ban-reason').value.trim();
+                          if (!ip) return;
+                          try { await apiCall('/admin/ip-blacklist', 'POST', { ip_address: ip, reason }); alert(`✅ IP ${ip} blocked.`); }
+                          catch (err) { alert('Failed: ' + err.message); }
+                        }} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Block IP</button>
+                      </div>
+                    </div>
+                  </Section>
+
+                  {/* Canvas API Token */}
+                  <Section id="token" label="Canvas API Token" color="text-yellow-700">
+                    <AdminTokenCard
+                      user={ou}
+                      onViewToken={() => adminViewCanvasToken(ou.id)}
+                      onSetToken={t => adminSetCanvasToken(ou.id, t)}
+                      onClearToken={() => adminClearToken(ou.id)}
+                    />
+                  </Section>
+
+                  {/* Credits */}
+                  <Section id="credits" label="Credits" color="text-amber-700">
+                    <AdminCreditsCard
+                      user={ou}
+                      onSetCredits={amount => adminSetCredits(ou.id, amount)}
+                      onAdjustCredits={(delta, reason) => adminAdjustCredits(ou.id, delta, reason)}
+                    />
+                  </Section>
+
+                  {/* Features */}
+                  <Section id="features" label="Features" color="text-purple-700">
+                    <div className="space-y-2">
+                      <button onClick={async () => {
+                        try { const r = await apiCall(`/admin/users/${ou.id}/grant-shield`, 'POST', {}); alert(`✅ Shield granted. ${ou.name} now has ${r.shields} shield(s).`); loadAdminUsers(); }
+                        catch (err) { alert('Failed: ' + err.message); }
+                      }} className="w-full py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-sm font-semibold hover:bg-amber-100">
+                        🛡️ Grant Streak Shield {ou.streak_shields_available > 0 && `(currently ${ou.streak_shields_available})`}
+                      </button>
+                      {hasHack ? (
+                        <button onClick={async () => {
+                          if (!confirm(`Revoke "Hacked PlanAssist" from ${ou.name}?`)) return;
+                          try { await apiCall(`/admin/users/${ou.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(ou.id); setShowOptionsModal(null); }
+                          catch (err) { alert('Failed: ' + err.message); }
+                        }} className="w-full py-2 bg-gray-900 text-green-400 border border-green-800 rounded-lg text-sm font-mono font-semibold hover:bg-black">⚠ Revoke Hacked PlanAssist</button>
+                      ) : (
+                        <button onClick={async () => {
+                          if (!confirm(`Grant "Hacked PlanAssist" to ${ou.name}?`)) return;
+                          try { await apiCall(`/admin/users/${ou.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(ou.id); alert(`✅ Granted to ${ou.name}.`); setShowOptionsModal(null); }
+                          catch (err) { alert('Failed: ' + err.message); }
+                        }} className="w-full py-2 bg-gray-900 text-green-400 border border-green-800 rounded-lg text-sm font-mono font-semibold hover:bg-black">⚠ Grant Hacked PlanAssist</button>
+                      )}
+                    </div>
+                  </Section>
+
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Ban Dialog */}
         {showBanDialog && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -13201,7 +13275,7 @@ const PlanAssist = () => {
           title = 'Time Estimation Accuracy';
           color = 'green';
           icon = <Target className="w-5 h-5 text-green-600" />;
-          const recentWithBoth = tasksWithBoth.slice(0, 10).reverse();
+          const recentWithBoth = tasksWithBoth.slice(0, 10);
           content = tasksWithBoth.length === 0
             ? <p className="text-gray-500 text-sm">No data yet — accuracy is calculated once you have tasks with both an estimated and actual time.</p>
             : <>
