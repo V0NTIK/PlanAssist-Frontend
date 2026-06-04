@@ -5670,7 +5670,7 @@ const PlanAssist = () => {
 
     // ── All other tiers: single span with CSS class ───────────────────────
     return (
-      <span className={s.animClass || ''} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block', animation: `ins-fadein 0.15s ease-out${s.animClass ? '' : ''}`, ...rest }}>
+      <span className={s.animClass || ''} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block', ...(s.animClass ? {} : { animation: 'ins-fadein 0.15s ease-out' }), ...rest }}>
         {name}
       </span>
     );
