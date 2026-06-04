@@ -798,17 +798,10 @@ function HubPage({ hptUser, token, studios, onNavigate }) {
   const [hubData, setHubData] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [statModal, setStatModal] = React.useState(null); // 'today'|'week'|'studytime'|'accuracy'|'streak'
-  const [insightIndex, setInsightIndex] = React.useState(0);
-
-  React.useEffect(() => {
-    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
 
   const load = React.useCallback(async () => {
     try {
-      const localDate = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD in local timezone
-      const d = await apiCall(`/hpt/hub?date=${localDate}`, 'GET', null, token);
+      const d = await apiCall('/hpt/hub', 'GET', null, token);
       if (d && d.error) {
         console.error('[HPT HUB] server error:', d.error, d.details || '');
       } else {
@@ -1265,211 +1258,6 @@ function StudioSelector({ studios, selectedId, onSelect }) {
 // MONITOR PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ExpandedStudentRow({ student, accum, est, progress, formatMins, timeSinceHeartbeat }) {
-  const [agendaHistoryId, setAgendaHistoryId] = React.useState(null);
-  const shownAgenda = agendaHistoryId
-    ? (student.agendaHistory || []).find(a => a.id === agendaHistoryId)
-    : student.activeAgenda;
-  const agendaRows = shownAgenda?.rows || [];
-  const agendaCurrentRow = agendaHistoryId ? (shownAgenda?.current_row ?? 0) : (student.activeAgenda?.currentRow ?? 0);
-
-  return (
-    <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
-
-      {/* Top row: session + priorities + urgent */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-
-        {/* Active session */}
-        <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Active Session</p>
-          {student.isActive && student.activeTask ? (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-semibold text-gray-900 text-sm truncate">{student.activeTask.title}</p>
-                  <p className="text-xs text-gray-500 truncate">{student.activeTask.class}</p>
-                </div>
-                {student.activeTask.session_heartbeat && (
-                  <span className="text-[10px] text-green-600 font-semibold flex-shrink-0 bg-green-100 px-1.5 py-0.5 rounded-full">
-                    ● {timeSinceHeartbeat(student.activeTask.session_heartbeat)}
-                  </span>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
-                  <p className="text-base font-bold text-gray-900">{formatMins(accum)}</p>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Logged</p>
-                </div>
-                <div className="bg-white rounded-lg p-2 text-center border border-green-100">
-                  <p className="text-base font-bold text-gray-900">{formatMins(est)}</p>
-                  <p className="text-[10px] text-gray-400 uppercase tracking-wide">Est.</p>
-                </div>
-              </div>
-              {progress !== null && (
-                <div>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">Progress</span>
-                    <span className="text-[10px] font-bold text-green-700">{progress}%</span>
-                  </div>
-                  <div className="w-full bg-green-100 rounded-full h-1.5">
-                    <div className="h-1.5 rounded-full bg-green-500 transition-all" style={{ width: `${progress}%` }} />
-                  </div>
-                </div>
-              )}
-              <p className="text-[10px] text-gray-400">
-                Due: {student.activeTask.deadline_date
-                  ? new Date(String(student.activeTask.deadline_date).slice(0,10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-                  : '—'}
-              </p>
-            </div>
-          ) : (
-            <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
-              <p className="text-sm text-gray-400">No active session</p>
-              {student.user.lastSync && (
-                <p className="text-xs text-gray-300 mt-1">
-                  Synced {new Date(student.user.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Focus list */}
-        <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-            Focus List ({student.priorities.length})
-          </p>
-          {student.priorities.length === 0 ? (
-            <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
-              <p className="text-sm text-gray-400">No focus list set today</p>
-            </div>
-          ) : (
-            <div className="space-y-1 max-h-44 overflow-y-auto">
-              {student.priorities.map((t, i) => (
-                <div key={t.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.completed ? 'bg-gray-50 opacity-60' : 'bg-white border border-gray-100'}`}>
-                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${t.completed ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'}`}>
-                    {t.completed ? '✓' : i + 1}
-                  </span>
-                  <p className={`flex-1 truncate font-medium ${t.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.title}</p>
-                  <span className="text-gray-400 flex-shrink-0">{formatMins(t.user_estimated_time || t.estimated_time)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Urgent tasks */}
-        <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-            Urgent / Overdue ({student.urgentTasks.length})
-          </p>
-          {student.urgentTasks.length === 0 ? (
-            <div className="bg-green-50 rounded-xl p-3 border border-green-200 text-center">
-              <Check className="w-4 h-4 text-green-500 mx-auto mb-1" />
-              <p className="text-xs text-green-700 font-semibold">All caught up</p>
-            </div>
-          ) : (
-            <div className="space-y-1 max-h-44 overflow-y-auto">
-              {student.urgentTasks.map(t => {
-                const due = new Date(String(t.deadline_date).slice(0,10) + 'T00:00:00');
-                const today = new Date(); today.setHours(0,0,0,0);
-                const overdue = due < today;
-                return (
-                  <div key={t.id} className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${overdue ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
-                    <AlertTriangle className={`w-3 h-3 flex-shrink-0 mt-0.5 ${overdue ? 'text-red-500' : 'text-amber-500'}`} />
-                    <div className="min-w-0">
-                      <p className={`font-medium truncate ${overdue ? 'text-red-800' : 'text-amber-800'}`}>{t.title}</p>
-                      <p className={`text-[10px] truncate ${overdue ? 'text-red-500' : 'text-amber-600'}`}>
-                        {t.class} · Due {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{overdue && ' — OVERDUE'}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Agenda section */}
-      {(student.activeAgenda || (student.agendaHistory?.length > 0)) && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-indigo-600" />
-              <p className="text-xs font-bold text-indigo-800 uppercase tracking-widest">
-                {agendaHistoryId ? 'Agenda History' : student.activeAgenda ? `Active — ${student.activeAgenda.name}` : 'Recent Agenda'}
-              </p>
-              {!agendaHistoryId && student.activeAgenda && (
-                <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-semibold">
-                  Row {agendaCurrentRow + 1} of {agendaRows.length}
-                </span>
-              )}
-            </div>
-            {student.agendaHistory?.length > 0 && (
-              <select
-                className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white text-indigo-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
-                value={agendaHistoryId || ''}
-                onChange={e => setAgendaHistoryId(e.target.value ? parseInt(e.target.value) : null)}
-              >
-                <option value="">{student.activeAgenda ? '▶ Current' : 'Select…'}</option>
-                {student.agendaHistory.map(a => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} — {new Date(a.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-
-          {agendaRows.length === 0 ? (
-            <p className="text-xs text-indigo-400 italic">No rows in this agenda.</p>
-          ) : (
-            <div className="space-y-1.5 max-h-56 overflow-y-auto">
-              {agendaRows.map((row, rowIdx) => {
-                const isDone   = rowIdx < agendaCurrentRow;
-                const isActive = !agendaHistoryId && rowIdx === agendaCurrentRow;
-                return (
-                  <div key={rowIdx} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors ${
-                    isActive ? 'bg-indigo-600 text-white shadow-sm'
-                    : isDone  ? 'bg-white text-gray-400 opacity-70'
-                    : 'bg-white text-gray-700 border border-indigo-100'
-                  }`}>
-                    <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px] ${
-                      isActive ? 'bg-white text-indigo-600'
-                      : isDone  ? 'bg-green-100 text-green-600'
-                      : 'bg-indigo-100 text-indigo-500'
-                    }`}>
-                      {isDone ? '✓' : rowIdx + 1}
-                    </span>
-                    <span className={`flex-1 font-medium truncate ${isDone ? 'line-through' : ''}`}>
-                      {row.task || `Row ${rowIdx + 1}`}
-                    </span>
-                    {row.zone && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${
-                        isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-600'
-                      }`}>{row.zone}</span>
-                    )}
-                    <span className={`flex-shrink-0 font-mono text-[10px] ${isActive ? 'text-indigo-200' : 'text-gray-400'}`}>
-                      {row.timeMins || 25}m
-                    </span>
-                    {isActive && student.activeAgenda?.currentRowCountdown != null && (
-                      <span className="text-white/80 font-mono text-[10px] flex-shrink-0 bg-white/10 px-1.5 rounded">
-                        {String(Math.floor(student.activeAgenda.currentRowCountdown / 60)).padStart(2,'0')}:{String(student.activeAgenda.currentRowCountdown % 60).padStart(2,'0')} left
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-    </div>
-  );
-}
-
 function MonitorPage({ token, studios }) {
   const [selectedStudioId, setSelectedStudioId] = useState(studios[0]?.id || null);
   const [data, setData] = useState([]);
@@ -1482,8 +1270,7 @@ function MonitorPage({ token, studios }) {
     if (!studioId) return;
     setLoading(true);
     try {
-      const localDate = new Date().toLocaleDateString('en-CA');
-      const d = await apiCall(`/hpt/studios/${studioId}/monitor?date=${localDate}`, 'GET', null, token);
+      const d = await apiCall(`/hpt/studios/${studioId}/monitor`, 'GET', null, token);
       setData(Array.isArray(d) ? d : []);
       setLastRefresh(new Date());
     } catch (e) { console.error('Monitor load error:', e.message); }
@@ -1708,17 +1495,211 @@ function MonitorPage({ token, studios }) {
                   </button>
 
                   {/* Expanded detail */}
-                  {isExpanded && (
-                    <ExpandedStudentRow
-                      student={student}
-                      accum={accum}
-                      est={est}
-                      progress={progress}
-                      formatMins={formatMins}
-                      timeSinceHeartbeat={timeSinceHeartbeat}
-                    />
-                  )}
-              </div>
+                  {isExpanded && (() => {
+                    // Local state for agenda history selector inside expanded row
+                    const [agendaHistoryId, setAgendaHistoryId] = React.useState(null);
+                    const shownAgenda = agendaHistoryId
+                      ? (student.agendaHistory || []).find(a => a.id === agendaHistoryId)
+                      : student.activeAgenda;
+                    const agendaRows = shownAgenda?.rows || [];
+                    const agendaCurrentRow = agendaHistoryId ? (shownAgenda?.current_row ?? 0) : (student.activeAgenda?.currentRow ?? 0);
+                    return (
+                      <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
+
+                        {/* Top row: session + priorities + urgent */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+                          {/* Active session */}
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Active Session</p>
+                            {student.isActive && student.activeTask ? (
+                              <div className="bg-green-50 border border-green-200 rounded-xl p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-semibold text-gray-900 text-sm truncate">{student.activeTask.title}</p>
+                                    <p className="text-xs text-gray-500 truncate">{student.activeTask.class}</p>
+                                  </div>
+                                  {student.activeTask.session_heartbeat && (
+                                    <span className="text-[10px] text-green-600 font-semibold flex-shrink-0 bg-green-100 px-1.5 py-0.5 rounded-full">
+                                      ● {timeSinceHeartbeat(student.activeTask.session_heartbeat)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                                    <p className="text-base font-bold text-gray-900">{formatMins(accum)}</p>
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Logged</p>
+                                  </div>
+                                  <div className="bg-white rounded-lg p-2 text-center border border-green-100">
+                                    <p className="text-base font-bold text-gray-900">{formatMins(est)}</p>
+                                    <p className="text-[10px] text-gray-400 uppercase tracking-wide">Est.</p>
+                                  </div>
+                                </div>
+                                {progress !== null && (
+                                  <div>
+                                    <div className="flex justify-between mb-1">
+                                      <span className="text-[10px] text-gray-500 uppercase tracking-wide">Progress</span>
+                                      <span className="text-[10px] font-bold text-green-700">{progress}%</span>
+                                    </div>
+                                    <div className="w-full bg-green-100 rounded-full h-1.5">
+                                      <div className="h-1.5 rounded-full bg-green-500 transition-all" style={{ width: `${progress}%` }} />
+                                    </div>
+                                  </div>
+                                )}
+                                <p className="text-[10px] text-gray-400">
+                                  Due: {student.activeTask.deadline_date
+                                    ? new Date(String(student.activeTask.deadline_date).slice(0,10) + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                                    : '—'}
+                                </p>
+                              </div>
+                            ) : (
+                              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
+                                <p className="text-sm text-gray-400">No active session</p>
+                                {student.user.lastSync && (
+                                  <p className="text-xs text-gray-300 mt-1">
+                                    Synced {new Date(student.user.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Focus list */}
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+                              Focus List ({student.priorities.length})
+                            </p>
+                            {student.priorities.length === 0 ? (
+                              <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
+                                <p className="text-sm text-gray-400">No focus list set today</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-1 max-h-44 overflow-y-auto">
+                                {student.priorities.map((t, i) => (
+                                  <div key={t.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.completed ? 'bg-gray-50 opacity-60' : 'bg-white border border-gray-100'}`}>
+                                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${t.completed ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'}`}>
+                                      {t.completed ? '✓' : i + 1}
+                                    </span>
+                                    <p className={`flex-1 truncate font-medium ${t.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.title}</p>
+                                    <span className="text-gray-400 flex-shrink-0">{formatMins(t.user_estimated_time || t.estimated_time)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Urgent tasks */}
+                          <div>
+                            <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
+                              Urgent / Overdue ({student.urgentTasks.length})
+                            </p>
+                            {student.urgentTasks.length === 0 ? (
+                              <div className="bg-green-50 rounded-xl p-3 border border-green-200 text-center">
+                                <Check className="w-4 h-4 text-green-500 mx-auto mb-1" />
+                                <p className="text-xs text-green-700 font-semibold">All caught up</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-1 max-h-44 overflow-y-auto">
+                                {student.urgentTasks.map(t => {
+                                  const due = new Date(String(t.deadline_date).slice(0,10) + 'T00:00:00');
+                                  const today = new Date(); today.setHours(0,0,0,0);
+                                  const overdue = due < today;
+                                  return (
+                                    <div key={t.id} className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${overdue ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200'}`}>
+                                      <AlertTriangle className={`w-3 h-3 flex-shrink-0 mt-0.5 ${overdue ? 'text-red-500' : 'text-amber-500'}`} />
+                                      <div className="min-w-0">
+                                        <p className={`font-medium truncate ${overdue ? 'text-red-800' : 'text-amber-800'}`}>{t.title}</p>
+                                        <p className={`text-[10px] truncate ${overdue ? 'text-red-500' : 'text-amber-600'}`}>
+                                          {t.class} · Due {due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}{overdue && ' — OVERDUE'}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Agenda section */}
+                        {(student.activeAgenda || (student.agendaHistory?.length > 0)) && (
+                          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="flex items-center gap-2">
+                                <Zap className="w-4 h-4 text-indigo-600" />
+                                <p className="text-xs font-bold text-indigo-800 uppercase tracking-widest">
+                                  {agendaHistoryId ? 'Agenda History' : student.activeAgenda ? `Active — ${student.activeAgenda.name}` : 'Recent Agenda'}
+                                </p>
+                                {!agendaHistoryId && student.activeAgenda && (
+                                  <span className="text-[10px] bg-indigo-600 text-white px-2 py-0.5 rounded-full font-semibold">
+                                    Row {agendaCurrentRow + 1} of {agendaRows.length}
+                                  </span>
+                                )}
+                              </div>
+                              {student.agendaHistory?.length > 0 && (
+                                <select
+                                  className="text-xs border border-indigo-200 rounded-lg px-2 py-1 bg-white text-indigo-700 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                                  value={agendaHistoryId || ''}
+                                  onChange={e => setAgendaHistoryId(e.target.value ? parseInt(e.target.value) : null)}
+                                >
+                                  <option value="">{student.activeAgenda ? '▶ Current' : 'Select…'}</option>
+                                  {student.agendaHistory.map(a => (
+                                    <option key={a.id} value={a.id}>
+                                      {a.name} — {new Date(a.updated_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                                    </option>
+                                  ))}
+                                </select>
+                              )}
+                            </div>
+
+                            {agendaRows.length === 0 ? (
+                              <p className="text-xs text-indigo-400 italic">No rows in this agenda.</p>
+                            ) : (
+                              <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                                {agendaRows.map((row, rowIdx) => {
+                                  const isDone   = rowIdx < agendaCurrentRow;
+                                  const isActive = !agendaHistoryId && rowIdx === agendaCurrentRow;
+                                  return (
+                                    <div key={rowIdx} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-xs transition-colors ${
+                                      isActive ? 'bg-indigo-600 text-white shadow-sm'
+                                      : isDone  ? 'bg-white text-gray-400 opacity-70'
+                                      : 'bg-white text-gray-700 border border-indigo-100'
+                                    }`}>
+                                      <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold flex-shrink-0 text-[10px] ${
+                                        isActive ? 'bg-white text-indigo-600'
+                                        : isDone  ? 'bg-green-100 text-green-600'
+                                        : 'bg-indigo-100 text-indigo-500'
+                                      }`}>
+                                        {isDone ? '✓' : rowIdx + 1}
+                                      </span>
+                                      <span className={`flex-1 font-medium truncate ${isDone ? 'line-through' : ''}`}>
+                                        {row.task || `Row ${rowIdx + 1}`}
+                                      </span>
+                                      {row.zone && (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0 ${
+                                          isActive ? 'bg-white/20 text-white' : 'bg-indigo-100 text-indigo-600'
+                                        }`}>{row.zone}</span>
+                                      )}
+                                      <span className={`flex-shrink-0 font-mono text-[10px] ${isActive ? 'text-indigo-200' : 'text-gray-400'}`}>
+                                        {row.timeMins || 25}m
+                                      </span>
+                                      {isActive && student.activeAgenda?.currentRowCountdown != null && (
+                                        <span className="text-white/80 font-mono text-[10px] flex-shrink-0 bg-white/10 px-1.5 rounded">
+                                          {String(Math.floor(student.activeAgenda.currentRowCountdown / 60)).padStart(2,'0')}:{String(student.activeAgenda.currentRowCountdown % 60).padStart(2,'0')} left
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                      </div>
+                    );
+                  })()}
+                </div>
               );
             })
           }
@@ -2164,6 +2145,12 @@ export default function AppHPT({ onBack }) {
   ];
 
   const [darkMode, setDarkMode] = React.useState(() => localStorage.getItem('planassist-hpt-dark') === 'true');
+  const [insightIndex, setInsightIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    const id = setInterval(() => setInsightIndex(p => p + 1), 10 * 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
 
   // Full dark theme matching regular PlanAssist's Dark colour theme exactly
   React.useEffect(() => {
@@ -2180,16 +2167,24 @@ export default function AppHPT({ onBack }) {
       .planassist-hpt * { scrollbar-color: ${d ? '#3d3d6b #0d0d14' : '#cbd5e1 #f1f5f9'}; scrollbar-width: thin; }
       .planassist-hpt .scrollbar-stable { scrollbar-gutter: stable; }
       ${d ? `
+      /* ── Page & nav ─────────────────────────────────────── */
       .planassist-hpt, .planassist-hpt main { background: #0d0d14 !important; color: #e8eaf6 !important; }
       .planassist-hpt nav { background-color: #09090f !important; border-color: #1e1e30 !important; }
+      /* ── Backgrounds ─────────────────────────────────────── */
       .planassist-hpt .bg-white { background-color: #13131f !important; }
       .planassist-hpt .bg-gray-50 { background-color: #181828 !important; }
       .planassist-hpt .bg-gray-100 { background-color: #1e1e30 !important; }
       .planassist-hpt .bg-gray-200 { background-color: #282840 !important; }
+      .planassist-hpt .bg-gray-700 { background-color: #24243a !important; }
+      .planassist-hpt .bg-gray-300 { background-color: #1e1e30 !important; }
+      .planassist-hpt .bg-black { background-color: #08080d !important; }
+      /* ── Gradients ───────────────────────────────────────── */
+      .planassist-hpt .from-gray-50 { --tw-gradient-from: #13131f !important; }
       .planassist-hpt .from-yellow-50 { --tw-gradient-from: #0d0d14 !important; }
       .planassist-hpt .via-purple-50 { --tw-gradient-via: #13131f !important; }
       .planassist-hpt .to-blue-50 { --tw-gradient-to: #0f0f1e !important; }
       .planassist-hpt .bg-gradient-to-br { background-image: linear-gradient(135deg, #0d0d14, #13131f) !important; }
+      /* ── Text ─────────────────────────────────────────────── */
       .planassist-hpt .text-gray-900 { color: #e8eaf6 !important; }
       .planassist-hpt .text-gray-800 { color: #c5cbe8 !important; }
       .planassist-hpt .text-gray-700 { color: #9fa8c8 !important; }
@@ -2197,36 +2192,147 @@ export default function AppHPT({ onBack }) {
       .planassist-hpt .text-gray-500 { color: #5c6694 !important; }
       .planassist-hpt .text-gray-400 { color: #434878 !important; }
       .planassist-hpt .text-gray-300 { color: #2e3260 !important; }
+      /* ── Borders ─────────────────────────────────────────── */
       .planassist-hpt .border-gray-100 { border-color: #1e1e30 !important; }
       .planassist-hpt .border-gray-200 { border-color: #282840 !important; }
       .planassist-hpt .border-gray-300 { border-color: #32325a !important; }
       .planassist-hpt .border-t, .planassist-hpt .border-b, .planassist-hpt .border-r, .planassist-hpt .border-l { border-color: #1e1e30 !important; }
+      .planassist-hpt .border-white { border-color: rgba(255,255,255,0.10) !important; }
       .planassist-hpt .divide-y > * + * { border-color: #1e1e30 !important; }
+      /* ── Hover ───────────────────────────────────────────── */
       .planassist-hpt .hover\\:bg-gray-50:hover { background-color: #1e1e30 !important; }
       .planassist-hpt .hover\\:bg-gray-100:hover { background-color: #24243a !important; }
-      .planassist-hpt .shadow-sm { box-shadow: 0 1px 3px rgba(0,0,0,0.5) !important; }
+      .planassist-hpt .hover\\:bg-gray-200:hover { background-color: #2e2e48 !important; }
+      /* ── Shadows ─────────────────────────────────────────── */
+      .planassist-hpt .shadow-sm { box-shadow: 0 1px 6px rgba(0,0,0,0.45) !important; }
+      .planassist-hpt .shadow-md { box-shadow: 0 4px 12px rgba(0,0,0,0.50) !important; }
+      .planassist-hpt .shadow-lg { box-shadow: 0 8px 24px rgba(0,0,0,0.55) !important; }
+      .planassist-hpt .shadow-xl { box-shadow: 0 12px 32px rgba(0,0,0,0.60) !important; }
+      .planassist-hpt .shadow-2xl { box-shadow: 0 20px 48px rgba(0,0,0,0.65) !important; }
+      /* ── Purple ──────────────────────────────────────────── */
+      .planassist-hpt .bg-purple-600 { background-color: #7c4dff !important; }
+      .planassist-hpt .bg-purple-700 { background-color: #651fff !important; }
+      .planassist-hpt .bg-purple-500 { background-color: #7e57c2 !important; }
       .planassist-hpt .bg-purple-100 { background-color: #1e1e30 !important; }
       .planassist-hpt .bg-purple-50 { background-color: #181828 !important; }
-      .planassist-hpt .bg-green-50 { background-color: #0a1a0c !important; }
-      .planassist-hpt .bg-green-100 { background-color: #0e2210 !important; }
-      .planassist-hpt .bg-red-50 { background-color: #1a0808 !important; }
-      .planassist-hpt .bg-amber-50 { background-color: #1a1400 !important; }
-      .planassist-hpt .bg-indigo-50 { background-color: #0f0f2a !important; }
-      .planassist-hpt .border-green-200 { border-color: #14301a !important; }
-      .planassist-hpt .border-red-200 { border-color: #3a1414 !important; }
-      .planassist-hpt .border-amber-200 { border-color: #2e2500 !important; }
-      .planassist-hpt .border-indigo-200 { border-color: #1a1a45 !important; }
+      .planassist-hpt .bg-purple-900 { background-color: #1e1e30 !important; }
+      .planassist-hpt .bg-purple-800 { background-color: rgba(0,0,0,0.35) !important; }
+      .planassist-hpt .hover\\:bg-purple-600:hover { background-color: #7c4dff !important; }
+      .planassist-hpt .hover\\:bg-purple-700:hover { background-color: #651fff !important; }
+      .planassist-hpt .hover\\:bg-purple-50:hover { background-color: #181828 !important; }
+      .planassist-hpt .hover\\:bg-purple-900:hover { background-color: rgba(0,0,0,0.45) !important; }
       .planassist-hpt .text-purple-700 { color: #b39ddb !important; }
       .planassist-hpt .text-purple-600 { color: #9575cd !important; }
+      .planassist-hpt .text-purple-500 { color: #7e57c2 !important; }
+      .planassist-hpt .text-purple-400 { color: #6948b8 !important; }
+      .planassist-hpt .text-purple-300 { color: #4a3490 !important; }
+      .planassist-hpt .text-purple-200 { color: #e8eaf6 !important; }
+      .planassist-hpt .text-purple-100 { color: #ffffff !important; }
+      .planassist-hpt .text-purple-900 { color: #b39ddb !important; }
+      .planassist-hpt .border-purple-100 { border-color: #1e1e30 !important; }
+      .planassist-hpt .border-purple-200 { border-color: #282840 !important; }
+      .planassist-hpt .border-purple-300 { border-color: #32325a !important; }
+      .planassist-hpt .border-purple-400 { border-color: rgba(124,77,255,0.45) !important; }
+      .planassist-hpt .border-purple-500 { border-color: #7c4dff !important; }
+      .planassist-hpt .border-purple-600 { border-color: #7c4dff !important; }
+      .planassist-hpt .from-purple-600 { --tw-gradient-from: #7c4dff !important; }
+      .planassist-hpt .to-purple-600 { --tw-gradient-to: #7c4dff !important; }
+      .planassist-hpt .from-purple-500 { --tw-gradient-from: #7e57c2 !important; }
+      .planassist-hpt .from-purple-50 { --tw-gradient-from: #1e1e30 !important; }
+      /* ── Blue ────────────────────────────────────────────── */
+      .planassist-hpt .bg-blue-50 { background-color: #0f1a30 !important; }
+      .planassist-hpt .bg-blue-100 { background-color: #12203d !important; }
+      .planassist-hpt .text-blue-600 { color: #64b5f6 !important; }
+      .planassist-hpt .text-blue-700 { color: #90caf9 !important; }
+      .planassist-hpt .text-blue-800 { color: #90caf9 !important; }
+      .planassist-hpt .text-blue-200 { color: #e8eaf6 !important; }
+      .planassist-hpt .text-blue-100 { color: #ffffff !important; }
+      .planassist-hpt .text-blue-900 { color: #64b5f6 !important; }
+      .planassist-hpt .border-blue-200 { border-color: #1a3060 !important; }
+      .planassist-hpt .border-blue-100 { border-color: #121e45 !important; }
+      .planassist-hpt .from-blue-600 { --tw-gradient-from: #2979ff !important; }
+      .planassist-hpt .to-blue-600 { --tw-gradient-to: #2979ff !important; }
+      .planassist-hpt .to-blue-500 { --tw-gradient-to: #42a5f5 !important; }
+      .planassist-hpt .from-blue-600.to-purple-600 { --tw-gradient-to: #7c4dff !important; }
+      /* ── Green ───────────────────────────────────────────── */
+      .planassist-hpt .bg-green-50 { background-color: #0a1a0c !important; }
+      .planassist-hpt .bg-green-100 { background-color: #0e2210 !important; }
       .planassist-hpt .text-green-700 { color: #a5d6a7 !important; }
       .planassist-hpt .text-green-600 { color: #81c784 !important; }
+      .planassist-hpt .text-green-500 { color: #81c784 !important; }
+      .planassist-hpt .text-green-400 { color: #66bb6a !important; }
+      .planassist-hpt .text-green-800 { color: #a5d6a7 !important; }
+      .planassist-hpt .text-green-900 { color: #a5d6a7 !important; }
+      .planassist-hpt .border-green-100 { border-color: #0e2210 !important; }
+      .planassist-hpt .border-green-200 { border-color: #14301a !important; }
+      .planassist-hpt .bg-emerald-50 { background-color: #0a1a0c !important; }
+      .planassist-hpt .bg-emerald-100 { background-color: #0e2210 !important; }
+      .planassist-hpt .border-emerald-200 { border-color: #14301a !important; }
+      .planassist-hpt .text-emerald-600 { color: #81c784 !important; }
+      /* ── Red ─────────────────────────────────────────────── */
+      .planassist-hpt .bg-red-50 { background-color: #1a0808 !important; }
+      .planassist-hpt .bg-red-100 { background-color: #220e0e !important; }
       .planassist-hpt .text-red-600 { color: #ef9a9a !important; }
+      .planassist-hpt .text-red-500 { color: #e57373 !important; }
+      .planassist-hpt .text-red-700 { color: #ef9a9a !important; }
+      .planassist-hpt .text-red-900 { color: #ef9a9a !important; }
+      .planassist-hpt .border-red-200 { border-color: #3a1414 !important; }
+      /* ── Amber/Orange/Yellow ─────────────────────────────── */
+      .planassist-hpt .bg-amber-50 { background-color: #1a1400 !important; }
+      .planassist-hpt .bg-amber-100 { background-color: #221b00 !important; }
       .planassist-hpt .text-amber-600 { color: #ffca28 !important; }
+      .planassist-hpt .text-amber-700 { color: #ffd54f !important; }
+      .planassist-hpt .text-amber-800 { color: #ffe57f !important; }
+      .planassist-hpt .border-amber-100 { border-color: #221b00 !important; }
+      .planassist-hpt .border-amber-200 { border-color: #2e2500 !important; }
+      .planassist-hpt .bg-orange-50 { background-color: #1a1008 !important; }
+      .planassist-hpt .bg-orange-100 { background-color: #221610 !important; }
+      .planassist-hpt .text-orange-600 { color: #ffb74d !important; }
+      .planassist-hpt .text-orange-500 { color: #ffa726 !important; }
+      .planassist-hpt .text-orange-900 { color: #ffb74d !important; }
+      .planassist-hpt .border-orange-100 { border-color: #221610 !important; }
+      .planassist-hpt .border-orange-200 { border-color: #2e200e !important; }
+      .planassist-hpt .bg-yellow-50 { background-color: #1a1400 !important; }
+      .planassist-hpt .text-yellow-600 { color: #fff176 !important; }
+      .planassist-hpt .text-yellow-800 { color: #ffe57f !important; }
+      .planassist-hpt .text-yellow-900 { color: #fff176 !important; }
+      .planassist-hpt .border-yellow-100 { border-color: #221b00 !important; }
+      /* ── Indigo ──────────────────────────────────────────── */
+      .planassist-hpt .bg-indigo-50 { background-color: #0f0f2a !important; }
+      .planassist-hpt .bg-indigo-600 { background-color: #5c6bc0 !important; }
       .planassist-hpt .text-indigo-800 { color: #c5caf0 !important; }
       .planassist-hpt .text-indigo-600 { color: #9fa8da !important; }
+      .planassist-hpt .border-indigo-200 { border-color: #1a1a45 !important; }
+      /* ── Inputs ──────────────────────────────────────────── */
       .planassist-hpt input, .planassist-hpt select, .planassist-hpt textarea {
         background-color: #181828 !important; color: #e8eaf6 !important; border-color: #282840 !important;
       }
+      .planassist-hpt input:focus, .planassist-hpt select:focus, .planassist-hpt textarea:focus {
+        border-color: #7c4dff !important; background-color: #13131f !important;
+      }
+      .planassist-hpt input::placeholder, .planassist-hpt textarea::placeholder { color: #434878 !important; opacity: 0.8; }
+      .planassist-hpt input[type="checkbox"] { accent-color: #7c4dff; }
+      .planassist-hpt input[type="range"] { accent-color: #7c4dff; }
+      .planassist-hpt .focus\\:ring-purple-500:focus { --tw-ring-color: rgba(124,77,255,0.35) !important; }
+      /* ── Overlays & opacity ───────────────────────────────── */
+      .planassist-hpt .bg-opacity-50 { background-color: rgba(0,0,0,0.72) !important; }
+      .planassist-hpt .bg-black.bg-opacity-50 { background-color: rgba(0,0,0,0.80) !important; }
+      .planassist-hpt .bg-opacity-20 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.25) !important; }
+      .planassist-hpt .bg-opacity-15 { --tw-bg-opacity: 1 !important; background-color: rgba(0,0,0,0.20) !important; }
+      .planassist-hpt .hover\\:bg-opacity-30:hover { background-color: rgba(0,0,0,0.35) !important; }
+      .planassist-hpt .backdrop-blur-sm { backdrop-filter: blur(8px); }
+      .planassist-hpt .bg-white\/10 { background-color: rgba(255,255,255,0.06) !important; }
+      .planassist-hpt .bg-white\/5 { background-color: rgba(255,255,255,0.03) !important; }
+      .planassist-hpt .bg-white\/20 { background-color: rgba(255,255,255,0.09) !important; }
+      .planassist-hpt .hover\\:bg-white\/10:hover { background-color: rgba(255,255,255,0.09) !important; }
+      /* ── Tables & misc ───────────────────────────────────── */
+      .planassist-hpt table thead { background-color: #181828 !important; }
+      .planassist-hpt table tbody tr { border-color: #1e1e30 !important; }
+      .planassist-hpt .animate-spin { border-color: #7c4dff !important; border-top-color: transparent !important; }
+      .planassist-hpt .border-b-2.border-purple-600 { border-color: #7c4dff !important; }
+      .planassist-hpt .prose { color: #9fa8c8 !important; }
+      .planassist-hpt .prose h1, .planassist-hpt .prose h2, .planassist-hpt .prose h3 { color: #e8eaf6 !important; }
+      .planassist-hpt .bg-white.text-blue-600 { background-color: #e8eaf6 !important; color: #1565c0 !important; }
       ` : ''}
     `;
     document.documentElement.style.colorScheme = d ? 'dark' : 'light';
