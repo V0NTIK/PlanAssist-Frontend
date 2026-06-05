@@ -12417,7 +12417,7 @@ const PlanAssist = () => {
                         </h4>
                         {d.newUsers.length === 0 && <p className="text-gray-400 text-sm">No new signups</p>}
                         <div className={`space-y-1.5 ${d.newUsers.length > 10 ? 'max-h-64 overflow-y-auto' : ''}`}>
-                          {d.newUsers.slice(0, 10).map(u => (
+                          {d.newUsers.map(u => (
                             <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded-lg gap-2">
                               <div className="min-w-0">
                                 <span className="font-semibold text-gray-800">{u.name || '(unnamed)'}</span>
@@ -12431,7 +12431,6 @@ const PlanAssist = () => {
                               </div>
                             </div>
                           ))}
-                          {d.newUsers.length > 10 && <p className="text-xs text-gray-400 text-center pt-1">+ {d.newUsers.length - 10} more</p>}
                         </div>
                       </div>
 
@@ -12443,7 +12442,7 @@ const PlanAssist = () => {
                         </h4>
                         {d.staleSyncs.length === 0 && <p className="text-green-600 text-sm">All users syncing ✓</p>}
                         <div className={`space-y-1.5 ${d.staleSyncs.length > 10 ? 'max-h-64 overflow-y-auto' : ''}`}>
-                          {d.staleSyncs.slice(0, 10).map(u => (
+                          {d.staleSyncs.map(u => (
                             <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-orange-50 rounded-lg gap-2">
                               <div className="min-w-0">
                                 <span className="font-semibold text-gray-800">{u.name}</span>
@@ -12456,7 +12455,6 @@ const PlanAssist = () => {
                               </div>
                             </div>
                           ))}
-                          {d.staleSyncs.length > 10 && <p className="text-xs text-gray-400 text-center pt-1">+ {d.staleSyncs.length - 10} more</p>}
                         </div>
                       </div>
 
@@ -12467,7 +12465,7 @@ const PlanAssist = () => {
                             <AlertTriangle className="w-4 h-4 text-red-500" />
                             Duplicate Tasks ({d.duplicates.length})
                           </h4>
-                          <div className="space-y-1.5">
+                          <div className={`space-y-1.5 ${d.duplicates.length > 10 ? 'max-h-64 overflow-y-auto' : ''}`}>
                             {d.duplicates.map((d2, i) => (
                               <div key={i} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
                                 <span className="font-medium text-gray-800">{d2.user_name}</span>
