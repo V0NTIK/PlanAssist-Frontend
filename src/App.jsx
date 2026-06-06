@@ -5400,11 +5400,11 @@ const PlanAssist = () => {
     Default:
       { animClass:'', wave:false, nameStyle:{ color:'#e5e7eb', fontWeight:600 } },
     Bronze:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#a16207,#d97706,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#78350f,#d97706,#f59e0b,#b45309,#92400e)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
     Silver:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#b0b8c4,#d0d5dc,#b0b8c4)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:600 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#64748b,#cbd5e1,#f1f5f9,#94a3b8,#475569)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
     Gold:
-      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#ca8a04,#eab308,#a16207)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:700 } },
+      { animClass:'', wave:false, nameStyle:{ background:'linear-gradient(135deg,#854d0e,#eab308,#fde047,#ca8a04,#713f12)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800 } },
     Platinum:
       { animClass:'ins-platinum', wave:false, nameStyle:{ background:'linear-gradient(135deg,#475569,#f1f5f9,#334155,#e2e8f0)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:800, backgroundSize:'300% auto' } },
     Onyx:
@@ -5442,7 +5442,7 @@ const PlanAssist = () => {
     'Dark Matter':
       { animClass:'', wave:false, darkMatter:true, nameStyle:{ color:'#09090b', fontWeight:900, letterSpacing:'0.12em' } },
     Neutronium:
-      { animClass:'ins-neutronium', wave:false, nameStyle:{ color:'#4ade80', fontWeight:900, textShadow:'0 0 8px #4ade80, 0 0 16px #16a34a' } },
+      { animClass:'', wave:false, neutronium:true, nameStyle:{ color:'#1a3a1a', fontWeight:900 } },
     'Singularity Core':
       { animClass:'ins-singularity', wave:false, nameStyle:{ background:'linear-gradient(90deg,#e0f2fe,#a5f3fc,#ffffff,#e0f2fe)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent', backgroundClip:'text', fontWeight:900, backgroundSize:'300% auto' } },
     'Hacked PlanAssist':
@@ -5505,54 +5505,88 @@ const PlanAssist = () => {
       100%{filter:brightness(1) saturate(1)}
     }
     .ins-aether { animation: ins-lightning 1.1s ease-in-out infinite }
-    /* Starlight — individual letters blink white and micro-shake on black background */
+    /* Starlight — individual letters blink white and micro-shake on black background, with a fade-out after each flash */
     @keyframes ins-starlight {
       0%,100%{color:#1c1917;transform:translate(0,0)}
       15%{color:#1c1917}
       18%{color:#ffffff;transform:translate(0.4px,-0.5px)}
-      20%{color:#e5e5e5;transform:translate(-0.3px,0.3px)}
-      22%{color:#ffffff;transform:translate(0,0)}
-      25%{color:#1c1917}
+      20%{color:#ffffff;transform:translate(-0.3px,0.3px)}
+      22%{color:#e0e0e0}
+      27%{color:#888888}
+      32%{color:#1c1917;transform:translate(0,0)}
       60%{color:#1c1917}
       62%{color:#f5f5f5;transform:translate(0.3px,-0.3px)}
-      64%{color:#1c1917}
+      65%{color:#cccccc}
+      70%{color:#888888}
+      75%{color:#1c1917;transform:translate(0,0)}
     }
-    @keyframes ins-glitch {
-      0%{opacity:1;transform:rotate(0deg)}
+    @keyframes ins-astral-blink {
+      0%,100%{opacity:1}
+      6%{opacity:0}
       8%{opacity:1}
-      10%{opacity:0;transform:rotate(-0.4deg)}
+      14%{opacity:0}
+      16%{opacity:1}
       22%{opacity:0}
-      24%{opacity:0.25;transform:rotate(0.3deg)}
-      26%{opacity:0}
-      30%{opacity:1;transform:rotate(0deg)}
-      50%{opacity:1}
-      53%{opacity:0;transform:rotate(0.4deg)}
+      24%{opacity:1}
+      /* pause fully lit, then burst again */
+      60%{opacity:1}
+      63%{opacity:0}
+      65%{opacity:1}
       68%{opacity:0}
-      70%{opacity:0.15;transform:rotate(-0.3deg)}
+      70%{opacity:1}
       73%{opacity:0}
-      78%{opacity:1;transform:rotate(0deg)}
-      100%{opacity:1;transform:rotate(0deg)}
+      75%{opacity:1}
+      78%{opacity:0}
+      80%{opacity:1}
     }
     @keyframes ins-pendulum { 0%,100%{transform:rotate(-0.8deg)} 50%{transform:rotate(0.8deg)} }
-    .ins-astral { animation: ins-glitch 2.8s ease-in-out infinite, ins-pendulum 3.5s ease-in-out infinite }
-    /* Neutronium — violent shutter */
-    @keyframes ins-shutter { 0%,87%,100%{filter:brightness(1)} 88%{filter:brightness(3) saturate(2)} 89%{filter:brightness(0.2)} 90%{filter:brightness(2.5)} 91%{filter:brightness(1)} }
-    .ins-neutronium { animation: ins-shutter 1.4s ease-in-out infinite }
-    /* Singularity Core — sweep + flame glow */
-    @keyframes ins-singularity-shift {
-      0%  { background-position:0% center;   filter:brightness(1) }
-      40% { background-position:120% center; filter:brightness(1.1) }
-      50% { background-position:150% center; filter:brightness(1.6) drop-shadow(0 -3px 8px #a855f7) drop-shadow(0 3px 8px #7c3aed) saturate(1.5) }
-      55% { background-position:165% center; filter:brightness(2.2) drop-shadow(0 -4px 14px #e879f9) drop-shadow(0 4px 14px #a855f7) saturate(2) }
-      60% { background-position:180% center; filter:brightness(1.4) drop-shadow(0 -2px 6px #c084fc) }
-      100%{ background-position:300% center; filter:brightness(1) }
+    .ins-astral { animation: ins-astral-blink 1.6s ease-in-out infinite, ins-pendulum 3.5s ease-in-out infinite }
+    /* Neutronium — letters light up L→R, stay lit, then each individually fades to unlit neon green */
+    /* "Unlit" = dim desaturated green; "lit" = bright glowing neon green */
+    @keyframes ins-neut-light {
+      0%    { color:#1a3a1a; text-shadow:none; opacity:0.35 }         /* unlit */
+      50%   { color:#1a3a1a; text-shadow:none; opacity:0.35 }         /* still unlit — waits for its turn */
+      55%   { color:#4ade80; text-shadow:0 0 8px #4ade80,0 0 20px #16a34a,0 0 2px #bbf7d0; opacity:1 }  /* snap on */
+      75%   { color:#4ade80; text-shadow:0 0 8px #4ade80,0 0 20px #16a34a; opacity:1 }                  /* stay lit */
+      90%   { color:#4ade80; text-shadow:0 0 4px #4ade80; opacity:0.7 }  /* fade begins */
+      100%  { color:#1a3a1a; text-shadow:none; opacity:0.35 }            /* faded back to unlit */
     }
-    .ins-singularity { animation: ins-singularity-shift 2.5s ease-in-out infinite }
+    /* Singularity Core — bright dense purple pulse sweep */
+    @keyframes ins-singularity-shift {
+      0%  { background-position:0% center;   filter:brightness(1.1) }
+      35% { background-position:100% center; filter:brightness(1.2) }
+      48% { background-position:140% center; filter:brightness(2.5) drop-shadow(0 -4px 12px #a855f7) drop-shadow(0 4px 12px #7c3aed) saturate(2) }
+      52% { background-position:155% center; filter:brightness(4) drop-shadow(0 -6px 20px #e879f9) drop-shadow(0 6px 20px #a855f7) drop-shadow(0 0 30px #c026d3) saturate(3) }
+      56% { background-position:170% center; filter:brightness(2.8) drop-shadow(0 -3px 10px #c084fc) saturate(1.8) }
+      65% { background-position:200% center; filter:brightness(1.4) }
+      100%{ background-position:300% center; filter:brightness(1.1) }
+    }
+    /* Per-letter pulse reaction: expand + violent shake as pulse crest passes through */
+    @keyframes ins-sing-letter {
+      0%  { transform:scale(1) translate(0,0) }
+      /* pulse approaching */
+      44% { transform:scale(1) translate(0,0) }
+      /* pulse hits — rapid violent shake while expanding */
+      46% { transform:scale(1.25) translate(-1.5px,-2px) }
+      48% { transform:scale(1.45) translate(2px,1.5px) }
+      50% { transform:scale(1.55) translate(-2px,-1px) }
+      52% { transform:scale(1.45) translate(1.5px,2px) }
+      54% { transform:scale(1.30) translate(-1px,-1.5px) }
+      56% { transform:scale(1.15) translate(1px,1px) }
+      58% { transform:scale(1.05) translate(-0.5px,0.5px) }
+      62% { transform:scale(1) translate(0,0) }
+      100%{ transform:scale(1) translate(0,0) }
+    }
     /* Dark Matter drift */
     @keyframes ins-drift { 0%,100%{transform:translateX(0)} 30%{transform:translateX(2px)} 60%{transform:translateX(-1.5px)} 80%{transform:translateX(1px)} }
     /* Dark Matter purple oval clouds sweep via background-position (no clipping) */
     @keyframes ins-dm-cloud-a { 0%{opacity:0;background-position:-20% center} 15%{opacity:1} 75%{opacity:0.85;background-position:120% center} 88%,100%{opacity:0;background-position:120% center} }
     @keyframes ins-dm-cloud-b { 0%{opacity:0;background-position:120% center} 15%{opacity:1} 75%{opacity:0.75;background-position:-20% center} 88%,100%{opacity:0;background-position:-20% center} }
+    /* Dark Matter per-letter shimmer — very subtle colour flicks */
+    @keyframes ins-dm-shimmer-a { 0%,100%{color:#09090b} 20%{color:#2d0a3e} 40%{color:#09090b} 65%{color:#3b0a1e} 80%{color:#09090b} }
+    @keyframes ins-dm-shimmer-b { 0%,100%{color:#09090b} 15%{color:#1a0a0a} 35%{color:#2a0a1a} 55%{color:#09090b} 75%{color:#261009} 90%{color:#09090b} }
+    @keyframes ins-dm-shimmer-c { 0%,100%{color:#09090b} 10%{color:#090912} 30%{color:#1a0a2e} 50%{color:#09090b} 70%{color:#1e0a0a} 85%{color:#09090b} }
+    @keyframes ins-dm-shimmer-d { 0%,100%{color:#09090b} 25%{color:#2a1209} 45%{color:#09090b} 60%{color:#2d0828} 80%{color:#09090b} }
     /* Soulstone / shared ins-wave */
     @keyframes ins-wave { 0%,100%{transform:translateY(0) rotate(0deg)} 25%{transform:translateY(-2px) rotate(-1deg)} 75%{transform:translateY(1px) rotate(0.8deg)} }
     /* Dark Matter jitter */
@@ -5712,30 +5746,32 @@ const PlanAssist = () => {
       );
     }
 
-    // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep ─
+    // ── Dark Matter: widely spaced letters, violent jitter, side-drift, purple cloud sweep, subtle colour shimmer ─
     if (tier === 'Dark Matter') {
-      // Purple cloud: a full-width overlay whose background is a soft oval purple blob.
-      // Animating background-position slides the blob's centre from left-of-frame to
-      // right-of-frame (and vice-versa) — no translateX clipping, works on any text width.
       const cloudBase = {
         position:'absolute',
         top:0, left:0, right:0, bottom:0,
-        // Wide background so the blob (centred at 15% of the 400%-wide canvas) slides
-        // cleanly across without hard edges hitting the span boundary.
         background:'radial-gradient(ellipse 18% 160% at 15% 50%, rgba(168,85,247,0.52) 0%, rgba(147,51,234,0.28) 45%, transparent 75%)',
         backgroundSize:'400% 100%',
         pointerEvents:'none',
         opacity:0,
       };
+      // Four shimmer variants — subtly different colours (purple, pink, red, yellow tints)
+      const shimmerAnims = ['ins-dm-shimmer-a','ins-dm-shimmer-b','ins-dm-shimmer-c','ins-dm-shimmer-d'];
+      // Varying shimmer durations so letters don't pulse in unison
+      const shimmerDurs = [4.2, 5.1, 3.8, 6.0, 4.7, 5.5, 3.5, 4.9];
       return (
         <span style={{ position:'relative', display:'inline-block', overflow:'hidden', ...rest }}>
           {name.split('').map((ch, i) => {
-            const jitterDelay = (i * 0.07).toFixed(2);
-            const driftDelay  = (i * 0.12).toFixed(2);
+            const jitterDelay  = (i * 0.07).toFixed(2);
+            const driftDelay   = (i * 0.12).toFixed(2);
+            const shimmerAnim  = shimmerAnims[i % shimmerAnims.length];
+            const shimmerDur   = shimmerDurs[i % shimmerDurs.length];
+            const shimmerDelay = (i * 0.18).toFixed(2);
             return ch === ' '
               ? <span key={i} style={{ display:'inline-block', width:'0.5em' }}>&nbsp;</span>
               : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                  animation: `ins-jitter 0.8s ease-in-out ${jitterDelay}s infinite, ins-drift 6s ease-in-out ${driftDelay}s infinite` }}>{ch}</span>;
+                  animation: `ins-jitter 0.8s ease-in-out ${jitterDelay}s infinite, ins-drift 6s ease-in-out ${driftDelay}s infinite, ${shimmerAnim} ${shimmerDur}s ease-in-out ${shimmerDelay}s infinite` }}>{ch}</span>;
           })}
           <span style={{ ...cloudBase, animation:'ins-dm-cloud-a 5s ease-in-out 0.5s infinite' }} />
           <span style={{ ...cloudBase, animation:'ins-dm-cloud-b 5s ease-in-out 2.8s infinite' }} />
@@ -5743,16 +5779,52 @@ const PlanAssist = () => {
       );
     }
 
-    // ── Singularity Core: sweep + flame glow rising from each letter ──────
-    if (tier === 'Singularity Core') {
+    // ── Neutronium: letters light up L→R ~2 per second, stay lit, then each randomly fades back to unlit ──
+    if (tier === 'Neutronium') {
+      const letters = name.split('');
+      const litCount = letters.filter(c => c !== ' ').length;
+      // Each letter lights up sequentially: delay = index * 0.5s (2 per second)
+      // Total cycle: light-up phase + stay-lit phase + fade phase
+      // We make the full animation duration long enough to cover the whole sequence + a pause
+      const cycleDur = litCount * 0.5 + 2.5; // light-up + 1.5s hold + fade
+      let letterIdx = 0;
       return (
         <span style={{ display:'inline-block', ...rest }}>
-          {name.split('').map((ch, i) => {
-            const delay = (i * 0.1).toFixed(2);
-            return ch === ' '
-              ? <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>
-              : <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                  animation: `ins-singularity-shift 2.5s ease-in-out ${delay}s infinite` }}>{ch}</span>;
+          {letters.map((ch, i) => {
+            if (ch === ' ') return <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>;
+            const myIdx = letterIdx++;
+            // Each letter delays by its position * 0.5s, then the keyframe handles the rest
+            // We also add a random per-letter offset for the fade-out (0–1.2s) so they don't all fade at once
+            const lightDelay = (myIdx * 0.5).toFixed(2);
+            // Extra random fade offset baked into a longer animation + negative delay trick
+            const fadeOffset  = (Math.sin(myIdx * 2.3 + 1.1) * 0.6 + 0.6).toFixed(2);
+            const totalDelay  = (parseFloat(lightDelay) - parseFloat(fadeOffset)).toFixed(2);
+            return (
+              <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                animation: `ins-neut-light ${cycleDur}s linear ${totalDelay}s infinite` }}>{ch}</span>
+            );
+          })}
+        </span>
+      );
+    }
+
+    // ── Singularity Core: bright dense pulse sweep, each letter expands + shakes as pulse passes ──
+    if (tier === 'Singularity Core') {
+      const letters = name.split('');
+      const litCount = letters.filter(c => c !== ' ').length;
+      // Stagger delay per letter so the shake ripples left-to-right in sync with the CSS background-position sweep
+      // Total cycle = 2.5s; pulse crest hits at ~52% ≈ 1.3s; spread the letter delays so last letter peaks at same time
+      const spreadMs = 0.4; // total spread across all letters
+      return (
+        <span style={{ display:'inline-block', ...rest }}>
+          {letters.map((ch, i) => {
+            if (ch === ' ') return <span key={i} style={{ display:'inline-block', width:'0.3em' }}>&nbsp;</span>;
+            const frac = litCount > 1 ? i / (litCount - 1) : 0;
+            const delay = (frac * spreadMs).toFixed(2);
+            return (
+              <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
+                animation: `ins-singularity-shift 2.5s ease-in-out ${delay}s infinite, ins-sing-letter 2.5s ease-in-out ${delay}s infinite` }}>{ch}</span>
+            );
           })}
         </span>
       );
