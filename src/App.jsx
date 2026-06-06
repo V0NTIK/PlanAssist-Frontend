@@ -342,34 +342,50 @@ const AdminCreditsCard = ({ user, onSetCredits, onAdjustCredits }) => {
   );
 };
 
-const AdminTokenCard = ({ user, onViewToken, onSetToken, onClearToken }) => {
+const AdminTokenCard = ({ user, onViewToken, onSetToken }) => {
   const [revealed, setRevealed] = React.useState(null);
   const [newToken, setNewToken] = React.useState('');
   const [tokenLoading, setTokenLoading] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-      <h4 className="font-semibold text-gray-700 mb-3 text-sm">Canvas API Token</h4>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="font-semibold text-gray-700 text-sm">Canvas API Token</h4>
+        {user.has_canvas_token
+          ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-medium">✓ Token set</span>
+          : <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium">No token</span>}
+      </div>
       <div className="space-y-2">
         {revealed === null ? (
-          <button onClick={async () => { setTokenLoading(true); const t = await onViewToken(); setRevealed(t || ''); setTokenLoading(false); }}
-            disabled={tokenLoading}
-            className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-50">
-            {tokenLoading ? 'Loading…' : '🔍 View Token'}
+          <button
+            onClick={async () => { setTokenLoading(true); const t = await onViewToken(); setRevealed(t || ''); setTokenLoading(false); }}
+            disabled={tokenLoading || !user.has_canvas_token}
+            className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {tokenLoading ? 'Loading…' : '🔍 Reveal Token'}
           </button>
         ) : revealed === '' ? (
-          <p className="text-xs text-gray-400 italic">No token set.</p>
+          <p className="text-xs text-gray-400 italic">No token stored.</p>
         ) : (
-          <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-700 break-all select-all border border-gray-200">{revealed}</div>
+          <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs font-mono text-gray-600 break-all select-all border border-gray-200 leading-relaxed">{revealed}</div>
         )}
-        <div className="flex gap-2 mt-2">
-          <input type="text" value={newToken} onChange={e => setNewToken(e.target.value)}
-            placeholder="Paste new Canvas token to replace"
-            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-red-400 font-mono" />
-          <button onClick={async () => { if (!newToken.trim()) return; await onSetToken(newToken.trim()); setNewToken(''); setRevealed(null); }}
-            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700">Replace</button>
+        <div className="flex gap-2 pt-1">
+          <input
+            type="text"
+            value={newToken}
+            onChange={e => setNewToken(e.target.value)}
+            placeholder="Paste new token to replace…"
+            className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-1 focus:ring-blue-400 font-mono"
+          />
+          <button
+            disabled={saving || !newToken.trim()}
+            onClick={async () => { setSaving(true); await onSetToken(newToken.trim()); setNewToken(''); setRevealed(null); setSaving(false); }}
+            className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-semibold hover:bg-blue-700 disabled:opacity-40"
+          >
+            {saving ? '…' : 'Replace'}
+          </button>
         </div>
-        <button onClick={onClearToken}
-          className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200">Clear Token</button>
+        <p className="text-xs text-gray-400">To clear the token, use Options → Clear Canvas Token above.</p>
       </div>
     </div>
   );
@@ -7347,22 +7363,26 @@ const PlanAssist = () => {
 
                   // ── Global-comparative insights ──────────────────────────
                   if (ins) {
-                    if (ins.userCompletionsToday > 0 && ins.globalCompletionsToday > 0) {
+                    // Global share: only show if meaningful (not 100% and user has done >1)
+                    if (ins.userCompletionsToday > 0 && ins.globalCompletionsToday > ins.userCompletionsToday) {
                       const pct = Math.round((ins.userCompletionsToday / ins.globalCompletionsToday) * 100);
-                      if (pct >= 1) insights.push(`🌍 You accounted for ${pct}% of all PlanAssist completions today.`);
+                      if (pct >= 1 && pct <= 50) insights.push(`🌍 You accounted for ${pct}% of all PlanAssist completions today.`);
                     }
-                    if (hubStats.streak >= 2 && ins.streakPercentile >= 50)
+                    // Streak percentile: streakPercentile = % of users with FEWER days = your rank
+                    // Only show if streak ≥ 3 and rank is genuinely good (top 25%)
+                    if (hubStats.streak >= 3 && ins.streakPercentile >= 75)
                       insights.push(`🔥 Your ${hubStats.streak}-day streak puts you in the top ${100 - ins.streakPercentile}% of all students.`);
                     if (ins.globalAvgWeek > 0 && ins.userCompletionsThisWeek > 0) {
                       const ratio = ins.userCompletionsThisWeek / ins.globalAvgWeek;
                       if (ratio >= 1.5) insights.push(`📈 ${ins.userCompletionsThisWeek} tasks this week — ${ratio.toFixed(1)}× the global average of ${ins.globalAvgWeek.toFixed(1)}.`);
-                      else if (ratio < 0.6) insights.push(`📊 Global average is ${ins.globalAvgWeek.toFixed(1)} tasks this week — you're at ${ins.userCompletionsThisWeek}. Still time to catch up.`);
+                      else if (ratio < 0.6 && ins.userCompletionsThisWeek > 0) insights.push(`📊 Global average is ${ins.globalAvgWeek.toFixed(1)} tasks this week — you're at ${ins.userCompletionsThisWeek}. Still time to catch up.`);
                     }
                     if (ins.userAvgSessionMins > 0 && ins.globalAvgSessionMins > 0) {
                       const diff = Math.round(ins.userAvgSessionMins - ins.globalAvgSessionMins);
                       if (Math.abs(diff) >= 3) insights.push(`⏱ Your average session is ${diff > 0 ? diff + ' min longer' : Math.abs(diff) + ' min shorter'} than the global average.`);
                     }
-                    if (ins.gradePercentile != null && ins.gradePercentile >= 50)
+                    // gradePercentile: fraction of grade with fewer completions — show if top 25%
+                    if (ins.gradePercentile != null && ins.gradePercentile >= 75)
                       insights.push(`🏆 You're in the top ${100 - ins.gradePercentile}% of your grade this week.`);
                     if (ins.accuracyDelta != null && Math.abs(ins.accuracyDelta) >= 5) {
                       if (ins.accuracyDelta > 0) insights.push(`🎯 Your time accuracy improved by ${ins.accuracyDelta}% over the last 4 weeks.`);
@@ -7372,11 +7392,12 @@ const PlanAssist = () => {
                       const ratio = ins.userCompletionsThisWeek / ins.userCompletionsLastWeek;
                       if (ratio >= 1.5) insights.push(`🚀 ${ins.userCompletionsThisWeek} tasks this week vs ${ins.userCompletionsLastWeek} last week — ${Math.round((ratio-1)*100)}% more output.`);
                     }
+                    // bestDay and peakHour already timezone-corrected by server; only shown if ≥10 completions
                     if (ins.bestDay) insights.push(`📅 You complete more tasks on ${ins.bestDay}s than any other day.`);
                     if (ins.peakHour != null) {
                       const h = ins.peakHour;
-                      const label = h === 0 ? 'midnight' : h < 12 ? `${h} AM` : h === 12 ? 'noon' : `${h-12} PM`;
-                      insights.push(`🕐 You're historically most productive around ${label}.`);
+                      const label = h === 0 ? 'midnight' : h < 12 ? `${h}:00 AM` : h === 12 ? 'noon' : `${h-12}:00 PM`;
+                      insights.push(`🕐 You're historically most productive around ${label} (your local time).`);
                     }
                   }
 
@@ -12427,7 +12448,6 @@ const PlanAssist = () => {
                           user={u}
                           onViewToken={() => adminViewCanvasToken(u.id)}
                           onSetToken={token => adminSetCanvasToken(u.id, token)}
-                          onClearToken={() => adminClearToken(u.id)}
                         />
 
                         {/* Tasks */}
