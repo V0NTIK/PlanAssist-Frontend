@@ -5522,25 +5522,29 @@ const PlanAssist = () => {
     }
     @keyframes ins-astral-blink {
       0%,100%{opacity:1}
-      6%{opacity:0}
-      8%{opacity:1}
-      14%{opacity:0}
-      16%{opacity:1}
-      22%{opacity:0}
-      24%{opacity:1}
-      /* pause fully lit, then burst again */
-      60%{opacity:1}
-      63%{opacity:0}
-      65%{opacity:1}
-      68%{opacity:0}
-      70%{opacity:1}
+      3%{opacity:0}
+      5%{opacity:1}
+      8%{opacity:0}
+      10%{opacity:1}
+      13%{opacity:0}
+      15%{opacity:1}
+      18%{opacity:0}
+      20%{opacity:1}
+      /* pause fully lit, then second burst */
+      55%{opacity:1}
+      57%{opacity:0}
+      59%{opacity:1}
+      61%{opacity:0}
+      63%{opacity:1}
+      65%{opacity:0}
+      67%{opacity:1}
+      69%{opacity:0}
+      71%{opacity:1}
       73%{opacity:0}
       75%{opacity:1}
-      78%{opacity:0}
-      80%{opacity:1}
     }
     @keyframes ins-pendulum { 0%,100%{transform:rotate(-0.8deg)} 50%{transform:rotate(0.8deg)} }
-    .ins-astral { animation: ins-astral-blink 1.6s ease-in-out infinite, ins-pendulum 3.5s ease-in-out infinite }
+    .ins-astral { animation: ins-astral-blink 1.2s ease-in-out infinite, ins-pendulum 3.5s ease-in-out infinite }
     /* Neutronium — letters light up L→R, stay lit, then each individually fades to unlit neon green */
     /* "Unlit" = dim desaturated green; "lit" = bright glowing neon green */
     @keyframes ins-neut-light {
@@ -5564,17 +5568,17 @@ const PlanAssist = () => {
     /* Per-letter pulse reaction: expand + violent shake as pulse crest passes through */
     @keyframes ins-sing-letter {
       0%  { transform:scale(1) translate(0,0) }
-      /* pulse approaching */
       44% { transform:scale(1) translate(0,0) }
-      /* pulse hits — rapid violent shake while expanding */
-      46% { transform:scale(1.25) translate(-1.5px,-2px) }
-      48% { transform:scale(1.45) translate(2px,1.5px) }
-      50% { transform:scale(1.55) translate(-2px,-1px) }
-      52% { transform:scale(1.45) translate(1.5px,2px) }
-      54% { transform:scale(1.30) translate(-1px,-1.5px) }
-      56% { transform:scale(1.15) translate(1px,1px) }
-      58% { transform:scale(1.05) translate(-0.5px,0.5px) }
-      62% { transform:scale(1) translate(0,0) }
+      /* pulse hits — shake spread over more keyframe steps so it feels slightly slower */
+      46% { transform:scale(1.18) translate(-1px,-1.5px) }
+      48% { transform:scale(1.35) translate(1.5px,1px) }
+      50% { transform:scale(1.50) translate(-1.5px,-1px) }
+      52% { transform:scale(1.55) translate(1px,1.5px) }
+      54% { transform:scale(1.45) translate(-1px,-1px) }
+      57% { transform:scale(1.30) translate(1px,0.5px) }
+      60% { transform:scale(1.15) translate(-0.5px,0.5px) }
+      64% { transform:scale(1.05) translate(0.5px,-0.5px) }
+      68% { transform:scale(1) translate(0,0) }
       100%{ transform:scale(1) translate(0,0) }
     }
     /* Dark Matter drift */
@@ -5823,7 +5827,7 @@ const PlanAssist = () => {
             const delay = (frac * spreadMs).toFixed(2);
             return (
               <span key={i} style={{ ...s.nameStyle, fontSize: fs, display:'inline-block',
-                animation: `ins-singularity-shift 2.5s ease-in-out ${delay}s infinite, ins-sing-letter 2.5s ease-in-out ${delay}s infinite` }}>{ch}</span>
+                animation: `ins-singularity-shift 3.5s ease-in-out ${delay}s infinite, ins-sing-letter 3.5s ease-in-out ${delay}s infinite` }}>{ch}</span>
             );
           })}
         </span>
