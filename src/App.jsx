@@ -738,6 +738,12 @@ const PlanAssist = () => {
   const [adminSelectedUser, setAdminSelectedUser] = useState(null);
   const [adminUserDetail, setAdminUserDetail] = useState(null);
   const [adminDiagnostics, setAdminDiagnostics] = useState(null);
+  const [adminIpBlacklist, setAdminIpBlacklist] = useState([]);
+  const [ipBlacklistLoading, setIpBlacklistLoading] = useState(false);
+  const [newBlockIp, setNewBlockIp] = useState('');
+  const [newBlockReason, setNewBlockReason] = useState('');
+  const [ipBlockSubmitting, setIpBlockSubmitting] = useState(false);
+  const [showCustomScrollbar, setShowCustomScrollbar] = useState(() => localStorage.getItem('pa-custom-scrollbar') !== 'off');
   const [adminAuditLog, setAdminAuditLog] = useState([]);
   const [adminFeedback, setAdminFeedback] = useState([]);
   const [adminSection, setAdminSection] = useState('users');
@@ -749,6 +755,7 @@ const PlanAssist = () => {
   const [newAnnouncementType, setNewAnnouncementType] = useState('info');
   const [banReason, setBanReason] = useState('');
   const [showBanDialog, setShowBanDialog] = useState(null);
+  const [adminOptionsOpen, setAdminOptionsOpen] = useState(false); // controls Options dropdown in user detail
   const [editingUser, setEditingUser] = useState(null);
   const [adminHelpContent, setAdminHelpContent] = useState('');
   const [adminHelpSaving, setAdminHelpSaving] = useState(false);
@@ -3801,6 +3808,15 @@ const PlanAssist = () => {
     finally { setAdminLoading(false); }
   };
 
+  const loadAdminIpBlacklist = async () => {
+    setIpBlacklistLoading(true);
+    try {
+      const data = await apiCall('/admin/ip-blacklist', 'GET');
+      setAdminIpBlacklist(data || []);
+    } catch (err) { console.error(err); }
+    finally { setIpBlacklistLoading(false); }
+  };
+
   const loadAdminAuditLog = async () => {
     try {
       const data = await apiCall('/admin/audit-log', 'GET');
@@ -4772,6 +4788,9 @@ const PlanAssist = () => {
         /* Scrollbar — 7px wide, always rendered at the screen edge.
            scrollbar-gutter:stable reserves the track space even when no scrollbar
            is visible, so the layout never shifts when zooming in/out. */
+        /* When custom scrollbar is disabled by admin/user toggle */
+        [data-hide-scrollbar] ::-webkit-scrollbar { width: 0px !important; height: 0px !important; }
+        [data-hide-scrollbar] * { scrollbar-width: none !important; }
         [data-planassist-theme="system"] ::-webkit-scrollbar { width: 7px; height: 7px; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-track { background: #f1f5f9; }
         [data-planassist-theme="system"] ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -6492,7 +6511,7 @@ const PlanAssist = () => {
   }
 
   return (
-    <div className="bg-gradient-to-br from-gray-50 to-blue-50 h-screen overflow-hidden flex flex-col scrollbar-stable" data-theme={colorTheme} data-planassist-theme={colorTheme}>
+    <div className="bg-gradient-to-br from-gray-50 to-blue-50 h-screen overflow-hidden flex flex-col scrollbar-stable" data-theme={colorTheme} data-planassist-theme={colorTheme} {...(!showCustomScrollbar ? { 'data-hide-scrollbar': 'true' } : {})}>
 
       {/* ── Buy Shield Modal ── */}
       {showBuyShieldModal && (
@@ -12076,7 +12095,7 @@ const PlanAssist = () => {
                   onClick={() => {
                     setAdminSection(id);
                     if (id === 'users' && adminUsers.length === 0) loadAdminUsers();
-                    if (id === 'diagnostics') loadAdminDiagnostics();
+                    if (id === 'diagnostics') { loadAdminDiagnostics(); loadAdminIpBlacklist(); }
                     if (id === 'audit') loadAdminAuditLog();
                     if (id === 'announcements') loadAdminAnnouncements();
                     if (id === 'feedback') loadAdminFeedback();
@@ -12161,14 +12180,27 @@ const PlanAssist = () => {
                       return (
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-gray-400">{filtered.length} of {adminUsers.length} users</span>
-                          {hasFilters && (
-                            <button
-                              onClick={() => { setAdminFilter({ status: 'all', grade: 'all', unsorted: 'all' }); setAdminSearch(''); }}
-                              className="text-xs text-red-500 hover:text-red-700 font-medium"
-                            >
-                              Clear filters
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {(() => {
+                              const activeCount = adminUsers.filter(u => u.in_session).length;
+                              return activeCount > 0 ? (
+                                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>
+                                  {activeCount} active now
+                                </span>
+                              ) : (
+                                <span className="text-xs text-gray-300">0 active</span>
+                              );
+                            })()}
+                            {hasFilters && (
+                              <button
+                                onClick={() => { setAdminFilter({ status: 'all', grade: 'all', unsorted: 'all' }); setAdminSearch(''); }}
+                                className="text-xs text-red-500 hover:text-red-700 font-medium"
+                              >
+                                Clear filters
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })()}
@@ -12217,7 +12249,7 @@ const PlanAssist = () => {
                         .map(u => (
                           <div
                             key={u.id}
-                            onClick={() => { setAdminSelectedUser(u.id); loadAdminUserDetail(u.id); }}
+                            onClick={() => { setAdminSelectedUser(u.id); loadAdminUserDetail(u.id); setAdminOptionsOpen(false); }}
                             className={`p-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${adminSelectedUser === u.id ? 'bg-red-50 border-l-2 border-l-red-500' : ''}`}
                           >
                             <div className="flex items-center justify-between">
@@ -12289,68 +12321,90 @@ const PlanAssist = () => {
                           {editingUser === u.id ? (
                             <EditUserForm user={u} onSave={fields => adminEditUser(u.id, fields)} onCancel={() => setEditingUser(null)} currentUserId={user.id} />
                           ) : (
-                            <div className="flex flex-wrap gap-2">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <button onClick={() => setEditingUser(u.id)} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1">
                                 <Edit2 className="w-3.5 h-3.5" />Edit
                               </button>
-                              <button onClick={() => adminClearToken(u.id)} className="text-xs px-3 py-1.5 bg-yellow-100 text-yellow-700 rounded-lg hover:bg-yellow-200 flex items-center gap-1">
-                                <X className="w-3.5 h-3.5" />Clear Token
-                              </button>
-                              <button onClick={async () => {
-                                try {
-                                  const r = await apiCall(`/admin/users/${u.id}/grant-shield`, 'POST', {});
-                                  alert(`✅ Shield granted to ${u.name}. They now have ${r.shields} shield(s).`);
-                                  loadAdminUsers();
-                                } catch (err) { alert('Failed: ' + err.message); }
-                              }} className="text-xs px-3 py-1.5 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 flex items-center gap-1">
-                                🛡️ Grant Shield {u.streak_shields_available > 0 && <span className="ml-1 font-bold">({u.streak_shields_available})</span>}
-                              </button>
-                              {u.is_banned ? (
-                                <button onClick={() => adminUnbanUser(u.id)} className="text-xs px-3 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 flex items-center gap-1">
-                                  <UserCheck className="w-3.5 h-3.5" />Unblock
+
+                              {/* Options dropdown */}
+                              <div className="relative">
+                                <button
+                                  onClick={() => setAdminOptionsOpen(o => !o)}
+                                  className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 flex items-center gap-1 font-medium"
+                                >
+                                  Options <ChevronDown className="w-3.5 h-3.5" />
                                 </button>
-                              ) : (
-                                <button onClick={() => setShowBanDialog(u.id)} className="text-xs px-3 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 flex items-center gap-1">
-                                  <Ban className="w-3.5 h-3.5" />Block Account
-                                </button>
-                              )}
-                              {/* Block IP button — uses stored last_login_ip, no manual entry needed */}
-                              <button
-                                onClick={async () => {
-                                  const ip = u.last_login_ip;
-                                  if (!ip) {
-                                    alert('No login IP on record for this user. They must log in at least once for an IP to be recorded.');
-                                    return;
-                                  }
-                                  if (!confirm(`Block IP address ${ip} (last known login IP for ${u.name})?\n\nThis will prevent all logins from this address.`)) return;
-                                  try {
-                                    await apiCall(`/admin/users/${u.id}/block-ip`, 'POST', { reason: `Blocked via admin panel (user: ${u.name})` });
-                                    alert(`✅ IP ${ip} has been blocked.`);
-                                  } catch (err) { alert('Failed: ' + err.message); }
-                                }}
-                                title={u.last_login_ip ? `Block ${u.last_login_ip}` : 'No IP on record'}
-                                className={`text-xs px-3 py-1.5 rounded-lg flex items-center gap-1 ${u.last_login_ip ? 'bg-gray-800 text-red-400 hover:bg-black' : 'bg-gray-100 text-gray-400 cursor-not-allowed'}`}
-                              >
-                                🚫 Block IP {u.last_login_ip ? <span className="font-mono ml-1 opacity-70">{u.last_login_ip}</span> : <span className="opacity-50">(none on record)</span>}
-                              </button>
-                              {/* Hacked PlanAssist insignia grant/revoke */}
-                              {(adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist') ? (
-                                <button onClick={async () => {
-                                  if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
-                                  try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
-                                  catch (err) { alert('Failed: ' + err.message); }
-                                }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
-                                  ⚠ Revoke Hack
-                                </button>
-                              ) : (
-                                <button onClick={async () => {
-                                  if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}?`)) return;
-                                  try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ Granted to ${u.name}.`); }
-                                  catch (err) { alert('Failed: ' + err.message); }
-                                }} className="text-xs px-3 py-1.5 bg-gray-900 text-green-400 rounded-lg hover:bg-black font-mono flex items-center gap-1 border border-green-800">
-                                  ⚠ Grant Hack
-                                </button>
-                              )}
+                                {adminOptionsOpen && (
+                                  <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
+                                    {/* Clear Token */}
+                                    <button onClick={() => { adminClearToken(u.id); setAdminOptionsOpen(false); }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-50 flex items-center gap-2 text-yellow-700">
+                                      <X className="w-3.5 h-3.5" />Clear Canvas Token
+                                    </button>
+                                    {/* Grant Shield */}
+                                    <button onClick={async () => {
+                                      setAdminOptionsOpen(false);
+                                      try {
+                                        const r = await apiCall(`/admin/users/${u.id}/grant-shield`, 'POST', {});
+                                        alert(`✅ Shield granted to ${u.name}. They now have ${r.shields} shield(s).`);
+                                        loadAdminUsers();
+                                      } catch (err) { alert('Failed: ' + err.message); }
+                                    }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-50 flex items-center gap-2 text-amber-700">
+                                      🛡️ Grant Shield {u.streak_shields_available > 0 && <span className="ml-auto font-bold text-amber-600">({u.streak_shields_available} held)</span>}
+                                    </button>
+                                    <div className="border-t border-gray-100" />
+                                    {/* Block / Unblock Account */}
+                                    {u.is_banned ? (
+                                      <button onClick={() => { adminUnbanUser(u.id); setAdminOptionsOpen(false); }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-50 flex items-center gap-2 text-green-700">
+                                        <UserCheck className="w-3.5 h-3.5" />Unblock Account
+                                      </button>
+                                    ) : (
+                                      <button onClick={() => { setShowBanDialog(u.id); setAdminOptionsOpen(false); }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-red-50 flex items-center gap-2 text-red-700">
+                                        <Ban className="w-3.5 h-3.5" />Block Account
+                                      </button>
+                                    )}
+                                    {/* Block IP */}
+                                    <button
+                                      onClick={async () => {
+                                        setAdminOptionsOpen(false);
+                                        const ip = u.last_login_ip;
+                                        if (!ip) { alert('No login IP on record for this user. They must log in at least once for an IP to be recorded.'); return; }
+                                        if (!confirm(`Block IP address ${ip} (last known login IP for ${u.name})?\n\nThis will prevent all logins from this address.`)) return;
+                                        try {
+                                          await apiCall(`/admin/users/${u.id}/block-ip`, 'POST', { reason: `Blocked via admin panel (user: ${u.name})` });
+                                          alert(`✅ IP ${ip} has been blocked.`);
+                                        } catch (err) { alert('Failed: ' + err.message); }
+                                      }}
+                                      className="w-full text-left text-xs px-4 py-2.5 hover:bg-red-50 flex items-center gap-2 text-red-700"
+                                    >
+                                      🚫 Block IP {u.last_login_ip ? <span className="ml-auto font-mono text-gray-400">{u.last_login_ip}</span> : <span className="ml-auto text-gray-300 italic">none on record</span>}
+                                    </button>
+                                    <div className="border-t border-gray-100" />
+                                    {/* Hacked PlanAssist insignia */}
+                                    {(adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist') ? (
+                                      <button onClick={async () => {
+                                        setAdminOptionsOpen(false);
+                                        if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
+                                        try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
+                                        catch (err) { alert('Failed: ' + err.message); }
+                                      }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-900 bg-gray-800 flex items-center gap-2 text-green-400 font-mono">
+                                        ⚠ Revoke Hack Insignia
+                                      </button>
+                                    ) : (
+                                      <button onClick={async () => {
+                                        setAdminOptionsOpen(false);
+                                        if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}?`)) return;
+                                        try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ Granted to ${u.name}.`); }
+                                        catch (err) { alert('Failed: ' + err.message); }
+                                      }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-900 bg-gray-800 flex items-center gap-2 text-green-400 font-mono">
+                                        ⚠ Grant Hack Insignia
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Inline status badges */}
+                              {u.is_banned && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">Blocked</span>}
                             </div>
                           )}
 
@@ -12531,7 +12585,7 @@ const PlanAssist = () => {
                           New Signups — Last 3 Days ({d.newUsers.length})
                         </h4>
                         {d.newUsers.length === 0 && <p className="text-gray-400 text-sm">No new signups</p>}
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
                           {d.newUsers.map(u => (
                             <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded-lg">
                               <div>
@@ -12570,7 +12624,7 @@ const PlanAssist = () => {
                           No Canvas Token ({d.noToken.length})
                         </h4>
                         {d.noToken.length === 0 && <p className="text-green-600 text-sm">All set up ✓</p>}
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
                           {d.noToken.map(u => (
                             <div key={u.id} className="flex justify-between text-xs p-2 bg-yellow-50 rounded-lg">
                               <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
@@ -12587,7 +12641,7 @@ const PlanAssist = () => {
                           Stale Syncs — No activity in 7+ days ({d.staleSyncs.length})
                         </h4>
                         {d.staleSyncs.length === 0 && <p className="text-green-600 text-sm">All users syncing ✓</p>}
-                        <div className="space-y-1.5">
+                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
                           {d.staleSyncs.map(u => (
                             <div key={u.id} className="flex justify-between text-xs p-2 bg-orange-50 rounded-lg">
                               <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
@@ -12604,7 +12658,7 @@ const PlanAssist = () => {
                             <AlertTriangle className="w-4 h-4 text-red-500" />
                             Duplicate Tasks ({d.duplicates.length})
                           </h4>
-                          <div className="space-y-1.5">
+                          <div className="space-y-1.5 max-h-64 overflow-y-auto">
                             {d.duplicates.map((d2, i) => (
                               <div key={i} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
                                 <span className="font-medium text-gray-800">{d2.user_name}</span>
@@ -12623,7 +12677,7 @@ const PlanAssist = () => {
                             <AlertTriangle className="w-4 h-4 text-red-500" />
                             Tasks Missing Deadlines ({d.badTasks.length})
                           </h4>
-                          <div className="space-y-1.5">
+                          <div className="space-y-1.5 max-h-64 overflow-y-auto">
                             {d.badTasks.map(t => (
                               <div key={t.id} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
                                 <span className="font-medium text-gray-800">{t.title}</span>
@@ -12665,6 +12719,97 @@ const PlanAssist = () => {
                         }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold transition-colors">
                           🛡️ Grant Streak Shield to All Users
                         </button>
+                      </div>
+
+                      {/* IP Blacklist */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                          <Ban className="w-4 h-4 text-red-500" />
+                          IP Blacklist ({adminIpBlacklist.length})
+                        </h4>
+
+                        {/* Add new IP */}
+                        <div className="flex gap-2 mb-4">
+                          <input
+                            value={newBlockIp}
+                            onChange={e => setNewBlockIp(e.target.value)}
+                            placeholder="IP address (e.g. 1.2.3.4)"
+                            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-400 focus:border-transparent font-mono"
+                          />
+                          <input
+                            value={newBlockReason}
+                            onChange={e => setNewBlockReason(e.target.value)}
+                            placeholder="Reason (optional)"
+                            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-400 focus:border-transparent"
+                          />
+                          <button
+                            disabled={ipBlockSubmitting || !newBlockIp.trim()}
+                            onClick={async () => {
+                              setIpBlockSubmitting(true);
+                              try {
+                                await apiCall('/admin/ip-blacklist', 'POST', { ip_address: newBlockIp.trim(), reason: newBlockReason.trim() });
+                                setNewBlockIp(''); setNewBlockReason('');
+                                await loadAdminIpBlacklist();
+                              } catch (err) { alert('Failed: ' + err.message); }
+                              finally { setIpBlockSubmitting(false); }
+                            }}
+                            className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 whitespace-nowrap"
+                          >
+                            {ipBlockSubmitting ? '…' : 'Block IP'}
+                          </button>
+                        </div>
+
+                        {/* Blocked IPs list */}
+                        {ipBlacklistLoading && <p className="text-xs text-gray-400 py-2">Loading...</p>}
+                        {!ipBlacklistLoading && adminIpBlacklist.length === 0 && (
+                          <p className="text-xs text-gray-400 text-center py-4">No IPs blocked</p>
+                        )}
+                        {adminIpBlacklist.length > 0 && (
+                          <div className="space-y-1.5 max-h-60 overflow-y-auto">
+                            {adminIpBlacklist.map(entry => (
+                              <div key={entry.id} className="flex items-center justify-between text-xs p-2.5 bg-red-50 rounded-lg gap-2">
+                                <div className="flex-1 min-w-0">
+                                  <span className="font-mono font-semibold text-red-800">{entry.ip_address}</span>
+                                  {entry.reason && <span className="text-gray-500 ml-2">{entry.reason}</span>}
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0 text-gray-400">
+                                  {entry.blocked_by_name && <span>by {entry.blocked_by_name}</span>}
+                                  <span>{new Date(entry.created_at).toLocaleDateString()}</span>
+                                  <button
+                                    onClick={async () => {
+                                      if (!confirm(`Unblock ${entry.ip_address}?`)) return;
+                                      try { await apiCall(`/admin/ip-blacklist/${entry.id}`, 'DELETE'); await loadAdminIpBlacklist(); }
+                                      catch (err) { alert('Failed: ' + err.message); }
+                                    }}
+                                    className="text-red-400 hover:text-red-600 ml-1"
+                                    title="Remove from blacklist"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Scrollbar preference */}
+                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                        <h4 className="font-bold text-gray-900 mb-1">Scrollbar Style</h4>
+                        <p className="text-xs text-gray-400 mb-3">Toggle the custom themed scrollbar for all users on this device. Disabling uses the browser default (or hides it entirely).</p>
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => {
+                              const next = !showCustomScrollbar;
+                              setShowCustomScrollbar(next);
+                              localStorage.setItem('pa-custom-scrollbar', next ? 'on' : 'off');
+                            }}
+                            className={`relative w-11 h-6 rounded-full transition-colors ${showCustomScrollbar ? 'bg-purple-600' : 'bg-gray-300'}`}
+                          >
+                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${showCustomScrollbar ? 'translate-x-5' : ''}`} />
+                          </button>
+                          <span className="text-sm text-gray-700">{showCustomScrollbar ? 'Custom scrollbar enabled' : 'Custom scrollbar disabled'}</span>
+                        </div>
                       </div>
 
                       <div className="text-right">
