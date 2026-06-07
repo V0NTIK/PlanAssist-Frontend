@@ -8226,29 +8226,52 @@ const PlanAssist = () => {
                               } catch { return '#ffffff'; }
                             })();
 
+                            // Smart title colour: use course colour, but override if it would be
+                            // illegible against the card background given the active theme.
+                            // Light themes (system / warm): if course colour is too light, use a
+                            // dark fallback so the title still pops. Dark themes (dark / cool): if
+                            // course colour is too dark, use a light fallback.
+                            const titleColor = (() => {
+                              try {
+                                const h = classColor.replace('#','');
+                                const r = parseInt(h.substr(0,2),16);
+                                const g = parseInt(h.substr(2,2),16);
+                                const b = parseInt(h.substr(4,2),16);
+                                const lum = (0.299*r + 0.587*g + 0.114*b)/255;
+                                const isDark = colorTheme === 'dark' || colorTheme === 'cool';
+                                if (!isDark && lum > 0.72) return '#374151'; // light theme + very light colour → dark text
+                                if (isDark && lum < 0.28) return '#e5e7eb'; // dark theme + very dark colour → light text
+                                return classColor; // otherwise use the course colour as-is
+                              } catch { return classColor; }
+                            })();
+
                             return (
                               <div
                                 key={task.id}
                                 className="rounded-lg transition-all bg-white hover:shadow-md border border-gray-100 flex overflow-hidden"
                               >
-                                {/* Wide coloured left bar — course colour + vertical course name */}
+                                {/* Wide coloured left bar — course colour + vertical course name (two lines) */}
                                 <div
-                                  className="flex-shrink-0 flex items-center justify-center"
-                                  style={{ width: '32px', backgroundColor: classColor }}
+                                  className="flex-shrink-0 flex items-center justify-center py-2"
+                                  style={{ width: '52px', backgroundColor: classColor }}
                                   title={className}
                                 >
                                   <span
-                                    className="text-xs font-bold leading-none select-none"
+                                    className="font-bold select-none text-center leading-tight"
                                     style={{
                                       color: barTextColor,
                                       writingMode: 'vertical-rl',
                                       textOrientation: 'mixed',
                                       transform: 'rotate(180deg)',
-                                      maxHeight: '90px',
+                                      maxHeight: '110px',
                                       overflow: 'hidden',
-                                      textOverflow: 'ellipsis',
-                                      whiteSpace: 'nowrap',
-                                      fontSize: className.length > 18 ? '9px' : className.length > 12 ? '10px' : '11px',
+                                      wordBreak: 'break-word',
+                                      whiteSpace: 'normal',
+                                      fontSize: className.length > 20 ? '8px' : className.length > 14 ? '9px' : '10px',
+                                      lineHeight: '1.2',
+                                      display: '-webkit-box',
+                                      WebkitBoxOrient: 'vertical',
+                                      WebkitLineClamp: 2,
                                     }}
                                   >
                                     {className}
@@ -8283,23 +8306,23 @@ const PlanAssist = () => {
 
                                   {/* Info block */}
                                   <div className="flex-1 min-w-0">
-                                    {/* Row 1: Title (course-coloured) + status badges */}
+                                    {/* Row 1: Title (course-coloured, theme-aware) + status badges */}
                                     <div className="flex items-start gap-2 flex-wrap mb-0.5">
                                       {task.url ? (
                                         <a href={task.url} target="_blank" rel="noopener noreferrer"
                                           className="font-semibold text-base hover:underline transition-colors leading-snug"
-                                          style={{ color: classColor }}>
+                                          style={{ color: titleColor }}>
                                           {cleanTaskTitle(task)}
                                         </a>
                                       ) : (
-                                        <span className="font-semibold text-base leading-snug" style={{ color: classColor }}>{cleanTaskTitle(task)}</span>
+                                        <span className="font-semibold text-base leading-snug" style={{ color: titleColor }}>{cleanTaskTitle(task)}</span>
                                       )}
                                       {statusBadges.map(b => (
                                         <span key={b.label} className={`px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 mt-0.5 ${b.cls}`}>{b.label}</span>
                                       ))}
                                     </div>
 
-                                    {/* Row 2: Deadline + time estimate + grade impact + Split + Notes */}
+                                    {/* Row 2: Deadline + time estimate + grade impact + Split + Notes + inline progress */}
                                     <div className="flex items-center gap-2 flex-wrap text-xs">
                                       <span className={`flex items-center gap-1 ${urgencyTextClass}`}>
                                         <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
@@ -8367,49 +8390,52 @@ const PlanAssist = () => {
                                         {descPreview}{task.description && stripDescHtml(task.description).length > 100 ? '…' : ''}
                                       </p>
                                     )}
-
-                                    {/* Row 4: Progress bar (if in progress) */}
-                                    {hasProgress && (
-                                      <div className="mt-2 flex items-center gap-2">
-                                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: classColor, opacity: 0.7 }} />
-                                        </div>
-                                        <span className="text-xs text-gray-400 flex-shrink-0">{accMin}m / {estMin}m</span>
-                                      </div>
-                                    )}
                                   </div>
 
-                                  {/* Start/Resume — enlarged, right side, vertically centred */}
-                                  {!isHomeroom && (() => {
-                                    const isStarting = sessionStartingId === task.id;
-                                    return (
-                                      <button
-                                        onClick={() => {
-                                          if (isStarting) return;
-                                          const sessionTask = {
-                                            id: task.id, title: task.title, segment: task.segment,
-                                            class: task.class, url: task.url,
-                                            dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
-                                            estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
-                                            accumulatedTime: (task.accumulatedTime || 0) * 60,
-                                            sessionActive: false, assignmentId: task.assignmentId,
-                                            course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
-                                          };
-                                          startTaskSession(sessionTask);
-                                        }}
-                                        disabled={isStarting}
-                                        className={`flex-shrink-0 self-center flex flex-col items-center justify-center gap-1 px-4 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm ${isStarting ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-br from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
-                                        style={{ minWidth: '72px' }}
-                                        title={hasProgress ? `Resume (${accMin}m logged)` : 'Start a timed session'}
-                                      >
-                                        {isStarting
-                                          ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                          : <Play className="w-4 h-4" />
-                                        }
-                                        <span>{hasProgress ? 'Resume' : 'Start'}</span>
-                                      </button>
-                                    );
-                                  })()}
+                                  {/* Right side: optional progress bar + Start/Resume button */}
+                                  <div className="flex-shrink-0 self-center flex items-center gap-2">
+                                    {/* Progress bar — vertical, beside the button, only when in progress */}
+                                    {hasProgress && !isHomeroom && (
+                                      <div className="flex flex-col items-center gap-1" style={{ width: '28px' }}>
+                                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: classColor, opacity: 0.75 }} />
+                                        </div>
+                                        <span className="text-gray-400 font-medium" style={{ fontSize: '9px', lineHeight: 1 }}>{accMin}m</span>
+                                      </div>
+                                    )}
+
+                                    {/* Start/Resume — enlarged */}
+                                    {!isHomeroom && (() => {
+                                      const isStarting = sessionStartingId === task.id;
+                                      return (
+                                        <button
+                                          onClick={() => {
+                                            if (isStarting) return;
+                                            const sessionTask = {
+                                              id: task.id, title: task.title, segment: task.segment,
+                                              class: task.class, url: task.url,
+                                              dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
+                                              estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
+                                              accumulatedTime: (task.accumulatedTime || 0) * 60,
+                                              sessionActive: false, assignmentId: task.assignmentId,
+                                              course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
+                                            };
+                                            startTaskSession(sessionTask);
+                                          }}
+                                          disabled={isStarting}
+                                          className={`flex flex-col items-center justify-center gap-1 px-4 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm ${isStarting ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-br from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
+                                          style={{ minWidth: '72px' }}
+                                          title={hasProgress ? `Resume (${accMin}m logged)` : 'Start a timed session'}
+                                        >
+                                          {isStarting
+                                            ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            : <Play className="w-4 h-4" />
+                                          }
+                                          <span>{hasProgress ? 'Resume' : 'Start'}</span>
+                                        </button>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
                               </div>
                             );
