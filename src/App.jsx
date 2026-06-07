@@ -693,7 +693,7 @@ const PlanAssist = () => {
     name: '',
     grade: '',
     canvasApiToken: '',
-    campus: 'Ashland',
+    campus: '',
     tzPeriods: null,  // populated from server; null means fall back to getEffectivePeriods(campus)
     schedule: {},
     classColors: {},
@@ -4899,6 +4899,10 @@ const PlanAssist = () => {
         [data-planassist-theme="system"] .pa-sync-text { color: #7c3aed; }
         [data-planassist-theme="system"] .pa-agenda-card-bottom { background: #ffffff; }
         [data-planassist-theme="system"] .pa-agenda-bg { background: linear-gradient(135deg, #f9fafb, #f3e8ff); }
+        [data-planassist-theme="system"] .pa-card { background: #ffffff; }
+        [data-planassist-theme="system"] .pa-text { color: #111827; }
+        [data-planassist-theme="system"] .pa-subtext { color: #6b7280; }
+        [data-planassist-theme="system"] .pa-border { border-color: #e5e7eb; }
       `,
       warm: `
         :root { color-scheme: light; }
@@ -4915,6 +4919,10 @@ const PlanAssist = () => {
         [data-planassist-theme="warm"] .pa-sync-text { color: #c2185b; }
         [data-planassist-theme="warm"] .pa-agenda-card-bottom { background: #fff5f8; }
         [data-planassist-theme="warm"] .pa-agenda-bg { background: linear-gradient(135deg, #fff0f5, #fce4ec); }
+        [data-planassist-theme="warm"] .pa-card { background: #fff5f8; }
+        [data-planassist-theme="warm"] .pa-text { color: #1a1a2e; }
+        [data-planassist-theme="warm"] .pa-subtext { color: #a85070; }
+        [data-planassist-theme="warm"] .pa-border { border-color: #f8bbd9; }
         [data-planassist-theme="warm"] .pa-sync-card .border-purple-600 { border-color: #e91e8c !important; }
         /* ── Page background: white ──────────────────────────── */
         [data-planassist-theme="warm"] { background: #ffffff !important; }
@@ -5074,6 +5082,10 @@ const PlanAssist = () => {
         [data-planassist-theme="cool"] .pa-sync-text { color: #66bb6a; }
         [data-planassist-theme="cool"] .pa-agenda-card-bottom { background: #192218; }
         [data-planassist-theme="cool"] .pa-agenda-bg { background: linear-gradient(135deg, #0a0f0a, #111811); }
+        [data-planassist-theme="cool"] .pa-card { background: #192218; }
+        [data-planassist-theme="cool"] .pa-text { color: #c8e6c9; }
+        [data-planassist-theme="cool"] .pa-subtext { color: #81c784; }
+        [data-planassist-theme="cool"] .pa-border { border-color: #2e4a30; }
         [data-planassist-theme="cool"] .pa-sync-card .border-purple-600 { border-color: #43a047 !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="cool"] { background: #0a0f0a !important; color: #e8f5e9; }
@@ -5266,6 +5278,10 @@ const PlanAssist = () => {
         [data-planassist-theme="dark"] .pa-sync-text { color: #b39ddb; }
         [data-planassist-theme="dark"] .pa-agenda-card-bottom { background: #1e1e30; }
         [data-planassist-theme="dark"] .pa-agenda-bg { background: linear-gradient(135deg, #0d0d14, #13131f); }
+        [data-planassist-theme="dark"] .pa-card { background: #1e1e30; }
+        [data-planassist-theme="dark"] .pa-text { color: #e2e8f0; }
+        [data-planassist-theme="dark"] .pa-subtext { color: #94a3b8; }
+        [data-planassist-theme="dark"] .pa-border { border-color: #2d2d4a; }
         [data-planassist-theme="dark"] .pa-sync-card .border-purple-600 { border-color: #7c4dff !important; }
         /* ── Page background: black ──────────────────────────── */
         [data-planassist-theme="dark"] { background: #0d0d14 !important; color: #e8eaf6; }
@@ -6619,31 +6635,49 @@ const PlanAssist = () => {
     {
       page: 'hub',
       title: '👋 Welcome to PlanAssist!',
-      body: 'This is your Hub — your home base. Here you can see your live activity feed, leaderboard, and stats at a glance.',
+      body: "This is your Hub — your home base. It shows your streak, credits, leaderboard rank, live activity feed, and quick-action cards. Everything you need at a glance before you start studying.",
       arrow: null,
     },
     {
       page: 'tasks',
-      title: '📋 Your Task List',
-      body: 'This is where all your Canvas assignments live. Tasks are automatically sorted by deadline. Set manual time estimates, split big tasks into segments, or start a session directly. Hit Sync to pull in fresh assignments from Canvas.',
+      title: '📋 Tasks — Your Planning Quarry',
+      body: "All your Canvas assignments live here, sorted by deadline. The left colour bar shows the course, urgency is colour-coded in the deadline text, and you can see Grade Impact badges, time estimates, and a description preview. Hit Sync to pull in fresh work, or use the filter chips to focus on what's due today or overdue. You can also Add a manual task.",
+      arrow: null,
+    },
+    {
+      page: 'calendar',
+      title: '🗓 Calendar',
+      body: "A week-at-a-glance view of all your deadlines. Each task bubble shows the title and estimated time. Tap a bubble to expand it — you'll see the description, grade impact, and a Start Session button. Past days with incomplete tasks show a red overdue header so nothing slips through the cracks.",
       arrow: null,
     },
     {
       page: 'organizer',
-      title: '⏱ Organizer',
-      body: "The Organizer is your daily scheduling engine. It reads your study periods and automatically distributes your tasks across available study time, showing exactly how long to spend on each task today. Export your day as Agendas in one tap.",
+      title: '⏱ Organizer — Your Daily Scheduler',
+      body: "The Organizer is the engine behind your day. It reads your study periods, finds all your tasks, and automatically calculates how many minutes to spend on each task today — and every future study period until the deadline. The left panel shows all tasks, the centre shows today's priority list, and the right panel shows what's in each study period. Hit Generate Agendas to export your schedule directly to the Agendas page.",
+      arrow: null,
+    },
+    {
+      page: 'agendas',
+      title: '📝 Agendas — Row-by-Row Work Plans',
+      body: "An Agenda is a structured work session: each row is one task, one action, and a timer. Open one and PlanAssist will count down the time for each row, ping you when it's up, and move to the next. You can assign an Agenda to a specific date and period to have it appear in your Itinerary. Agendas with more than 60 minutes must be assigned to Outside School.",
+      arrow: null,
+    },
+    {
+      page: 'itinerary',
+      title: '🗒 Itinerary — Your Day in Detail',
+      body: "The Itinerary shows every period in your school day. Each period has three panels: Events (Tutorials and Meetings you've booked), Study Plan (tasks from the Organizer), and Agenda (any Agenda you've appointed to that period). There's also an Outside School block at the bottom for work beyond the school day — and it's the only section shown on weekends.",
       arrow: null,
     },
     {
       page: 'marks',
       title: '📊 Marks',
-      body: 'The Marks page shows your current grade in every course, compared against the global average of all PlanAssist users. Grades update automatically when you sync.',
+      body: "See your current grade in every course, compared against the campus-wide average of all PlanAssist users. Grades update automatically each Canvas sync. Your overall GPA and year average are shown at the top.",
       arrow: null,
     },
     {
       page: 'hub',
-      title: '🚀 You\'re all set!',
-      body: "Start by syncing your Canvas tasks, then use the Organizer to see today's schedule and export Agendas. Good luck!",
+      title: '🚀 You\'re ready!',
+      body: "Start by syncing Canvas on the Tasks page, then open the Organizer to see your automated daily schedule. Export it as Agendas, open your first one, and get to work. Your streak starts the moment you complete your first task. Good luck! 🎯",
       arrow: null,
     },
   ];
@@ -7232,7 +7266,7 @@ const PlanAssist = () => {
                         { label: 'Streak',   value: `${profileModalData.streakDays ?? 0}d`,  icon: '🔥' },
                         { label: 'Credits',  value: profileModalData.credits ?? 0,           icon: '🪙' },
                       ].map(s => (
-                        <div key={s.label} className="bg-gray-50 rounded-xl p-2.5">
+                        <div key={s.label} className="pa-card rounded-xl p-2.5">
                           <p className="text-base mb-0.5">{s.icon}</p>
                           <p className="text-sm font-bold text-gray-900">{s.value}</p>
                           <p className="text-[9px] text-gray-400 uppercase tracking-wide leading-tight">{s.label}</p>
@@ -7250,10 +7284,10 @@ const PlanAssist = () => {
                           {profileModalData.badges.map(b => {
                             const def = PROFILE_BADGE_DEFS[b.badge_key] || { emoji: '🏅', name: b.badge_key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), desc: '' };
                             return (
-                              <div key={b.badge_key} className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-3 text-center flex flex-col items-center gap-1">
+                              <div key={b.badge_key} className="pa-card border pa-border rounded-xl p-3 text-center flex flex-col items-center gap-1">
                                 <span className="text-xl">{def.emoji}</span>
-                                <p className="text-xs font-bold text-gray-800 leading-tight">{def.name}</p>
-                                <p className="text-[9px] text-gray-400 leading-tight">{def.desc}</p>
+                                <p className="text-xs font-bold pa-text leading-tight">{def.name}</p>
+                                <p className="text-[9px] pa-subtext leading-tight">{def.desc}</p>
                               </div>
                             );
                           })}
@@ -10580,8 +10614,107 @@ const PlanAssist = () => {
               </div>
 
               {isViewWeekend && (
-                <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl text-center">
-                  <p className="text-gray-500 text-sm">Weekend — no school periods. Use the Organizer's Outside School section for weekend study planning.</p>
+                <div className="space-y-3">
+                  <div className="p-4 bg-gray-50 border border-gray-200 rounded-xl text-center">
+                    <p className="text-gray-500 text-sm">Weekend — no school periods. Outside School shows any work you've planned.</p>
+                  </div>
+                  {/* Outside School block — always shown on weekends */}
+                  <div className="rounded-2xl border-2 border-dashed border-gray-200 overflow-hidden">
+                    <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                      <p className="text-sm font-semibold text-gray-600">Outside School</p>
+                      <p className="text-xs text-gray-400">Weekend work</p>
+                    </div>
+                    <div className="flex bg-white">
+                      {/* Events */}
+                      {showEvents && (
+                        <div className={`flex-1 min-w-0 ${(showOrganizer || showAgenda) ? 'border-r border-gray-100' : ''} p-3`}>
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Events</p>
+                          {(() => {
+                            const allEvents = [...itineraryTutorials, ...itineraryMeetings];
+                            if (allEvents.length === 0) return <p className="text-xs text-gray-300 italic">No events booked</p>;
+                            return (
+                              <div className="space-y-1.5">
+                                {itineraryTutorials.map(tut => (
+                                  <div key={tut.id} className="flex items-center justify-between p-2 bg-orange-50 border border-orange-200 rounded-xl">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-orange-900 truncate">{tut.title}</p>
+                                      <p className="text-xs text-orange-400">{campusUTCToLocal(tut.scheduled_time, accountSetup.campus)}</p>
+                                    </div>
+                                    {tut.zoom_number && <a href={`https://oneschoolglobal.zoom.us/j/${tut.zoom_number.replace(/[\s-]/g,'')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 hover:underline ml-2 flex-shrink-0">Join Zoom</a>}
+                                  </div>
+                                ))}
+                                {itineraryMeetings.map(mtg => (
+                                  <div key={mtg.id} className="flex items-center justify-between p-2 bg-indigo-50 border border-indigo-200 rounded-xl">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-indigo-900 truncate">{mtg.title}</p>
+                                      <p className="text-xs text-indigo-400">{campusUTCToLocal(mtg.scheduled_time, accountSetup.campus)}</p>
+                                    </div>
+                                    {mtg.zoom_number && <a href={`https://oneschoolglobal.zoom.us/j/${mtg.zoom_number.replace(/[\s-]/g,'')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline ml-2 flex-shrink-0">Join Zoom</a>}
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      {/* Organizer */}
+                      {showOrganizer && (
+                        <div className={`flex-1 min-w-0 ${showAgenda ? 'border-r border-gray-100' : ''} p-3`}>
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Study Plan</p>
+                          {(() => {
+                            const osAgenda = itineraryAgendas.find(ag => ag.name && ag.name.startsWith('Outside School'));
+                            if (!osAgenda) return <p className="text-xs text-gray-300 italic">No outside-school work planned</p>;
+                            return (
+                              <div className="space-y-1.5">
+                                {(osAgenda.rows || []).map((row, i) => {
+                                  const t = tasks.find(tk => tk.id === row.taskId);
+                                  if (!t) return null;
+                                  const cc = getClassColor(t);
+                                  return (
+                                    <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
+                                      <div style={{ backgroundColor: cc, minHeight: '28px', width: '3px' }} className="rounded-full flex-shrink-0 self-stretch" />
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-semibold truncate" style={{ color: cc }}>{cleanTaskTitle(t)}</p>
+                                      </div>
+                                      <span className="text-xs font-semibold text-gray-500">{row.timeMins}m</span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
+                      {/* Agenda */}
+                      {showAgenda && (
+                        <div className="flex-1 min-w-0 p-3">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Agenda</p>
+                          {outsideSchoolAgendas.length === 0
+                            ? <p className="text-xs text-gray-300 italic">No agendas appointed</p>
+                            : (
+                              <div className="space-y-1.5">
+                                {outsideSchoolAgendas.map(ag => {
+                                  const totalMins = (ag.rows || []).reduce((s, r) => s + (r.timeMins || 0), 0);
+                                  return (
+                                    <div key={ag.id} className="flex items-center justify-between p-2 bg-purple-50 border border-purple-100 rounded-xl">
+                                      <div className="min-w-0">
+                                        <p className="text-xs font-semibold text-purple-900 truncate">{ag.name}</p>
+                                        <p className="text-xs text-purple-400">{ag.rows?.length || 0} rows · {totalMins}m</p>
+                                      </div>
+                                      <button onClick={() => openAgenda(ag)}
+                                        className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded text-xs font-semibold hover:bg-purple-700 flex-shrink-0 ml-2">
+                                        <Play className="w-3 h-3" /> Open
+                                      </button>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )
+                          }
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -11288,48 +11421,58 @@ const PlanAssist = () => {
                       )}
                     </div>
 
-                    {/* Weekly Schedule */}
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-3">Weekly Schedule <span className="text-red-500">*</span></label>
-                      <div className="border border-gray-200 rounded-xl overflow-hidden">
-                        <table className="w-full">
-                          <thead className="bg-gray-50">
-                            <tr>
-                              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
-                              {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
-                                <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">{day.slice(0,3)}</th>
-                              ))}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {selectedPeriods.map(period => (
-                              <tr key={period} className="border-t">
-                                <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
+                    {/* Weekly Schedule — only shown once a valid campus is selected */}
+                    {accountSetup.campus && VALID_CAMPUSES.includes(accountSetup.campus) && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Weekly Schedule <span className="text-red-500">*</span></label>
+                        <p className="text-xs text-gray-500 mb-3">Showing periods for <span className="font-semibold text-purple-700">{accountSetup.campus}</span>. Set each period to Study or Lesson.</p>
+                        <div className="border border-gray-200 rounded-xl overflow-hidden">
+                          <table className="w-full">
+                            <thead className="bg-gray-50">
+                              <tr>
+                                <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700">Period</th>
                                 {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
-                                  <td key={day} className="px-4 py-3 text-center">
-                                    <select
-                                      value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
-                                      onChange={(e) => {
-                                        const newSchedule = { ...accountSetup.schedule };
-                                        if (!newSchedule[day]) newSchedule[day] = {};
-                                        newSchedule[day][period] = e.target.value;
-                                        setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
-                                      }}
-                                      className={`px-3 py-2 rounded-lg font-medium text-sm ${
-                                        (accountSetup.schedule[day]?.[String(period)] || 'Study') === 'Study'
-                                          ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
-                                      }`}>
-                                      <option value="Study">Study</option>
-                                      <option value="Lesson">Lesson</option>
-                                    </select>
-                                  </td>
+                                  <th key={day} className="px-4 py-3 text-center text-sm font-semibold text-gray-700">{day.slice(0,3)}</th>
                                 ))}
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {selectedPeriods.map(period => (
+                                <tr key={period} className="border-t">
+                                  <td className="px-4 py-3 font-medium text-gray-900">P{period}</td>
+                                  {['Monday','Tuesday','Wednesday','Thursday','Friday'].map(day => (
+                                    <td key={day} className="px-4 py-3 text-center">
+                                      <select
+                                        value={accountSetup.schedule[day]?.[String(period)] || 'Study'}
+                                        onChange={(e) => {
+                                          const newSchedule = { ...accountSetup.schedule };
+                                          if (!newSchedule[day]) newSchedule[day] = {};
+                                          newSchedule[day][period] = e.target.value;
+                                          setAccountSetup(prev => ({ ...prev, schedule: newSchedule }));
+                                        }}
+                                        className={`px-3 py-2 rounded-lg font-medium text-sm ${
+                                          (accountSetup.schedule[day]?.[String(period)] || 'Study') === 'Study'
+                                            ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'
+                                        }`}>
+                                        <option value="Study">Study</option>
+                                        <option value="Lesson">Lesson</option>
+                                      </select>
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
+                    )}
+
+                    {/* Prompt to select campus if not yet done */}
+                    {(!accountSetup.campus || !VALID_CAMPUSES.includes(accountSetup.campus)) && (
+                      <div className="p-4 bg-purple-50 border border-purple-200 rounded-xl text-sm text-purple-700">
+                        <span className="font-semibold">Select your campus above</span> to reveal your schedule periods.
+                      </div>
+                    )}
 
                     <button
                       onClick={saveAccountSetup}
@@ -12176,7 +12319,7 @@ const PlanAssist = () => {
                                   {earnedBadges.map(b => {
                                     const def = BDEFS[b.badge_key] || { emoji: '🏅', name: b.badge_key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') };
                                     return (
-                                      <div key={b.id || b.badge_key} className="flex items-center justify-between p-3 rounded-xl border bg-yellow-50 border-yellow-200">
+                                      <div key={b.id || b.badge_key} className="flex items-center justify-between p-3 rounded-xl border pa-card pa-border">
                                         <div className="flex items-center gap-2">
                                           <span className="text-lg">{def.emoji}</span>
                                           <p className="text-sm font-semibold text-yellow-800">{def.name}</p>
@@ -12887,11 +13030,11 @@ const PlanAssist = () => {
                           <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-3">Earned</p>
                           <div className="grid grid-cols-3 gap-3">
                             {earned.map(b => (
-                              <div key={b.badge_key} className="bg-gradient-to-br from-purple-50 to-blue-50 border border-purple-200 rounded-2xl p-4 text-center shadow-sm">
+                              <div key={b.badge_key} className="pa-card border border-purple-200 rounded-2xl p-4 text-center shadow-sm">
                                 <div className="text-3xl mb-1">{b.emoji}</div>
-                                <div className="font-bold text-gray-800 text-xs">{b.name}</div>
-                                <div className="text-gray-500 text-xs mt-0.5">{b.desc}</div>
-                                <div className="text-gray-400 text-xs mt-1">{new Date(b.awarded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
+                                <div className="font-bold pa-text text-xs">{b.name}</div>
+                                <div className="pa-subtext text-xs mt-0.5">{b.desc}</div>
+                                <div className="pa-subtext text-xs mt-1">{new Date(b.awarded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</div>
                               </div>
                             ))}
                           </div>
@@ -12902,10 +13045,10 @@ const PlanAssist = () => {
                           <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide mb-3">Locked</p>
                           <div className="grid grid-cols-3 gap-3">
                             {locked.map(([key, def]) => (
-                              <div key={key} className="bg-gray-50 border border-gray-200 rounded-2xl p-4 text-center opacity-50">
+                              <div key={key} className="pa-card border pa-border rounded-2xl p-4 text-center opacity-50">
                                 <div className="text-3xl mb-1 grayscale">{def.emoji}</div>
-                                <div className="font-bold text-gray-500 text-xs">{def.name}</div>
-                                <div className="text-gray-400 text-xs mt-0.5">{def.desc}</div>
+                                <div className="font-bold pa-subtext text-xs">{def.name}</div>
+                                <div className="pa-subtext text-xs mt-0.5">{def.desc}</div>
                               </div>
                             ))}
                           </div>
