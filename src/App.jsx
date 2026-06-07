@@ -8067,7 +8067,7 @@ const PlanAssist = () => {
             {/* Main Task List */}
             <div className="flex-1">
               <div className="h-full overflow-y-auto p-6">
-                <div className="max-w-4xl mx-auto">
+                <div className="max-w-5xl mx-auto">
                   {isLoadingTasks ? (
                     <div className="bg-white rounded-xl shadow-md p-6 space-y-4">
                       <div className="flex items-center justify-between mb-6">
@@ -8215,16 +8215,50 @@ const PlanAssist = () => {
                             if (task.isMissing) statusBadges.push({ label: 'Missing', cls: 'bg-red-100 text-red-700' });
                             if (task.isLate) statusBadges.push({ label: 'Late', cls: 'bg-amber-100 text-amber-700' });
 
+                            // Vertical class label text colour
+                            const barTextColor = (() => {
+                              try {
+                                const h = classColor.replace('#','');
+                                const r = parseInt(h.substr(0,2),16);
+                                const g = parseInt(h.substr(2,2),16);
+                                const b = parseInt(h.substr(4,2),16);
+                                return (0.299*r + 0.587*g + 0.114*b)/255 > 0.55 ? '#1a1a1a' : '#ffffff';
+                              } catch { return '#ffffff'; }
+                            })();
+
                             return (
-                              <div 
+                              <div
                                 key={task.id}
-                                className="rounded-lg transition-all bg-white hover:shadow-md border border-gray-100"
-                                style={{ borderLeft: `5px solid ${classColor}` }}
+                                className="rounded-lg transition-all bg-white hover:shadow-md border border-gray-100 flex overflow-hidden"
                               >
+                                {/* Wide coloured left bar — course colour + vertical course name */}
+                                <div
+                                  className="flex-shrink-0 flex items-center justify-center"
+                                  style={{ width: '32px', backgroundColor: classColor }}
+                                  title={className}
+                                >
+                                  <span
+                                    className="text-xs font-bold leading-none select-none"
+                                    style={{
+                                      color: barTextColor,
+                                      writingMode: 'vertical-rl',
+                                      textOrientation: 'mixed',
+                                      transform: 'rotate(180deg)',
+                                      maxHeight: '90px',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap',
+                                      fontSize: className.length > 18 ? '9px' : className.length > 12 ? '10px' : '11px',
+                                    }}
+                                  >
+                                    {className}
+                                  </span>
+                                </div>
+
                                 {/* Main card content */}
-                                <div className="p-3 flex items-start gap-3">
-                                  {/* Checkbox */}
-                                  <div className="flex-shrink-0 pt-0.5">
+                                <div className="flex-1 min-w-0 flex items-center gap-3 p-3">
+                                  {/* Checkbox — vertically centred */}
+                                  <div className="flex-shrink-0 self-center">
                                     {checkingTask === task.id ? (
                                       <div className="w-5 h-5 flex items-center justify-center">
                                         <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
@@ -8249,27 +8283,24 @@ const PlanAssist = () => {
 
                                   {/* Info block */}
                                   <div className="flex-1 min-w-0">
-                                    {/* Row 1: Title + class chip + status badges */}
+                                    {/* Row 1: Title (course-coloured) + status badges */}
                                     <div className="flex items-start gap-2 flex-wrap mb-0.5">
                                       {task.url ? (
                                         <a href={task.url} target="_blank" rel="noopener noreferrer"
-                                          className="font-semibold text-gray-900 text-base hover:text-purple-600 hover:underline transition-colors leading-snug">
+                                          className="font-semibold text-base hover:underline transition-colors leading-snug"
+                                          style={{ color: classColor }}>
                                           {cleanTaskTitle(task)}
                                         </a>
                                       ) : (
-                                        <span className="font-semibold text-gray-900 text-base leading-snug">{cleanTaskTitle(task)}</span>
+                                        <span className="font-semibold text-base leading-snug" style={{ color: classColor }}>{cleanTaskTitle(task)}</span>
                                       )}
-                                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white flex-shrink-0 mt-0.5"
-                                        style={{ backgroundColor: classColor }}>
-                                        {className}
-                                      </span>
                                       {statusBadges.map(b => (
                                         <span key={b.label} className={`px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 mt-0.5 ${b.cls}`}>{b.label}</span>
                                       ))}
                                     </div>
 
-                                    {/* Row 2: Deadline + time estimate + grade impact */}
-                                    <div className="flex items-center gap-3 flex-wrap text-xs">
+                                    {/* Row 2: Deadline + time estimate + grade impact + Split + Notes */}
+                                    <div className="flex items-center gap-2 flex-wrap text-xs">
                                       <span className={`flex items-center gap-1 ${urgencyTextClass}`}>
                                         <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
                                         {urgency === 'overdue' ? `Overdue · ${dayName}${timeLabel}` : `${dayName}${timeLabel}`}
@@ -8307,11 +8338,32 @@ const PlanAssist = () => {
                                           {gradeImpact[task.id]} Impact
                                         </span>
                                       )}
+                                      {/* Split + Notes inline after grade impact */}
+                                      {!isHomeroom && (
+                                        <button onClick={() => setShowSplitTask(task.id)}
+                                          className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded text-xs font-medium hover:bg-purple-100 transition-all"
+                                          title="Split task into segments">
+                                          Split
+                                        </button>
+                                      )}
+                                      <button onClick={() => openNotesPopup(task)}
+                                        className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-xs font-medium hover:bg-amber-100 transition-all relative flex items-center gap-1"
+                                        title="Open notes">
+                                        <FileText className="w-3 h-3" />
+                                        Notes
+                                        {tasksWithNotes.has(task.id) && (
+                                          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" />
+                                        )}
+                                      </button>
                                     </div>
 
-                                    {/* Row 3: Description preview (How) */}
+                                    {/* Row 3: Description preview — clickable to open Details */}
                                     {descPreview && (
-                                      <p className="text-xs text-gray-400 mt-1 leading-relaxed line-clamp-1">
+                                      <p
+                                        className="text-xs text-gray-400 mt-1 leading-relaxed line-clamp-1 cursor-pointer hover:text-gray-600 transition-colors"
+                                        title="Click to view full assignment details"
+                                        onClick={() => setShowTaskDescription(task)}
+                                      >
                                         {descPreview}{task.description && stripDescHtml(task.description).length > 100 ? '…' : ''}
                                       </p>
                                     )}
@@ -8327,61 +8379,37 @@ const PlanAssist = () => {
                                     )}
                                   </div>
 
-                                  {/* Action buttons — right side */}
-                                  <div className="flex flex-col gap-1.5 flex-shrink-0 items-end">
-                                    {/* Start/Resume — always visible for non-homeroom */}
-                                    {!isHomeroom && (() => {
-                                      const isStarting = sessionStartingId === task.id;
-                                      return (
-                                        <button
-                                          onClick={() => {
-                                            if (isStarting) return;
-                                            const sessionTask = {
-                                              id: task.id, title: task.title, segment: task.segment,
-                                              class: task.class, url: task.url,
-                                              dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
-                                              estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
-                                              accumulatedTime: (task.accumulatedTime || 0) * 60,
-                                              sessionActive: false, assignmentId: task.assignmentId,
-                                              course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
-                                            };
-                                            startTaskSession(sessionTask);
-                                          }}
-                                          disabled={isStarting}
-                                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-semibold text-xs transition-all shadow-sm ${isStarting ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
-                                        >
-                                          {isStarting
-                                            ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                            : <Play className="w-3 h-3" />
-                                          }
-                                          {hasProgress ? 'Resume' : 'Start'}
-                                        </button>
-                                      );
-                                    })()}
-                                    {/* Secondary actions row */}
-                                    <div className="flex gap-1">
-                                      <button onClick={() => setShowTaskDescription(task)}
-                                        className="px-2 py-1 bg-blue-50 text-blue-600 rounded text-xs font-medium hover:bg-blue-100 transition-all"
-                                        title="View assignment details">
-                                        Details
+                                  {/* Start/Resume — enlarged, right side, vertically centred */}
+                                  {!isHomeroom && (() => {
+                                    const isStarting = sessionStartingId === task.id;
+                                    return (
+                                      <button
+                                        onClick={() => {
+                                          if (isStarting) return;
+                                          const sessionTask = {
+                                            id: task.id, title: task.title, segment: task.segment,
+                                            class: task.class, url: task.url,
+                                            dueDate: task.dueDate, deadlineDateRaw: task.deadlineDateRaw,
+                                            estimatedTime: task.estimatedTime, userEstimate: task.userEstimate,
+                                            accumulatedTime: (task.accumulatedTime || 0) * 60,
+                                            sessionActive: false, assignmentId: task.assignmentId,
+                                            course_id: task.course_id, manuallyCreated: task.manuallyCreated || false,
+                                          };
+                                          startTaskSession(sessionTask);
+                                        }}
+                                        disabled={isStarting}
+                                        className={`flex-shrink-0 self-center flex flex-col items-center justify-center gap-1 px-4 py-3 rounded-xl font-semibold text-sm transition-all shadow-sm ${isStarting ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-br from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
+                                        style={{ minWidth: '72px' }}
+                                        title={hasProgress ? `Resume (${accMin}m logged)` : 'Start a timed session'}
+                                      >
+                                        {isStarting
+                                          ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                          : <Play className="w-4 h-4" />
+                                        }
+                                        <span>{hasProgress ? 'Resume' : 'Start'}</span>
                                       </button>
-                                      {!isHomeroom && (
-                                        <button onClick={() => setShowSplitTask(task.id)}
-                                          className="px-2 py-1 bg-purple-50 text-purple-600 rounded text-xs font-medium hover:bg-purple-100 transition-all"
-                                          title="Split task into segments">
-                                          Split
-                                        </button>
-                                      )}
-                                      <button onClick={() => openNotesPopup(task)}
-                                        className="px-2 py-1 bg-amber-50 text-amber-600 rounded text-xs font-medium hover:bg-amber-100 transition-all relative"
-                                        title="Open notes">
-                                        <FileText className="w-3.5 h-3.5" />
-                                        {tasksWithNotes.has(task.id) && (
-                                          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" />
-                                        )}
-                                      </button>
-                                    </div>
-                                  </div>
+                                    );
+                                  })()}
                                 </div>
                               </div>
                             );
@@ -8605,7 +8633,8 @@ const PlanAssist = () => {
                     value={popupNotes}
                     onChange={(e) => setPopupNotes(e.target.value)}
                     placeholder="Type your notes here... bullet points, reminders, key concepts, study tips, etc."
-                    className="flex-1 w-full p-4 border-2 border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-gray-900"
+                    className="flex-1 w-full p-4 border-2 border-gray-300 rounded-lg resize-y focus:ring-2 focus:ring-amber-500 focus:border-transparent text-gray-900"
+                    style={{ minHeight: '240px' }}
                     autoFocus
                   />
 
