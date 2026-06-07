@@ -730,18 +730,27 @@ const PlanAssist = () => {
   const [enhanceLessons, setEnhanceLessons] = useState({});            // { 'Monday-3': { courseId, courseName } }
   const [enhanceZoom, setEnhanceZoom] = useState({});                  // { courseId: zoomNumber }
   const [scheduleLessons, setScheduleLessons] = useState([]);           // from DB after enhance
-  const [itinerarySlots, setItinerarySlots] = useState({});            // { period: { agendaId, agendaName } }
-  const [itineraryDate, setItineraryDate] = useState(null);              // Date object for currently viewed itinerary date
+  const [itineraryDate, setItineraryDate] = useState(null);
   const [itineraryLoading, setItineraryLoading] = useState(false);
-  const [showAddAgendaSlot, setShowAddAgendaSlot] = useState(null);    // period number being picked
-  const [tutorials, setTutorials] = useState({});          // { 'Monday-3': { zoom_number, topic, period, day } }
-  const [showTutorialDialog, setShowTutorialDialog] = useState(null); // { day, period } or 'hub'
-  const [tutorialZoom, setTutorialZoom] = useState('');
-  const [tutorialTopic, setTutorialTopic] = useState('');
-  const [tutorialDay, setTutorialDay] = useState('');     // for hub booking (kept for compat)
-  const [tutorialDate, setTutorialDate] = useState('');   // ISO date string for hub booking
-  const [tutorialPeriod, setTutorialPeriod] = useState('');
-  const [isSavingTutorial, setIsSavingTutorial] = useState(false);
+  // Itinerary events state: tutorials, meetings, matched agendas
+  const [itineraryTutorials, setItineraryTutorials] = useState([]);
+  const [itineraryMeetings, setItineraryMeetings] = useState([]);
+  const [itineraryAgendas, setItineraryAgendas] = useState([]);
+  // Booking modal state
+  const [showBookingModal, setShowBookingModal] = useState(false); // false | 'hub' | 'itinerary'
+  const [bookingTab, setBookingTab] = useState('tutorial');         // 'tutorial' | 'meeting'
+  const [bookingDate, setBookingDate] = useState('');
+  const [bookingPeriod, setBookingPeriod] = useState('');
+  const [bookingCourse, setBookingCourse] = useState('');           // for tutorial
+  const [bookingMeetingTitle, setBookingMeetingTitle] = useState(''); // for meeting
+  const [bookingZoom, setBookingZoom] = useState('');
+  const [bookingTime, setBookingTime] = useState('');
+  const [isSavingBooking, setIsSavingBooking] = useState(false);
+  // Itinerary panel toggles (loaded from accountSetup, saved to server)
+  const [itineraryShowEvents, setItineraryShowEvents] = useState(true);
+  const [itineraryShowOrganizer, setItineraryShowOrganizer] = useState(true);
+  // Legacy compat — tutorials map used by zoom check (keyed by date-period)
+  const [tutorials, setTutorials] = useState({});
   const [checkingTask, setCheckingTask] = useState(null);    // taskId being checked off
   const [showAddTask, setShowAddTask] = useState(false);
   const [addTaskForm, setAddTaskForm] = useState({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '', course: 'Personal' });
@@ -857,20 +866,11 @@ const PlanAssist = () => {
   const [gradeSyncLoading, setGradeSyncLoading] = useState(false);   // Grade Sync spinner
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(null);
   const [showSplitTask, setShowSplitTask] = useState(null);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [sessionPriorities, setSessionPriorities] = useState(null); // null=not set today, []=empty, [...ids]=set
-  const [sessionPrioritiesLoading, setSessionPrioritiesLoading] = useState(false);
-  const [sessionPrioritiesPickerOpen, setSessionPrioritiesPickerOpen] = useState(false);
-
   // ── Organizer page state ──────────────────────────────────────────────────
   const [organizerSelectedStudy, setOrganizerSelectedStudy] = useState(0); // tab index (0 = first study, last = Outside School)
   const [showGenerateAgendasModal, setShowGenerateAgendasModal] = useState(false);
   const [generateAgendasMode, setGenerateAgendasMode] = useState('current'); // 'current' | 'all'
   const [organizerExporting, setOrganizerExporting] = useState(false);
-  const focusDragIndexRef = React.useRef(null); // index being dragged
-  const focusDragOverIndexRef = React.useRef(null); // index being dragged over
-  const [sessionPickerSel, setSessionPickerSel] = useState([]); // selected task IDs in picker modal
-  const [sessionDashView, setSessionDashView] = useState('timeline'); // 'timeline' | 'kanban' | 'focus'
   const [sessionStartingId, setSessionStartingId] = useState(null); // task ID currently being started
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -1275,7 +1275,7 @@ const PlanAssist = () => {
     // Detect if any dialog/modal is open: check for fixed z-50+ overlays or open state flags
     const isDialogOpen = () => {
       return showTaskDescription || showNotesPopup || showSplitTask ||
-             sessionPrioritiesPickerOpen || showEnhanceDialog ||
+             showEnhanceDialog ||
              showHubExplainer || breakTimerActive ||
              document.querySelector('[data-modal-open]') !== null;
     };
@@ -1308,7 +1308,7 @@ const PlanAssist = () => {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [currentPage, isLoadingTasks, showTaskDescription, showNotesPopup, showSplitTask,
-      sessionPrioritiesPickerOpen, showEnhanceDialog, showHubExplainer, breakTimerActive, user]);
+      showEnhanceDialog, showHubExplainer, breakTimerActive, user]);
 
 
 
@@ -1435,6 +1435,9 @@ const PlanAssist = () => {
         localStorage.setItem('campus', setupData.campus || 'Ashland');
         localStorage.setItem('tzPeriods', setupData.tzPeriods || getEffectivePeriods(setupData.campus || 'Ashland'));
         setScheduleEnhanced(setupData.schedule_enhanced || false);
+        // Load itinerary panel toggle prefs
+        setItineraryShowEvents(setupData.itinerary_show_events !== false);
+        setItineraryShowOrganizer(setupData.itinerary_show_organizer !== false);
         // Sync name + isAdmin from DB (in case admin changed it)
         if (setupData.name) {
           setUser(prev => prev ? { ...prev, name: setupData.name, isAdmin: setupData.is_admin || false } : prev);
@@ -3646,13 +3649,24 @@ const PlanAssist = () => {
     setItineraryLoading(true);
     try {
       const data = await apiCall(`/itinerary?date=${dateStr}`, 'GET');
-      const slots = {};
-      (data || []).forEach(row => {
-        if (row.agenda_id && !row.finished) {
-          slots[row.period] = { agendaId: row.agenda_id, agendaName: row.agenda_name };
+      setItineraryTutorials(data.tutorials || []);
+      setItineraryMeetings(data.meetings || []);
+      setItineraryAgendas(data.agendas || []);
+      // Keep tutorials map for zoom banner check (keyed date-period)
+      const tMap = {};
+      (data.tutorials || []).forEach(t => {
+        const dateKey = t.date ? (typeof t.date === 'string' ? t.date.split('T')[0] : new Date(t.date).toISOString().split('T')[0]) : null;
+        if (dateKey) tMap[`${dateKey}-${t.period}`] = { ...t, date: dateKey, zoom_number: t.zoom_number };
+      });
+      // Also include meetings in the zoom map
+      (data.meetings || []).forEach(m => {
+        const dateKey = m.date ? (typeof m.date === 'string' ? m.date.split('T')[0] : new Date(m.date).toISOString().split('T')[0]) : null;
+        if (dateKey && m.zoom_number) {
+          const key = `${dateKey}-${m.period}`;
+          if (!tMap[key]) tMap[key] = { ...m, date: dateKey, zoom_number: m.zoom_number, isMeeting: true };
         }
       });
-      setItinerarySlots(slots);
+      setTutorials(tMap);
     } catch (err) {
       console.error('Failed to load itinerary:', err);
     } finally {
@@ -3660,122 +3674,41 @@ const PlanAssist = () => {
     }
   };
 
-  const assignAgendaToSlot = async (dateStr, period, agendaId, agendaName) => {
+  const saveBooking = async ({ type, date, period, title, zoomNumber }) => {
+    setIsSavingBooking(true);
     try {
-      await apiCall('/itinerary', 'PUT', { date: dateStr, period, agendaId });
-      setItinerarySlots(prev => ({
-        ...prev,
-        [period]: { agendaId, agendaName }
-      }));
-      setShowAddAgendaSlot(null);
+      const endpoint = type === 'tutorial' ? '/tutorials' : '/meetings';
+      const payload = type === 'tutorial'
+        ? { date, period: parseInt(period), title, zoomNumber }
+        : { date, period: parseInt(period), title, zoomNumber };
+      await apiCall(endpoint, 'POST', payload);
+      await loadItinerary(date);
+      setShowBookingModal(false);
+      setBookingDate(''); setBookingPeriod(''); setBookingCourse('');
+      setBookingMeetingTitle(''); setBookingZoom(''); setBookingTime('');
     } catch (err) {
-      console.error('Failed to assign agenda:', err);
-    }
-  };
-
-  const clearAgendaFromSlot = async (dateStr, period) => {
-    try {
-      await apiCall('/itinerary', 'PUT', { date: dateStr, period, agendaId: null });
-      setItinerarySlots(prev => {
-        const next = { ...prev };
-        delete next[period];
-        return next;
-      });
-    } catch (err) {
-      console.error('Failed to clear agenda from slot:', err);
-    }
-  };
-
-  const submitEnhanceSchedule = async () => {
-    const lessons = Object.entries(enhanceLessons).map(([key, val]) => {
-      const [day, period] = key.split('-');
-      return { day, period: parseInt(period), courseId: val.courseId, courseName: val.courseName };
-    });
-    const zoomNumbers = Object.entries(enhanceZoom)
-      .filter(([, z]) => z && z.trim())
-      .map(([courseId, zoomNumber]) => ({ courseId: parseInt(courseId), zoomNumber: zoomNumber.trim() }));
-
-    setIsSavingEnhance(true);
-    try {
-      await apiCall('/schedule/enhance', 'POST', { lessons, zoomNumbers });
-      setScheduleEnhanced(true);
-      setAccountSetup(prev => ({ ...prev, scheduleEnhanced: true }));
-      setShowEnhanceDialog(false);
-      setEnhanceStep(1);
-      await loadScheduleLessons();
-    } catch (err) {
-      console.error('Failed to enhance schedule:', err);
-      alert('Failed to save enhanced schedule: ' + err.message);
+      console.error('Failed to save booking:', err);
+      alert('Failed to save: ' + err.message);
     } finally {
-      setIsSavingEnhance(false);
+      setIsSavingBooking(false);
     }
   };
 
-
-  // ── Tutorial functions ──────────────────────────────────────────────────────
-
-  const loadTutorials = async (dateStr) => {
+  const deleteItineraryEvent = async (type, id, dateStr) => {
     try {
-      const data = await apiCall(`/tutorials?date=${dateStr}`, 'GET');
-      const map = {};
-      (data || []).forEach(t => {
-        // Normalize date: pg returns DATE columns as ISO timestamp strings,
-        // extract just the YYYY-MM-DD part so keys match viewDateStr
-        const dateKey = t.date
-          ? (typeof t.date === 'string' ? t.date.split('T')[0] : new Date(t.date).toISOString().split('T')[0])
-          : null;
-        if (dateKey) map[`${dateKey}-${t.period}`] = { ...t, date: dateKey };
-      });
-      setTutorials(map);
+      const endpoint = type === 'tutorial' ? `/tutorials/${id}` : `/meetings/${id}`;
+      await apiCall(endpoint, 'DELETE');
+      await loadItinerary(dateStr);
     } catch (err) {
-      console.error('Failed to load tutorials:', err);
+      console.error('Failed to delete event:', err);
     }
-  };
-
-  const saveTutorial = async ({ date, period, zoomNumber, topic }) => {
-    setIsSavingTutorial(true);
-    try {
-      await apiCall('/tutorials', 'PUT', { date, period, zoomNumber, topic });
-      const key = `${date}-${period}`;
-      setTutorials(prev => ({ ...prev, [key]: { date, period, zoom_number: zoomNumber, topic } }));
-      setShowTutorialDialog(null);
-      setTutorialZoom('');
-      setTutorialTopic('');
-      setTutorialDay('');
-      setTutorialDate('');
-      setTutorialPeriod('');
-    } catch (err) {
-      console.error('Failed to save tutorial:', err);
-      alert('Failed to save tutorial: ' + err.message);
-    } finally {
-      setIsSavingTutorial(false);
-    }
-  };
-
-  const deleteTutorial = async (date, period) => {
-    try {
-      await apiCall('/tutorials', 'DELETE', { date, period });
-      const key = `${date}-${period}`;
-      setTutorials(prev => { const n = { ...prev }; delete n[key]; return n; });
-    } catch (err) {
-      console.error('Failed to delete tutorial:', err);
-    }
-  };
-
-  const openTutorialDialog = ({ date, period }) => {
-    const existing = tutorials[`${date}-${period}`];
-    setTutorialZoom(existing?.zoom_number || '');
-    setTutorialTopic(existing?.topic || '');
-    setShowTutorialDialog({ date, period });
   };
 
   const openHubTutorialDialog = () => {
-    setTutorialZoom('');
-    setTutorialTopic('');
-    setTutorialDay('');
-    setTutorialDate('');
-    setTutorialPeriod('');
-    setShowTutorialDialog('hub');
+    setBookingTab('tutorial');
+    setBookingDate(''); setBookingPeriod(''); setBookingCourse('');
+    setBookingMeetingTitle(''); setBookingZoom('');
+    setShowBookingModal('hub');
   };
 
 
@@ -4082,37 +4015,6 @@ const PlanAssist = () => {
   const getLocalDateStr = () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  };
-
-  const loadSessionPriorities = async () => {
-    setSessionPrioritiesLoading(true);
-    try {
-      const data = await apiCall(`/session-priorities/today?date=${getLocalDateStr()}`, 'GET');
-      setSessionPriorities(data.taskIds ? data.taskIds.map(Number) : null); // null if not set today
-    } catch (err) {
-      console.error('Failed to load session priorities:', err);
-    } finally {
-      setSessionPrioritiesLoading(false);
-    }
-  };
-
-  const saveSessionPriorities = async (taskIds) => {
-    try {
-      const ids = taskIds.map(Number);
-      await apiCall('/session-priorities/today', 'POST', { taskIds: ids, date: getLocalDateStr() });
-      setSessionPriorities(ids);
-    } catch (err) {
-      console.error('Failed to save session priorities:', err);
-    }
-  };
-
-  const clearSessionPriorities = async () => {
-    try {
-      await apiCall(`/session-priorities/today?date=${getLocalDateStr()}`, 'DELETE');
-      setSessionPriorities(null);
-    } catch (err) {
-      console.error('Failed to clear session priorities:', err);
-    }
   };
 
   // Workspace functions
@@ -4737,11 +4639,13 @@ const PlanAssist = () => {
               } catch(e) { zoomPingAudioRef.current = null; }
             })();
 
-            // 2. Show the banner (closing it or clicking Join stops alarm)
-            setZoomBanner({ period, zoomNumber, isTutorial: !!tutorial?.zoom_number });
+            // 2. Show the banner — distinguish tutorial / meeting / lesson
+            const isTutorialPing = !!(tutorial?.zoom_number && !tutorial?.isMeeting);
+            const isMeetingPing = !!(tutorial?.zoom_number && tutorial?.isMeeting);
+            setZoomBanner({ period, zoomNumber, isTutorial: isTutorialPing, isMeeting: isMeetingPing, title: tutorial?.title });
 
             // 3. Launch the PiP Zoom Ping
-            launchZoomPing(zoomNumber, !!tutorial?.zoom_number, colorTheme);
+            launchZoomPing(zoomNumber, isTutorialPing, colorTheme);
           }
           break;
         }
@@ -6521,7 +6425,6 @@ const PlanAssist = () => {
       const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth()+1).padStart(2,'0')}-${String(todayDate.getDate()).padStart(2,'0')}`;
       setItineraryDate(todayDate);
       loadItinerary(todayStr);
-      loadTutorials(todayStr);
       loadScheduleLessons(); // always fetch; returns empty if not enhanced
       loadAgendas();
     }
@@ -7103,27 +7006,35 @@ const PlanAssist = () => {
 
       {/* Feature 1: Period Zoom Banner */}
       {zoomBanner && (
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md">
+        <div className={`text-white px-4 py-3 flex items-center justify-between gap-3 shadow-md bg-gradient-to-r ${
+          zoomBanner.isTutorial ? 'from-orange-500 to-amber-500' :
+          zoomBanner.isMeeting  ? 'from-indigo-600 to-violet-600' :
+                                  'from-blue-600 to-indigo-600'
+        }`}>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Play className="w-4 h-4" />
+              {zoomBanner.isTutorial ? <BookOpen className="w-4 h-4" /> : zoomBanner.isMeeting ? <Users className="w-4 h-4" /> : <Play className="w-4 h-4" />}
             </div>
             <div>
               <p className="font-semibold text-sm">
-                Period {zoomBanner.period} is starting!
-                {zoomBanner.isTutorial && <span className="ml-2 text-xs bg-orange-400 text-white px-2 py-0.5 rounded-full">Tutorial</span>}
+                {zoomBanner.isTutorial
+                  ? <>{zoomBanner.title || 'Tutorial'} <span className="ml-1 text-xs bg-white bg-opacity-20 px-2 py-0.5 rounded-full">Period {zoomBanner.period}</span></>
+                  : zoomBanner.isMeeting
+                  ? <>{zoomBanner.title || 'Meeting'} <span className="ml-1 text-xs bg-white bg-opacity-20 px-2 py-0.5 rounded-full">Period {zoomBanner.period}</span></>
+                  : <>Period {zoomBanner.period} is starting!</>
+                }
               </p>
-              <p className="text-xs text-blue-200">Zoom: {zoomBanner.zoomNumber}</p>
+              <p className="text-xs opacity-75">Zoom: {zoomBanner.zoomNumber}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <a href={`https://oneschoolglobal.zoom.us/j/${zoomBanner.zoomNumber.replace(/[\s\-]/g, '')}`}
               target="_blank" rel="noopener noreferrer"
               onClick={() => { if (zoomAlarmStopRef.current) zoomAlarmStopRef.current(); }}
-              className="bg-white text-blue-600 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-blue-50 transition-colors">
+              className="bg-white text-gray-800 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">
               Join Zoom
             </a>
-            <button onClick={() => { if (zoomAlarmStopRef.current) zoomAlarmStopRef.current(); else setZoomBanner(null); }} className="text-blue-200 hover:text-white"><X className="w-5 h-5" /></button>
+            <button onClick={() => { if (zoomAlarmStopRef.current) zoomAlarmStopRef.current(); else setZoomBanner(null); }} className="opacity-60 hover:opacity-100"><X className="w-5 h-5" /></button>
           </div>
         </div>
       )}
@@ -8540,141 +8451,6 @@ const PlanAssist = () => {
                 </div>
               </div>
             )}
-            {showTaskDescription && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
-                  <div className="flex items-start justify-between mb-4">
-                    <h3 className="text-xl font-bold text-gray-900 pr-8">{showTaskDescription.title}</h3>
-                    <button 
-                      onClick={() => setShowTaskDescription(null)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-                  <div className="space-y-3 mb-6">
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Calendar className="w-4 h-4" />
-                      Due: {new Date(showTaskDescription.dueDate).toLocaleDateString('en-US', { 
-                        weekday: 'long',
-                        year: 'numeric',
-                        month: 'long',
-                        day: 'numeric'
-                      })}
-                    </div>
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
-                      <Clock className="w-4 h-4" />
-                      Estimated Time: {showTaskDescription.userEstimate || showTaskDescription.estimatedTime} min
-                    </div>
-                  </div>
-                  <div className="border-t pt-4">
-                    <h4 className="font-semibold text-gray-700 mb-2">Description</h4>
-                    {showTaskDescription.description ? (
-                      <div
-                        className="text-gray-600 prose prose-sm max-w-none leading-relaxed"
-                        dangerouslySetInnerHTML={{
-                          __html: (() => {
-                            // Sanitize Canvas HTML: strip script/event handlers before rendering.
-                            // Canvas descriptions are trusted but this guards against edge cases.
-                            const raw = showTaskDescription.description
-                              .replace(/<p>\s*<\/p>/gi, '')
-                              .replace(/\n{3,}/g, '\n\n');
-                            // Remove script tags and dangerous attributes
-                            return raw
-                              .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                              .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
-                              .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
-                              .replace(/javascript\s*:/gi, 'blocked:');
-                          })()
-                        }}
-                      />
-                    ) : (
-                      <p className="text-gray-400 italic">No description available</p>
-                    )}
-                  </div>
-                  <div className="mt-6 flex justify-end">
-                    <button 
-                      onClick={() => setShowTaskDescription(null)} 
-                      className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 font-medium"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Notes Popup Modal */}
-            {showNotesPopup && (
-              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                <div className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 pr-8">
-                      <h3 className="text-xl font-bold text-gray-900 mb-1">{showNotesPopup.title}</h3>
-                      <p className="text-sm text-gray-600">{extractClassName(showNotesPopup)}</p>
-                    </div>
-                    <button 
-                      onClick={closeNotesPopup}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <X className="w-6 h-6" />
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between mb-3 pb-3 border-b">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-5 h-5 text-amber-600" />
-                      <h4 className="font-semibold text-gray-700">Your Notes</h4>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {popupNotesLastSaved && (
-                        <span className="text-xs text-green-600">
-                          Saved {popupNotesLastSaved.toLocaleTimeString()}
-                        </span>
-                      )}
-                      <button
-                        onClick={savePopupNotes}
-                        disabled={popupNotesSaving}
-                        className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
-                      >
-                        {popupNotesSaving ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            Saving...
-                          </>
-                        ) : (
-                          <>
-                            <Save className="w-4 h-4" />
-                            Save Notes
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <textarea
-                    value={popupNotes}
-                    onChange={(e) => setPopupNotes(e.target.value)}
-                    placeholder="Type your notes here... bullet points, reminders, key concepts, study tips, etc."
-                    className="flex-1 w-full p-4 border-2 border-gray-300 rounded-lg resize-y focus:ring-2 focus:ring-amber-500 focus:border-transparent text-gray-900"
-                    style={{ minHeight: '240px' }}
-                    autoFocus
-                  />
-
-                  <div className="mt-4 flex justify-between items-center">
-                    <p className="text-xs text-gray-500">
-                      💡 Notes auto-save after 2 seconds of inactivity
-                    </p>
-                    <button 
-                      onClick={closeNotesPopup} 
-                      className="bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700 font-medium"
-                    >
-                      Close
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
         {currentPage === 'session-active' && (currentSessionTask || showSessionComplete) && (
@@ -9740,7 +9516,7 @@ const PlanAssist = () => {
                   onClick={() => { setGenerateAgendasMode('current'); setShowGenerateAgendasModal(true); }}
                   className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold text-sm transition-all shadow-sm"
                 >
-                  <ClipboardList className="w-4 h-4" />
+                  <LayoutList className="w-4 h-4" />
                   Generate Agendas
                 </button>
               </div>
@@ -10157,7 +9933,7 @@ const PlanAssist = () => {
                           {organizerExporting ? (
                             <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Exporting…</>
                           ) : (
-                            <><ClipboardList className="w-4 h-4" />Export Agendas</>
+                            <><LayoutList className="w-4 h-4" />Export Agendas</>
                           )}
                         </button>
                       </div>
@@ -10472,6 +10248,13 @@ const PlanAssist = () => {
         })()}
 
         {currentPage === 'itinerary' && (() => {
+          // ── ITINERARY PAGE ───────────────────────────────────────────────────
+          const ITIN_PERIOD_TIMES_UTC = {
+            1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
+            4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
+            7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
+          };
+          const PERIOD_DURATION_MINS = 60;
           const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
           const viewDate = itineraryDate || today;
@@ -10482,20 +10265,43 @@ const PlanAssist = () => {
           const userGrade = user?.grade ? parseInt(user.grade) : 0;
           const viewDateStr = `${viewDate.getFullYear()}-${String(viewDate.getMonth()+1).padStart(2,'0')}-${String(viewDate.getDate()).padStart(2,'0')}`;
 
-          // Tutorial booking URL by grade
-          const tutorialUrl = userGrade >= 11 ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
-            : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
-            : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
+          const campusOffsetHours = getCampusOffsetHours(accountSetup.campus || 'Ashland');
+          const campusNowMs = today.getTime() + campusOffsetHours * 3600000;
+          const campusNowDate = new Date(campusNowMs);
+          const campusNowMins = campusNowDate.getUTCHours() * 60 + campusNowDate.getUTCMinutes();
+
+          const periodCampusStartMins = (pNum) => {
+            const utc = ITIN_PERIOD_TIMES_UTC[pNum];
+            if (!utc) return null;
+            return ((utc.h * 60 + utc.m + campusOffsetHours * 60) % 1440 + 1440) % 1440;
+          };
+          const fmtLocalTime = (totalMins) => {
+            const h = Math.floor(totalMins / 60) % 24;
+            const m = totalMins % 60;
+            return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+          };
 
           const navigateItinerary = (delta) => {
             const newDate = new Date(viewDate);
             newDate.setDate(viewDate.getDate() + delta);
             setItineraryDate(newDate);
             const newStr = `${newDate.getFullYear()}-${String(newDate.getMonth()+1).padStart(2,'0')}-${String(newDate.getDate()).padStart(2,'0')}`;
-            setItinerarySlots({});
             loadItinerary(newStr);
-            loadTutorials(newStr);
           };
+
+          const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+          const [pStart, pEnd] = range.split('-').map(Number);
+          const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+          const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
+          const lessonCourseMap = {};
+          scheduleLessons.forEach(sl => { if (sl.day === viewDayName) lessonCourseMap[sl.period] = sl; });
+
+          // Tutorial bookings URL (for hub iframe tab)
+          const tutorialUrl = userGrade >= 11
+            ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
+            : userGrade >= 9
+            ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
+            : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
 
           // Grade 3-6 block
           if (userGrade >= 3 && userGrade <= 6) return (
@@ -10510,7 +10316,6 @@ const PlanAssist = () => {
             </div>
           );
 
-          // Not enhanced
           if (!scheduleEnhanced) return (
             <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
               <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-8 text-center relative">
@@ -10525,196 +10330,234 @@ const PlanAssist = () => {
             </div>
           );
 
-          // Build period list based on the viewed day's schedule
-          const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
-          const [pStart, pEnd] = range.split('-').map(Number);
-          const selectedPeriods = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
-          const viewSchedule = accountSetup.schedule?.[viewDayName] || {};
-          const lessonCourseMap = {};
-          scheduleLessons.forEach(sl => { if (sl.day === viewDayName) lessonCourseMap[sl.period] = sl; });
-          const availableAgendas = agendas.filter(a => !a.finished);
+          // ── Organizer data for this day ───────────────────────────────────────
+          // Reuse the same scheduling algorithm logic from the Organizer page
+          const ORG_PERIOD_TIMES_UTC_ITIN = ITIN_PERIOD_TIMES_UTC;
+          const orgActiveTasks = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'));
+          // Build a simple per-period task allocation for today from itineraryAgendas (title-matched)
+          const orgPerPeriod = {};
+          itineraryAgendas.forEach(ag => {
+            // Extract period from title e.g. "Period 3 Study - 2 Tasks - 6/7/2026"
+            const m = ag.name && ag.name.match(/^Period (\d+) Study/);
+            if (m) {
+              const p = parseInt(m[1]);
+              if (!orgPerPeriod[p]) orgPerPeriod[p] = [];
+              (ag.rows || []).forEach(row => {
+                const task = orgActiveTasks.find(t => t.id === row.taskId);
+                if (task) orgPerPeriod[p].push({ task, mins: row.timeMins, action: row.action });
+              });
+            }
+          });
+
+          const showEvents = itineraryShowEvents;
+          const showOrganizer = itineraryShowOrganizer;
 
           return (
             <div className="h-full overflow-y-auto scrollbar-stable">
-            <div className="max-w-3xl mx-auto p-6">
-              {/* Header with inline date navigation */}
-              <div className="flex items-center justify-between mb-6">
+            <div className="max-w-5xl mx-auto p-6">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-4">
                 <div>
                   <h2 className="text-2xl font-bold text-gray-900">Itinerary</h2>
-                  <p className="text-gray-500 text-sm mt-1">
+                  <p className="text-gray-500 text-sm mt-0.5">
                     {viewDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
                     {isViewToday && <span className="ml-2 text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-semibold">Today</span>}
                   </p>
                 </div>
-
-                {/* Date navigation — centered between title and button */}
                 <div className="flex items-center gap-2">
-                  <button onClick={() => navigateItinerary(-1)}
-                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                  <button onClick={() => navigateItinerary(-1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
                   </button>
                   <div className="text-center min-w-[90px]">
-                    <p className="font-semibold text-gray-800 text-sm">
-                      {viewDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
-                    </p>
+                    <p className="font-semibold text-gray-800 text-sm">{viewDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</p>
                     {!isViewToday && (
-                      <button onClick={() => {
-                        const t = new Date();
-                        setItineraryDate(t);
-                        const s = `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`;
-                        setItinerarySlots({});
-                        loadItinerary(s);
-                        loadTutorials(s);
-                      }} className="text-xs text-purple-500 hover:text-purple-700 font-medium">Today</button>
+                      <button onClick={() => { const t = new Date(); setItineraryDate(t); loadItinerary(`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`); }}
+                        className="text-xs text-purple-500 hover:text-purple-700 font-medium">Today</button>
                     )}
                   </div>
-                  <button onClick={() => navigateItinerary(1)}
-                    className="p-2 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors">
+                  <button onClick={() => navigateItinerary(1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                   </button>
+                  <button
+                    onClick={() => { setBookingTab('tutorial'); setBookingDate(viewDateStr); setBookingPeriod(''); setBookingCourse(''); setBookingMeetingTitle(''); setBookingZoom(''); setShowBookingModal('itinerary'); }}
+                    className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
+                    <BookOpen className="w-4 h-4" /> Make a Booking
+                  </button>
                 </div>
-
-                <button onClick={openHubTutorialDialog}
-                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
-                  <BookOpen className="w-4 h-4" /> Book a Tutorial
-                </button>
               </div>
 
-              {/* Weekend notice — shown inline, not a blocker */}
               {isViewWeekend && (
                 <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-xl text-center">
-                  <p className="text-gray-500 text-sm">📅 This is a weekend day. You can still plan ahead — periods are shown based on your schedule.</p>
+                  <p className="text-gray-500 text-sm">Weekend — no school periods. Use the Organizer's Outside School section for weekend study planning.</p>
                 </div>
               )}
 
-              {itineraryLoading ? (
-                <div className="flex items-center justify-center py-16">
-                  <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              ) : (
-                <div className="space-y-4">
+              {!isViewWeekend && (
+                <div className="space-y-3">
                   {selectedPeriods.map(period => {
-                    const slotType = viewSchedule[String(period)] || 'Study';
-                    const isLesson = slotType === 'Lesson';
-                    const lessonInfo = lessonCourseMap[period];
-                    const assignedAgenda = itinerarySlots[period];
-                    const tutorial = tutorials[`${viewDateStr}-${period}`];
+                    const periodType = viewSchedule[String(period)] || 'Study';
+                    const isLesson = periodType === 'Lesson' || periodType === 'lesson';
+                    const lessonInfo = isLesson ? lessonCourseMap[period] : null;
+                    const startMins = periodCampusStartMins(period);
+                    const endMins = startMins !== null ? startMins + PERIOD_DURATION_MINS : null;
+                    const startLabel = startMins !== null ? fmtLocalTime(startMins) : '';
+                    const endLabel = endMins !== null ? fmtLocalTime(endMins) : '';
+
+                    // Is this period currently active?
+                    const isCurrentPeriod = isViewToday && startMins !== null
+                      && campusNowMins >= startMins && campusNowMins < endMins;
+                    const isPastPeriod = isViewToday && endMins !== null && campusNowMins >= endMins;
+                    const progressPct = isCurrentPeriod && startMins !== null
+                      ? Math.min(100, Math.round((campusNowMins - startMins) / PERIOD_DURATION_MINS * 100))
+                      : 0;
+
+                    // Events for this period
+                    const periodTutorials = itineraryTutorials.filter(t => t.period === period);
+                    const periodMeetings = itineraryMeetings.filter(m => m.period === period);
+                    const periodAgenda = itineraryAgendas.find(ag => {
+                      const m = ag.name && ag.name.match(/^Period (\d+) Study/);
+                      return m && parseInt(m[1]) === period;
+                    });
+                    const orgTasks = orgPerPeriod[period] || [];
 
                     return (
-                      <div key={period} className={`rounded-2xl border-2 overflow-hidden shadow-sm ${isLesson ? 'border-blue-200' : 'border-gray-200'}`}>
-                        {/* Period header bar */}
-                        <div className={`px-5 py-3 flex items-center justify-between ${isLesson ? 'bg-blue-600' : 'bg-gray-700'}`}>
-                          <div className="flex items-center gap-3">
-                            <span className="text-white font-bold text-base">Period {period}</span>
-                            <span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${isLesson ? 'bg-blue-500 text-blue-100' : 'bg-gray-600 text-gray-200'}`}>
-                              {slotType}
-                            </span>
+                      <div key={period}
+                        className={`rounded-2xl border-2 overflow-hidden transition-all ${
+                          isCurrentPeriod ? 'border-purple-400 shadow-md' : isPastPeriod ? 'border-gray-100 opacity-70' : 'border-gray-200'
+                        }`}>
+                        {/* Period header with time bar */}
+                        <div className={`flex items-center gap-3 px-4 py-2 ${isLesson ? 'bg-blue-50 border-b border-blue-100' : isCurrentPeriod ? 'bg-purple-50 border-b border-purple-100' : 'bg-gray-50 border-b border-gray-100'}`}>
+                          {/* Time column */}
+                          <div className="flex-shrink-0 text-center" style={{ minWidth: '80px' }}>
+                            <p className="text-xs font-bold text-gray-700">Period {period}</p>
+                            <p className="text-xs text-gray-500">{startLabel}</p>
+                            {isCurrentPeriod && (
+                              <div className="mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden w-full">
+                                <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
+                              </div>
+                            )}
                           </div>
-                          {isLesson && lessonInfo?.zoom_number && (
-                            <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/[\s\-]/g, "")}`}
-                              target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-1.5 text-xs bg-white text-blue-700 px-3 py-1.5 rounded-full font-semibold hover:bg-blue-50 transition-colors">
-                              🎥 Join Zoom
-                            </a>
-                          )}
+                          {/* Type label */}
+                          <div className="flex-1 min-w-0">
+                            <span className={`text-sm font-semibold ${isLesson ? 'text-blue-700' : 'text-gray-700'}`}>
+                              {isLesson
+                                ? (lessonInfo?.course_name || <span className="text-gray-400 italic font-normal">Lesson</span>)
+                                : periodType}
+                            </span>
+                            {lessonInfo?.zoom_number && (
+                              <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number||'').replace(/[\s\-]/g,'')}`}
+                                target="_blank" rel="noopener noreferrer"
+                                className="ml-2 text-xs text-blue-500 hover:underline">
+                                Join Zoom
+                              </a>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-400 flex-shrink-0">{startLabel}{endLabel ? ` – ${endLabel}` : ''}</p>
+                          {isCurrentPeriod && <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full font-semibold flex-shrink-0">Now</span>}
                         </div>
 
-                        <div className="bg-white p-5 space-y-4">
-                          {/* Lesson info */}
-                          {isLesson && (
-                            <div className="flex items-center gap-3">
-                              <div className="w-1 h-10 rounded-full bg-blue-400 flex-shrink-0" />
-                              <div>
-                                <p className="font-semibold text-gray-900 text-base">
-                                  {lessonInfo?.course_name || <span className="text-gray-400 italic font-normal">No course assigned</span>}
-                                </p>
-                                {lessonInfo?.zoom_number && (
-                                  <a href={`https://oneschoolglobal.zoom.us/j/${(lessonInfo.zoom_number || "").replace(/[\s\-]/g, "")}`}
-                                    target="_blank" rel="noopener noreferrer"
-                                    className="text-xs text-blue-500 hover:underline">
-                                    zoom.us/j/{(lessonInfo.zoom_number || "").replace(/[\s\-]/g, "")}
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                          )}
+                        {/* Period body — two-column layout */}
+                        <div className={`flex ${isLesson ? 'bg-blue-50 bg-opacity-30' : 'bg-white'}`}>
 
-                          {/* Tutorial row */}
-                          {tutorial ? (
-                            <div className="flex items-center justify-between p-3 bg-orange-50 border border-orange-200 rounded-xl">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <BookOpen className="w-5 h-5 text-orange-500 flex-shrink-0" />
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-orange-900">Tutorial{tutorial.topic ? `: ${tutorial.topic}` : ''}</p>
-                                  {tutorial.zoom_number ? (
-                                    <a href={`https://oneschoolglobal.zoom.us/j/${(tutorial.zoom_number || "").replace(/[\s\-]/g, "")}`}
-                                      target="_blank" rel="noopener noreferrer"
-                                      className="text-xs text-orange-600 hover:underline">
-                                      zoom.us/j/{(tutorial.zoom_number || "").replace(/[\s\-]/g, "")}
-                                    </a>
-                                  ) : <p className="text-xs text-orange-400">No Zoom link</p>}
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                <button onClick={() => openTutorialDialog({ date: viewDateStr, period })}
-                                  className="text-xs text-orange-600 hover:text-orange-800 font-medium px-2 py-1 rounded hover:bg-orange-100">Edit</button>
-                                <button onClick={() => deleteTutorial(viewDateStr, period)}
-                                  className="text-gray-300 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
-                              </div>
-                            </div>
-                          ) : (
-                            <button onClick={() => openTutorialDialog({ date: viewDateStr, period })}
-                              className="flex items-center gap-2 text-sm text-orange-500 hover:text-orange-700 transition-colors font-medium">
-                              <BookOpen className="w-4 h-4" /> + Add Tutorial
-                            </button>
-                          )}
+                          {/* LEFT: Events pane */}
+                          {showEvents && (
+                            <div className={`flex-1 min-w-0 border-r ${showOrganizer ? 'border-gray-100' : ''} p-3 space-y-2`}>
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Events</p>
 
-                          {/* Agenda row */}
-                          {assignedAgenda ? (
-                            <div className="flex items-center justify-between p-3 bg-purple-50 border border-purple-200 rounded-xl">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <LayoutList className="w-5 h-5 text-purple-500 flex-shrink-0" />
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-purple-900 truncate">{assignedAgenda.agendaName}</p>
-                                  <p className="text-xs text-purple-400">Agenda</p>
-                                </div>
-                              </div>
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                <button onClick={() => { const a = agendas.find(ag => ag.id === assignedAgenda.agendaId); if (a) openAgenda(a); }}
-                                  className="flex items-center gap-1 px-3 py-1.5 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700">
-                                  <Play className="w-3 h-3" /> Open
-                                </button>
-                                <button onClick={() => clearAgendaFromSlot(viewDateStr, period)}
-                                  className="text-gray-300 hover:text-red-400 transition-colors"><X className="w-4 h-4" /></button>
-                              </div>
-                            </div>
-                          ) : (
-                            showAddAgendaSlot === period ? (
-                              <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
-                                <p className="text-xs font-medium text-gray-600 mb-2">Select an Agenda:</p>
-                                {availableAgendas.length === 0 ? (
-                                  <p className="text-sm text-gray-400 italic">No agendas available.</p>
-                                ) : (
-                                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                                    {availableAgendas.map(agenda => (
-                                      <button key={agenda.id}
-                                        onClick={() => assignAgendaToSlot(viewDateStr, period, agenda.id, agenda.name)}
-                                        className="w-full flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg hover:border-purple-400 hover:bg-purple-50 text-left transition-colors">
-                                        <LayoutList className="w-4 h-4 text-purple-400 flex-shrink-0" />
-                                        <span className="text-sm text-gray-900 flex-1 truncate">{agenda.name}</span>
-                                        <span className="text-xs text-gray-400">{(agenda.rows?.length || 0)} rows</span>
-                                      </button>
-                                    ))}
+                              {isLesson && (
+                                <div className="text-xs text-blue-400 italic">Class period — no study events</div>
+                              )}
+
+                              {!isLesson && periodTutorials.length === 0 && periodMeetings.length === 0 && (
+                                <p className="text-xs text-gray-300 italic">No events booked</p>
+                              )}
+
+                              {/* Tutorial events */}
+                              {periodTutorials.map(tut => (
+                                <div key={tut.id} className="flex items-start justify-between p-2.5 bg-orange-50 border border-orange-200 rounded-xl">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <BookOpen className="w-4 h-4 text-orange-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-orange-900 truncate">{tut.title}</p>
+                                      {tut.zoom_number ? (
+                                        <a href={`https://oneschoolglobal.zoom.us/j/${(tut.zoom_number||'').replace(/[\s\-]/g,'')}`}
+                                          target="_blank" rel="noopener noreferrer"
+                                          className="text-xs text-orange-600 hover:underline">Join Zoom</a>
+                                      ) : <p className="text-xs text-orange-300">No Zoom link</p>}
+                                    </div>
                                   </div>
-                                )}
-                                <button onClick={() => setShowAddAgendaSlot(null)} className="mt-2 text-xs text-gray-400 hover:text-gray-600">Cancel</button>
-                              </div>
-                            ) : (
-                              <button onClick={() => { setShowAddAgendaSlot(period); loadAgendas(); }}
-                                className="flex items-center gap-2 text-sm text-purple-500 hover:text-purple-700 transition-colors font-medium">
-                                <LayoutList className="w-4 h-4" /> + Add Agenda
-                              </button>
-                            )
+                                  <button onClick={() => deleteItineraryEvent('tutorial', tut.id, viewDateStr)}
+                                    className="text-gray-300 hover:text-red-400 flex-shrink-0 ml-2"><X className="w-3.5 h-3.5" /></button>
+                                </div>
+                              ))}
+
+                              {/* Meeting events */}
+                              {periodMeetings.map(mtg => (
+                                <div key={mtg.id} className="flex items-start justify-between p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <Users className="w-4 h-4 text-indigo-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-indigo-900 truncate">{mtg.title}</p>
+                                      {mtg.zoom_number ? (
+                                        <a href={`https://oneschoolglobal.zoom.us/j/${(mtg.zoom_number||'').replace(/[\s\-]/g,'')}`}
+                                          target="_blank" rel="noopener noreferrer"
+                                          className="text-xs text-indigo-600 hover:underline">Join Zoom</a>
+                                      ) : <p className="text-xs text-indigo-300">No Zoom link</p>}
+                                    </div>
+                                  </div>
+                                  <button onClick={() => deleteItineraryEvent('meeting', mtg.id, viewDateStr)}
+                                    className="text-gray-300 hover:text-red-400 flex-shrink-0 ml-2"><X className="w-3.5 h-3.5" /></button>
+                                </div>
+                              ))}
+
+                              {/* Linked agenda */}
+                              {periodAgenda && !isLesson && (
+                                <div className="flex items-center justify-between p-2.5 bg-purple-50 border border-purple-200 rounded-xl">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <LayoutList className="w-4 h-4 text-purple-500 flex-shrink-0" />
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-purple-900 truncate">{periodAgenda.name}</p>
+                                      <p className="text-xs text-purple-400">{periodAgenda.rows?.length || 0} tasks</p>
+                                    </div>
+                                  </div>
+                                  <button
+                                    onClick={() => { const a = agendas.find(ag => ag.id === periodAgenda.id); if (a) openAgenda(a); }}
+                                    className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 flex-shrink-0">
+                                    <Play className="w-3 h-3" /> Open
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* RIGHT: Organizer pane */}
+                          {showOrganizer && (
+                            <div className={`flex-1 min-w-0 p-3 ${isLesson ? 'opacity-50' : ''}`}>
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Study Plan</p>
+                              {isLesson ? (
+                                <div className="flex items-center justify-center h-12 rounded-xl border-2 border-dashed border-blue-200">
+                                  <p className="text-xs text-blue-300">Class period</p>
+                                </div>
+                              ) : orgTasks.length === 0 ? (
+                                <p className="text-xs text-gray-300 italic">No tasks planned — generate Agendas from the Organizer</p>
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {orgTasks.map((ot, i) => {
+                                    const cc = getClassColor(ot.task);
+                                    return (
+                                      <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
+                                        <div className="w-1 h-full rounded-full flex-shrink-0 self-stretch" style={{ backgroundColor: cc, minHeight: '28px', width: '3px' }} />
+                                        <div className="flex-1 min-w-0">
+                                          <p className="text-xs font-semibold truncate" style={{ color: cc }}>{cleanTaskTitle(ot.task)}</p>
+                                          {ot.action && <p className="text-xs text-gray-400">{ot.action}</p>}
+                                        </div>
+                                        <span className="text-xs font-semibold text-gray-500 flex-shrink-0">{ot.mins}m</span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -10722,48 +10565,6 @@ const PlanAssist = () => {
                   })}
                 </div>
               )}
-
-              {/* Tutorial Dialog — shared for itinerary slot booking */}
-              {showTutorialDialog && showTutorialDialog !== 'hub' && (() => {
-                const { date: dlgDate, period } = showTutorialDialog;
-                return (
-                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
-                      <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-                        <div>
-                          <h3 className="text-xl font-bold text-gray-900">Book a Tutorial</h3>
-                          <p className="text-sm text-gray-500 mt-0.5">{dlgDate} · Period {period}</p>
-                        </div>
-                        <button onClick={() => setShowTutorialDialog(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                      </div>
-                      <div className="flex-1 overflow-hidden">
-                        <iframe src={tutorialUrl} className="w-full h-[420px] border-0" title="Book a Tutorial" />
-                      </div>
-                      <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
-                        <p className="text-xs text-gray-500">Once booked, enter your Zoom details below:</p>
-                        <div className="flex gap-3">
-                          <input type="text" value={tutorialZoom} onChange={e => setTutorialZoom(e.target.value.replace(/[^0-9]/g, ''))}
-                            placeholder="Zoom number (e.g. 74751073335)" maxLength={15}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
-                          <input type="text" value={tutorialTopic} onChange={e => setTutorialTopic(e.target.value)}
-                            placeholder="Topic (optional, max 60 chars)" maxLength={60}
-                            className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
-                        </div>
-                        <div className="flex gap-3">
-                          <button onClick={() => setShowTutorialDialog(null)}
-                            className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Close</button>
-                          <button
-                            onClick={() => saveTutorial({ date: dlgDate, period, zoomNumber: tutorialZoom, topic: tutorialTopic })}
-                            disabled={isSavingTutorial}
-                            className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-60 flex items-center justify-center gap-2">
-                            {isSavingTutorial ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</> : 'Save'}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
             </div>
             </div>
           );
@@ -11568,6 +11369,47 @@ const PlanAssist = () => {
                                 ))}
                               </div>
                             </div>
+                          </div>
+                          {/* Itinerary */}
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Itinerary</h3>
+                            <div className="border border-gray-200 rounded-xl p-4 space-y-4">
+                              <div className="flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-gray-900 text-sm">Show Events panel</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">Shows the left panel on the Itinerary with Tutorials, Meetings, and linked Agendas.</p>
+                                </div>
+                                <button
+                                  onClick={async () => {
+                                    const next = !itineraryShowEvents;
+                                    if (!next && !itineraryShowOrganizer) return; // at least one must be on
+                                    setItineraryShowEvents(next);
+                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: next, itinerary_show_organizer: itineraryShowOrganizer }); } catch(e) {}
+                                  }}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowEvents ? 'bg-purple-600' : 'bg-gray-200'} ${!itineraryShowEvents && !itineraryShowOrganizer ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${itineraryShowEvents ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </button>
+                              </div>
+                              <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-gray-900 text-sm">Show Study Plan panel</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">Shows the right panel on the Itinerary with your Organizer study plan per period.</p>
+                                </div>
+                                <button
+                                  onClick={async () => {
+                                    const next = !itineraryShowOrganizer;
+                                    if (!next && !itineraryShowEvents) return; // at least one must be on
+                                    setItineraryShowOrganizer(next);
+                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: itineraryShowEvents, itinerary_show_organizer: next }); } catch(e) {}
+                                  }}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowOrganizer ? 'bg-purple-600' : 'bg-gray-200'} ${!itineraryShowEvents && !itineraryShowOrganizer ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                >
+                                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${itineraryShowOrganizer ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </button>
+                              </div>
+                            </div>
+                            <p className="text-xs text-gray-400 mt-2">At least one panel must remain visible.</p>
                           </div>
                           {/* Sounds */}
                           <div>
@@ -14219,71 +14061,290 @@ const PlanAssist = () => {
       
       {/* Task Workspace Modal */}
       {/* Hub Tutorial Dialog */}
-      {showTutorialDialog === 'hub' && (() => {
-          const userGrade = user?.grade ? parseInt(user.grade) : 0;
-          const tutorialUrl = userGrade >= 11 ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
-            : userGrade >= 9 ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
-            : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
-          const dayNames = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
-          const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
-          const [pStart, pEnd] = range.split('-').map(Number);
-          const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
-          const canSave = tutorialDate && tutorialPeriod;
-          return (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
-                <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900">Book a Tutorial</h3>
-                    <p className="text-sm text-gray-500 mt-0.5">Book a meeting with your teacher</p>
-                  </div>
-                  <button onClick={() => setShowTutorialDialog(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+      {/* Unified Booking Modal — Tutorial (hub) */}
+      {showBookingModal === 'hub' && (() => {
+        const userGrade = user?.grade ? parseInt(user.grade) : 0;
+        const tutorialUrl = userGrade >= 11
+          ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
+          : userGrade >= 9
+          ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
+          : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
+        const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+        const [pStart, pEnd] = range.split('-').map(Number);
+        const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+        const activeCourseNames = [...new Set(courses.filter(c => c.enabled !== false).map(c => c.name))].sort();
+        const canSaveTutorial = bookingDate && bookingPeriod && bookingCourse;
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+              <div className="p-5 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                <h3 className="text-xl font-bold text-gray-900">Book a Tutorial</h3>
+                <button onClick={() => setShowBookingModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <iframe src={tutorialUrl} className="w-full h-[360px] border-0" title="Book a Tutorial" />
+              </div>
+              <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
+                <p className="text-xs text-gray-500">Once booked via the calendar above, fill in the details:</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <select value={bookingCourse} onChange={e => setBookingCourse(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                    <option value="">Course *</option>
+                    {activeCourseNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" placeholder="Date *" />
+                  <select value={bookingPeriod} onChange={e => setBookingPeriod(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                    <option value="">Period *</option>
+                    {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
+                  </select>
+                  <input type="text" value={bookingZoom} onChange={e => setBookingZoom(e.target.value)}
+                    placeholder="Zoom number (optional)" maxLength={20}
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
                 </div>
-                <div className="flex-1 overflow-hidden">
-                  <iframe src={tutorialUrl} className="w-full h-[380px] border-0" title="Book a Tutorial" />
-                </div>
-                <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
-                  <p className="text-xs text-gray-500">Once booked, fill in your tutorial details:</p>
-                  <div className="flex gap-3">
-                    <input type="date" value={tutorialDate} onChange={e => setTutorialDate(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent"
-                      placeholder="Date *" />
-                    <select value={tutorialPeriod} onChange={e => setTutorialPeriod(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent">
-                      <option value="">Period *</option>
-                      {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
-                    </select>
-                  </div>
-                  <div className="flex gap-3">
-                    <input type="text" value={tutorialZoom} onChange={e => setTutorialZoom(e.target.value)}
-                      placeholder="Zoom number (optional)" maxLength={20}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
-                    <input type="text" value={tutorialTopic} onChange={e => setTutorialTopic(e.target.value)}
-                      placeholder="Topic (optional, max 60 chars)" maxLength={60}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 focus:border-transparent" />
-                  </div>
-                  <div className="flex gap-3">
-                    <button onClick={() => setShowTutorialDialog(null)}
-                      className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Close</button>
-                    <button
-                      onClick={() => saveTutorial({ date: tutorialDate, period: parseInt(tutorialPeriod), zoomNumber: tutorialZoom, topic: tutorialTopic })}
-                      disabled={!canSave || isSavingTutorial}
-                      className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                      {isSavingTutorial
-                        ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div> Saving...</>
-                        : 'Save Tutorial'}
-                    </button>
-                  </div>
-                  {!canSave && (tutorialZoom || tutorialTopic) && (
-                    <p className="text-xs text-red-400 text-center">Please select a Date and Period to save.</p>
-                  )}
+                <div className="flex gap-3">
+                  <button onClick={() => setShowBookingModal(false)}
+                    className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                  <button
+                    disabled={!canSaveTutorial || isSavingBooking}
+                    onClick={() => saveBooking({ type: 'tutorial', date: bookingDate, period: bookingPeriod, title: bookingCourse, zoomNumber: bookingZoom })}
+                    className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 flex items-center justify-center gap-2">
+                    {isSavingBooking ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : 'Save Tutorial'}
+                  </button>
                 </div>
               </div>
             </div>
-          );
+          </div>
+        );
       })()}
 
+      {/* Make a Booking Modal — two-tab (Tutorial + Meeting), from Itinerary */}
+      {showBookingModal === 'itinerary' && (() => {
+        const userGrade = user?.grade ? parseInt(user.grade) : 0;
+        const tutorialUrl = userGrade >= 11
+          ? 'https://outlook.office.com/book/Grade1112Tutorials@na.oneschoolglobal.com/?ismsaljsauthenabled'
+          : userGrade >= 9
+          ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
+          : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
+        const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+        const [pStart, pEnd] = range.split('-').map(Number);
+        const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+        const activeCourseNames = [...new Set(courses.filter(c => c.enabled !== false).map(c => c.name))].sort();
+        const canSaveTutorial = bookingDate && bookingPeriod && bookingCourse;
+        const canSaveMeeting = bookingDate && bookingPeriod && bookingMeetingTitle.trim();
+        return (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+              {/* Header + tabs */}
+              <div className="p-5 border-b border-gray-100 flex-shrink-0">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xl font-bold text-gray-900">Make a Booking</h3>
+                  <button onClick={() => setShowBookingModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+                  {[{ id: 'tutorial', label: '📚 Tutorial', color: 'orange' }, { id: 'meeting', label: '🤝 Meeting', color: 'indigo' }].map(tab => (
+                    <button key={tab.id} onClick={() => setBookingTab(tab.id)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${bookingTab === tab.id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {bookingTab === 'tutorial' && (
+                <>
+                  <div className="flex-1 overflow-hidden">
+                    <iframe src={tutorialUrl} className="w-full h-[320px] border-0" title="Book a Tutorial" />
+                  </div>
+                  <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
+                    <p className="text-xs text-gray-500">Book via the calendar above, then fill in details:</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <select value={bookingCourse} onChange={e => setBookingCourse(e.target.value)}
+                        className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                        <option value="">Course *</option>
+                        {activeCourseNames.map(n => <option key={n} value={n}>{n}</option>)}
+                      </select>
+                      <input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)}
+                        className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                      <select value={bookingPeriod} onChange={e => setBookingPeriod(e.target.value)}
+                        className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
+                        <option value="">Period *</option>
+                        {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
+                      </select>
+                      <input type="text" value={bookingZoom} onChange={e => setBookingZoom(e.target.value)}
+                        placeholder="Zoom number (optional)" maxLength={20}
+                        className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    </div>
+                    <div className="flex gap-3">
+                      <button onClick={() => setShowBookingModal(false)}
+                        className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                      <button disabled={!canSaveTutorial || isSavingBooking}
+                        onClick={() => saveBooking({ type: 'tutorial', date: bookingDate, period: bookingPeriod, title: bookingCourse, zoomNumber: bookingZoom })}
+                        className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 flex items-center justify-center gap-2">
+                        {isSavingBooking ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : 'Save Tutorial'}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {bookingTab === 'meeting' && (
+                <div className="p-5 space-y-3 flex-1 overflow-y-auto">
+                  <p className="text-sm text-gray-600">Book a meeting with a teacher, student, or group — shown on your Itinerary with its own Meeting Ping.</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input type="text" value={bookingMeetingTitle} onChange={e => setBookingMeetingTitle(e.target.value)}
+                      placeholder="Meeting title *" maxLength={80}
+                      className="col-span-2 px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                    <input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)}
+                      className="px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                    <select value={bookingPeriod} onChange={e => setBookingPeriod(e.target.value)}
+                      className="px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400">
+                      <option value="">Period *</option>
+                      {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
+                    </select>
+                    <input type="text" value={bookingZoom} onChange={e => setBookingZoom(e.target.value)}
+                      placeholder="Zoom number (optional)" maxLength={20}
+                      className="col-span-2 px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <button onClick={() => setShowBookingModal(false)}
+                      className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                    <button disabled={!canSaveMeeting || isSavingBooking}
+                      onClick={() => saveBooking({ type: 'meeting', date: bookingDate, period: bookingPeriod, title: bookingMeetingTitle.trim(), zoomNumber: bookingZoom })}
+                      className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-40 flex items-center justify-center gap-2">
+                      {isSavingBooking ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : 'Save Meeting'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
+
+
       {/* Add Task Dialog */}
+      {/* Task Description Modal — top-level so it works from any page */}
+      {showTaskDescription && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <div className="flex items-start justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-900 pr-8">{showTaskDescription.title}</h3>
+              <button
+                onClick={() => setShowTaskDescription(null)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="space-y-3 mb-6">
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <Calendar className="w-4 h-4" />
+                Due: {showTaskDescription.dueDate ? new Date(showTaskDescription.dueDate).toLocaleDateString('en-US', {
+                  weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                }) : 'No due date'}
+              </div>
+              <div className="flex items-center gap-2 text-sm text-gray-600">
+                <Clock className="w-4 h-4" />
+                Estimated Time: {showTaskDescription.userEstimate || showTaskDescription.estimatedTime} min
+              </div>
+            </div>
+            <div className="border-t pt-4">
+              <h4 className="font-semibold text-gray-700 mb-2">Description</h4>
+              {showTaskDescription.description ? (
+                <div
+                  className="text-gray-600 prose prose-sm max-w-none leading-relaxed"
+                  dangerouslySetInnerHTML={{
+                    __html: (() => {
+                      const raw = showTaskDescription.description
+                        .replace(/<p>\s*<\/p>/gi, '')
+                        .replace(/\n{3,}/g, '\n\n');
+                      return raw
+                        .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                        .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
+                        .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
+                        .replace(/javascript\s*:/gi, 'blocked:');
+                    })()
+                  }}
+                />
+              ) : (
+                <p className="text-gray-400 italic">No description available</p>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setShowTaskDescription(null)}
+                className="bg-purple-600 text-white px-6 py-2 rounded-lg hover:bg-purple-700 font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Notes Popup Modal — top-level so it works from any page */}
+      {showNotesPopup && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl p-6 max-w-3xl w-full max-h-[80vh] flex flex-col">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex-1 pr-8">
+                <h3 className="text-xl font-bold text-gray-900 mb-1">{showNotesPopup.title}</h3>
+                <p className="text-sm text-gray-600">{extractClassName(showNotesPopup)}</p>
+              </div>
+              <button
+                onClick={closeNotesPopup}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="flex items-center justify-between mb-3 pb-3 border-b">
+              <div className="flex items-center gap-2">
+                <FileText className="w-5 h-5 text-amber-600" />
+                <h4 className="font-semibold text-gray-700">Your Notes</h4>
+              </div>
+              <div className="flex items-center gap-2">
+                {popupNotesLastSaved && (
+                  <span className="text-xs text-green-600">
+                    Saved {popupNotesLastSaved.toLocaleTimeString()}
+                  </span>
+                )}
+                <button
+                  onClick={savePopupNotes}
+                  disabled={popupNotesSaving}
+                  className="bg-amber-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {popupNotesSaving ? (
+                    <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>Saving...</>
+                  ) : (
+                    <><Save className="w-4 h-4" />Save Notes</>
+                  )}
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={popupNotes}
+              onChange={(e) => setPopupNotes(e.target.value)}
+              placeholder="Type your notes here... bullet points, reminders, key concepts, study tips, etc."
+              className="flex-1 w-full p-4 border-2 border-gray-300 rounded-lg resize-y focus:ring-2 focus:ring-amber-500 focus:border-transparent text-gray-900"
+              style={{ minHeight: '240px' }}
+              autoFocus
+            />
+            <div className="mt-4 flex justify-between items-center">
+              <p className="text-xs text-gray-500">💡 Notes auto-save after 2 seconds of inactivity</p>
+              <button
+                onClick={closeNotesPopup}
+                className="bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700 font-medium"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAddTask && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg">
