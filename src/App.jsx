@@ -3652,18 +3652,18 @@ const PlanAssist = () => {
       setItineraryTutorials(data.tutorials || []);
       setItineraryMeetings(data.meetings || []);
       setItineraryAgendas(data.agendas || []);
-      // Keep tutorials map for zoom banner check (keyed date-period)
+      // Build zoom map keyed by dateStr-HH:MM (UTC scheduled_time)
+      // Used by the zoom check loop which fires at the exact scheduled time
       const tMap = {};
       (data.tutorials || []).forEach(t => {
         const dateKey = t.date ? (typeof t.date === 'string' ? t.date.split('T')[0] : new Date(t.date).toISOString().split('T')[0]) : null;
-        if (dateKey) tMap[`${dateKey}-${t.period}`] = { ...t, date: dateKey, zoom_number: t.zoom_number };
+        if (dateKey && t.scheduled_time) tMap[`${dateKey}-${t.scheduled_time}`] = { ...t, date: dateKey, isMeeting: false };
       });
-      // Also include meetings in the zoom map
       (data.meetings || []).forEach(m => {
         const dateKey = m.date ? (typeof m.date === 'string' ? m.date.split('T')[0] : new Date(m.date).toISOString().split('T')[0]) : null;
-        if (dateKey && m.zoom_number) {
-          const key = `${dateKey}-${m.period}`;
-          if (!tMap[key]) tMap[key] = { ...m, date: dateKey, zoom_number: m.zoom_number, isMeeting: true };
+        if (dateKey && m.scheduled_time && m.zoom_number) {
+          const key = `${dateKey}-${m.scheduled_time}`;
+          if (!tMap[key]) tMap[key] = { ...m, date: dateKey, isMeeting: true };
         }
       });
       setTutorials(tMap);
@@ -3674,13 +3674,36 @@ const PlanAssist = () => {
     }
   };
 
-  const saveBooking = async ({ type, date, period, title, zoomNumber }) => {
+  // localTimeToCampusUTC: takes a "HH:MM" local campus time string and converts it
+  // to a UTC "HH:MM" string using the campus offset. Used when saving tutorial/meeting bookings.
+  const localTimeToCampusUTC = (localHHMM, campus) => {
+    const offsetHours = getCampusOffsetHours(campus || 'Ashland');
+    const [h, m] = localHHMM.split(':').map(Number);
+    const utcTotalMins = ((h * 60 + m) - (offsetHours * 60) + 1440 * 2) % 1440;
+    const utcH = Math.floor(utcTotalMins / 60);
+    const utcM = utcTotalMins % 60;
+    return `${String(utcH).padStart(2,'0')}:${String(utcM).padStart(2,'0')}`;
+  };
+
+  // campusUTCToLocal: reverse — UTC HH:MM → campus local HH:MM for display
+  const campusUTCToLocal = (utcHHMM, campus) => {
+    if (!utcHHMM) return '';
+    const offsetHours = getCampusOffsetHours(campus || 'Ashland');
+    const [h, m] = utcHHMM.split(':').map(Number);
+    const localTotalMins = ((h * 60 + m) + (offsetHours * 60) + 1440 * 2) % 1440;
+    const localH = Math.floor(localTotalMins / 60);
+    const localM = localTotalMins % 60;
+    const ampm = localH < 12 ? 'AM' : 'PM';
+    const displayH = localH % 12 || 12;
+    return `${displayH}:${String(localM).padStart(2,'0')} ${ampm}`;
+  };
+
+  const saveBooking = async ({ type, date, localTime, title, zoomNumber }) => {
     setIsSavingBooking(true);
     try {
       const endpoint = type === 'tutorial' ? '/tutorials' : '/meetings';
-      const payload = type === 'tutorial'
-        ? { date, period: parseInt(period), title, zoomNumber }
-        : { date, period: parseInt(period), title, zoomNumber };
+      const scheduledTimeUtc = localTimeToCampusUTC(localTime, accountSetup.campus);
+      const payload = { date, scheduledTimeUtc, title, zoomNumber: zoomNumber || undefined };
       await apiCall(endpoint, 'POST', payload);
       await loadItinerary(date);
       setShowBookingModal(false);
@@ -4588,27 +4611,23 @@ const PlanAssist = () => {
       const periodRange = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus);
       const [rangeStart, rangeEnd] = periodRange.split('-').map(Number);
 
+      // ── Loop 1: Lesson zoom pings (period-based, existing behaviour) ─────
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
         const period = parseInt(p);
         if (period < rangeStart || period > rangeEnd) continue;
 
-        const periodKey = `${todayStr}-${period}`;
-        if (zoomFiredPeriodsRef.current.has(periodKey)) continue; // already fired today
+        const periodKey = `lesson-${todayStr}-${period}`;
+        if (zoomFiredPeriodsRef.current.has(periodKey)) continue;
 
         const periodMins = t.h * 60 + t.m;
-        const diff = periodMins - nowUTCMins; // positive = starts in future, 0 = right now
-        // Window: [periodMins - 1, periodMins) i.e. diff in (0, 1] means "1 min before start"
-        // diff == 0 means "exactly at start" — also valid
+        const diff = periodMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
-          const tutorial = tutorials[`${todayStr}-${period}`];
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
           const lesson = scheduleLessons.find(sl => sl.day === todayName && sl.period === period);
-          const zoomNumber = tutorial?.zoom_number || lesson?.zoom_number || null;
+          const zoomNumber = lesson?.zoom_number || null;
 
           if (zoomNumber) {
             zoomFiredPeriodsRef.current.add(periodKey);
-
-            // 1. Start alarm audio immediately (before PiP opens)
             if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
             if (pingSoundEnabled) (() => {
               try {
@@ -4638,16 +4657,63 @@ const PlanAssist = () => {
                 zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
               } catch(e) { zoomPingAudioRef.current = null; }
             })();
-
-            // 2. Show the banner — distinguish tutorial / meeting / lesson
-            const isTutorialPing = !!(tutorial?.zoom_number && !tutorial?.isMeeting);
-            const isMeetingPing = !!(tutorial?.zoom_number && tutorial?.isMeeting);
-            setZoomBanner({ period, zoomNumber, isTutorial: isTutorialPing, isMeeting: isMeetingPing, title: tutorial?.title });
-
-            // 3. Launch the PiP Zoom Ping
-            launchZoomPing(zoomNumber, isTutorialPing, colorTheme);
+            setZoomBanner({ period, zoomNumber, isTutorial: false, isMeeting: false, title: null });
+            launchZoomPing(zoomNumber, false, colorTheme);
           }
           break;
+        }
+      }
+
+      // ── Loop 2: Tutorial / Meeting pings (time-based) ────────────────────
+      // tutorials map is keyed dateStr-HH:MM (UTC scheduled_time)
+      const nowHHMM = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')}`;
+      for (const [key, event] of Object.entries(tutorials)) {
+        if (!key.startsWith(todayStr)) continue;
+        const eventTime = key.substring(todayStr.length + 1); // HH:MM
+        const firedKey = `event-${key}`;
+        if (zoomFiredPeriodsRef.current.has(firedKey)) continue;
+
+        // Fire within a 1-minute window: eventTime to eventTime+1
+        const [eH, eM] = eventTime.split(':').map(Number);
+        const eventUtcMins = eH * 60 + eM;
+        const diff = eventUtcMins - nowUTCMins;
+        if (diff >= 0 && diff <= 1) {
+          const zoomNumber = event.zoom_number || null;
+          if (!zoomNumber) continue; // no zoom = no ping
+
+          zoomFiredPeriodsRef.current.add(firedKey);
+          if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
+          if (pingSoundEnabled) (() => {
+            try {
+              const ctx = new (window.AudioContext || window.webkitAudioContext)();
+              let stopped = false;
+              const playAlarm = () => {
+                if (stopped) return;
+                // Meetings get a slightly different tone pattern (lower, 2 notes)
+                const tones = event.isMeeting ? [660, 880] : [880, 1100, 880, 1100];
+                let t = ctx.currentTime;
+                tones.forEach(freq => {
+                  const osc = ctx.createOscillator();
+                  const gain = ctx.createGain();
+                  osc.connect(gain); gain.connect(ctx.destination);
+                  osc.type = 'sine';
+                  osc.frequency.setValueAtTime(freq, t);
+                  gain.gain.setValueAtTime(0, t);
+                  gain.gain.linearRampToValueAtTime(0.35, t + 0.02);
+                  gain.gain.setValueAtTime(0.35, t + 0.18);
+                  gain.gain.linearRampToValueAtTime(0, t + 0.22);
+                  osc.start(t); osc.stop(t + 0.22);
+                  t += 0.25;
+                });
+                const loopId = setTimeout(playAlarm, tones.length * 250 + 600);
+                ctx.__loopId = loopId;
+              };
+              playAlarm();
+              zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
+            } catch(e) { zoomPingAudioRef.current = null; }
+          })();
+          setZoomBanner({ zoomNumber, isTutorial: !event.isMeeting, isMeeting: !!event.isMeeting, title: event.title, scheduledTime: eventTime });
+          launchZoomPing(zoomNumber, !event.isMeeting, colorTheme);
         }
       }
     };
@@ -7024,7 +7090,11 @@ const PlanAssist = () => {
                   : <>Period {zoomBanner.period} is starting!</>
                 }
               </p>
-              <p className="text-xs opacity-75">Zoom: {zoomBanner.zoomNumber}</p>
+              <p className="text-xs opacity-75">{
+                zoomBanner.scheduledTime
+                  ? `${campusUTCToLocal(zoomBanner.scheduledTime, accountSetup.campus)} · Zoom: ${zoomBanner.zoomNumber}`
+                  : `Zoom: ${zoomBanner.zoomNumber}`
+              }</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -10411,9 +10481,23 @@ const PlanAssist = () => {
                       ? Math.min(100, Math.round((campusNowMins - startMins) / PERIOD_DURATION_MINS * 100))
                       : 0;
 
-                    // Events for this period
-                    const periodTutorials = itineraryTutorials.filter(t => t.period === period);
-                    const periodMeetings = itineraryMeetings.filter(m => m.period === period);
+                    // Events for this period — match by scheduled_time falling within the period window
+                    const periodStartMinsLocal = startMins; // already in campus local mins
+                    const periodEndMinsLocal = endMins;
+                    const eventLocalMins = (utcHHMM) => {
+                      if (!utcHHMM) return null;
+                      const offsetHours = getCampusOffsetHours(accountSetup.campus || 'Ashland');
+                      const [h, m] = utcHHMM.split(':').map(Number);
+                      return ((h * 60 + m) + offsetHours * 60 + 1440 * 2) % 1440;
+                    };
+                    const periodTutorials = itineraryTutorials.filter(t => {
+                      const lm = eventLocalMins(t.scheduled_time);
+                      return lm !== null && lm >= periodStartMinsLocal && lm < periodEndMinsLocal;
+                    });
+                    const periodMeetings = itineraryMeetings.filter(m => {
+                      const lm = eventLocalMins(m.scheduled_time);
+                      return lm !== null && lm >= periodStartMinsLocal && lm < periodEndMinsLocal;
+                    });
                     const periodAgenda = itineraryAgendas.find(ag => {
                       const m = ag.name && ag.name.match(/^Period (\d+) Study/);
                       return m && parseInt(m[1]) === period;
@@ -10479,6 +10563,7 @@ const PlanAssist = () => {
                                     <BookOpen className="w-4 h-4 text-orange-500 flex-shrink-0" />
                                     <div className="min-w-0">
                                       <p className="text-xs font-semibold text-orange-900 truncate">{tut.title}</p>
+                                      <p className="text-xs text-orange-400">{campusUTCToLocal(tut.scheduled_time, accountSetup.campus)}</p>
                                       {tut.zoom_number ? (
                                         <a href={`https://oneschoolglobal.zoom.us/j/${(tut.zoom_number||'').replace(/[\s\-]/g,'')}`}
                                           target="_blank" rel="noopener noreferrer"
@@ -10498,6 +10583,7 @@ const PlanAssist = () => {
                                     <Users className="w-4 h-4 text-indigo-500 flex-shrink-0" />
                                     <div className="min-w-0">
                                       <p className="text-xs font-semibold text-indigo-900 truncate">{mtg.title}</p>
+                                      <p className="text-xs text-indigo-400">{campusUTCToLocal(mtg.scheduled_time, accountSetup.campus)}</p>
                                       {mtg.zoom_number ? (
                                         <a href={`https://oneschoolglobal.zoom.us/j/${(mtg.zoom_number||'').replace(/[\s\-]/g,'')}`}
                                           target="_blank" rel="noopener noreferrer"
@@ -14069,11 +14155,9 @@ const PlanAssist = () => {
           : userGrade >= 9
           ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
           : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
-        const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
-        const [pStart, pEnd] = range.split('-').map(Number);
-        const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
         const activeCourseNames = [...new Set(courses.filter(c => c.enabled !== false).map(c => c.name))].sort();
-        const canSaveTutorial = bookingDate && bookingPeriod && bookingCourse;
+        const canSaveTutorial = bookingDate && bookingTime && bookingCourse;
+        const campusTzLabel = accountSetup.campus || 'Ashland';
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
@@ -14093,12 +14177,12 @@ const PlanAssist = () => {
                     {activeCourseNames.map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                   <input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" placeholder="Date *" />
-                  <select value={bookingPeriod} onChange={e => setBookingPeriod(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
-                    <option value="">Period *</option>
-                    {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
-                  </select>
+                    className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                  <div className="flex flex-col gap-1">
+                    <input type="time" value={bookingTime} onChange={e => setBookingTime(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                    <p className="text-xs text-gray-400">{campusTzLabel} time *</p>
+                  </div>
                   <input type="text" value={bookingZoom} onChange={e => setBookingZoom(e.target.value)}
                     placeholder="Zoom number (optional)" maxLength={20}
                     className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
@@ -14108,7 +14192,7 @@ const PlanAssist = () => {
                     className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
                   <button
                     disabled={!canSaveTutorial || isSavingBooking}
-                    onClick={() => saveBooking({ type: 'tutorial', date: bookingDate, period: bookingPeriod, title: bookingCourse, zoomNumber: bookingZoom })}
+                    onClick={() => saveBooking({ type: 'tutorial', date: bookingDate, localTime: bookingTime, title: bookingCourse, zoomNumber: bookingZoom })}
                     className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 flex items-center justify-center gap-2">
                     {isSavingBooking ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : 'Save Tutorial'}
                   </button>
@@ -14127,12 +14211,10 @@ const PlanAssist = () => {
           : userGrade >= 9
           ? 'https://outlook.office.com/book/Grade910TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled'
           : 'https://outlook.office.com/book/Grade9TutorialsCopy@na.oneschoolglobal.com/?ismsaljsauthenabled';
-        const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
-        const [pStart, pEnd] = range.split('-').map(Number);
-        const periodOptions = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
         const activeCourseNames = [...new Set(courses.filter(c => c.enabled !== false).map(c => c.name))].sort();
-        const canSaveTutorial = bookingDate && bookingPeriod && bookingCourse;
-        const canSaveMeeting = bookingDate && bookingPeriod && bookingMeetingTitle.trim();
+        const campusTzLabel = accountSetup.campus || 'Ashland';
+        const canSaveTutorial = bookingDate && bookingTime && bookingCourse;
+        const canSaveMeeting = bookingDate && bookingTime && bookingMeetingTitle.trim();
         return (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
@@ -14143,7 +14225,7 @@ const PlanAssist = () => {
                   <button onClick={() => setShowBookingModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-                  {[{ id: 'tutorial', label: '📚 Tutorial', color: 'orange' }, { id: 'meeting', label: '🤝 Meeting', color: 'indigo' }].map(tab => (
+                  {[{ id: 'tutorial', label: '📚 Tutorial' }, { id: 'meeting', label: '🤝 Meeting' }].map(tab => (
                     <button key={tab.id} onClick={() => setBookingTab(tab.id)}
                       className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${bookingTab === tab.id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
                       {tab.label}
@@ -14155,10 +14237,10 @@ const PlanAssist = () => {
               {bookingTab === 'tutorial' && (
                 <>
                   <div className="flex-1 overflow-hidden">
-                    <iframe src={tutorialUrl} className="w-full h-[320px] border-0" title="Book a Tutorial" />
+                    <iframe src={tutorialUrl} className="w-full h-[300px] border-0" title="Book a Tutorial" />
                   </div>
                   <div className="p-5 border-t border-gray-100 space-y-3 flex-shrink-0">
-                    <p className="text-xs text-gray-500">Book via the calendar above, then fill in details:</p>
+                    <p className="text-xs text-gray-500">Book via the calendar above, then fill in the details below:</p>
                     <div className="grid grid-cols-2 gap-3">
                       <select value={bookingCourse} onChange={e => setBookingCourse(e.target.value)}
                         className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
@@ -14167,11 +14249,11 @@ const PlanAssist = () => {
                       </select>
                       <input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)}
                         className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
-                      <select value={bookingPeriod} onChange={e => setBookingPeriod(e.target.value)}
-                        className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400">
-                        <option value="">Period *</option>
-                        {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
-                      </select>
+                      <div className="flex flex-col gap-1">
+                        <input type="time" value={bookingTime} onChange={e => setBookingTime(e.target.value)}
+                          className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
+                        <p className="text-xs text-gray-400">{campusTzLabel} time *</p>
+                      </div>
                       <input type="text" value={bookingZoom} onChange={e => setBookingZoom(e.target.value)}
                         placeholder="Zoom number (optional)" maxLength={20}
                         className="px-3 py-2 border border-orange-200 rounded-lg text-sm focus:ring-2 focus:ring-orange-400" />
@@ -14180,7 +14262,7 @@ const PlanAssist = () => {
                       <button onClick={() => setShowBookingModal(false)}
                         className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
                       <button disabled={!canSaveTutorial || isSavingBooking}
-                        onClick={() => saveBooking({ type: 'tutorial', date: bookingDate, period: bookingPeriod, title: bookingCourse, zoomNumber: bookingZoom })}
+                        onClick={() => saveBooking({ type: 'tutorial', date: bookingDate, localTime: bookingTime, title: bookingCourse, zoomNumber: bookingZoom })}
                         className="flex-1 px-4 py-2.5 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 disabled:opacity-40 flex items-center justify-center gap-2">
                         {isSavingBooking ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : 'Save Tutorial'}
                       </button>
@@ -14191,18 +14273,18 @@ const PlanAssist = () => {
 
               {bookingTab === 'meeting' && (
                 <div className="p-5 space-y-3 flex-1 overflow-y-auto">
-                  <p className="text-sm text-gray-600">Book a meeting with a teacher, student, or group — shown on your Itinerary with its own Meeting Ping.</p>
+                  <p className="text-sm text-gray-600">Book a meeting — shown on your Itinerary with its own Meeting Ping.</p>
                   <div className="grid grid-cols-2 gap-3">
                     <input type="text" value={bookingMeetingTitle} onChange={e => setBookingMeetingTitle(e.target.value)}
                       placeholder="Meeting title *" maxLength={80}
                       className="col-span-2 px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
                     <input type="date" value={bookingDate} onChange={e => setBookingDate(e.target.value)}
                       className="px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
-                    <select value={bookingPeriod} onChange={e => setBookingPeriod(e.target.value)}
-                      className="px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400">
-                      <option value="">Period *</option>
-                      {periodOptions.map(p => <option key={p} value={p}>Period {p}</option>)}
-                    </select>
+                    <div className="flex flex-col gap-1">
+                      <input type="time" value={bookingTime} onChange={e => setBookingTime(e.target.value)}
+                        className="px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
+                      <p className="text-xs text-gray-400">{campusTzLabel} time *</p>
+                    </div>
                     <input type="text" value={bookingZoom} onChange={e => setBookingZoom(e.target.value)}
                       placeholder="Zoom number (optional)" maxLength={20}
                       className="col-span-2 px-3 py-2 border border-indigo-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-400" />
@@ -14211,7 +14293,7 @@ const PlanAssist = () => {
                     <button onClick={() => setShowBookingModal(false)}
                       className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
                     <button disabled={!canSaveMeeting || isSavingBooking}
-                      onClick={() => saveBooking({ type: 'meeting', date: bookingDate, period: bookingPeriod, title: bookingMeetingTitle.trim(), zoomNumber: bookingZoom })}
+                      onClick={() => saveBooking({ type: 'meeting', date: bookingDate, localTime: bookingTime, title: bookingMeetingTitle.trim(), zoomNumber: bookingZoom })}
                       className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 disabled:opacity-40 flex items-center justify-center gap-2">
                       {isSavingBooking ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Saving…</> : 'Save Meeting'}
                     </button>
