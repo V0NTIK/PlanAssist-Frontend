@@ -674,6 +674,7 @@ const PlanAssist = () => {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [pwaInstallPrompt, setPwaInstallPrompt] = useState(null);   // deferred install event
   const [showPwaBanner, setShowPwaBanner] = useState(false);         // show install banner
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);    // offline mode detection
   const [isAppLoading, setIsAppLoading] = useState(false);
   // calendarTasks removed - calendar now reads from `tasks` state directly
   const [calendarExpandedId, setCalendarExpandedId] = useState(null);
@@ -860,6 +861,8 @@ const PlanAssist = () => {
   const [sessionPriorities, setSessionPriorities] = useState(null); // null=not set today, []=empty, [...ids]=set
   const [sessionPrioritiesLoading, setSessionPrioritiesLoading] = useState(false);
   const [sessionPrioritiesPickerOpen, setSessionPrioritiesPickerOpen] = useState(false);
+  const focusDragIndexRef = React.useRef(null); // index being dragged
+  const focusDragOverIndexRef = React.useRef(null); // index being dragged over
   const [sessionPickerSel, setSessionPickerSel] = useState([]); // selected task IDs in picker modal
   const [sessionDashView, setSessionDashView] = useState('timeline'); // 'timeline' | 'kanban' | 'focus'
   const [sessionStartingId, setSessionStartingId] = useState(null); // task ID currently being started
@@ -1201,6 +1204,7 @@ const PlanAssist = () => {
 
   // API helper
   const apiCall = async (endpoint, method = 'GET', body = null) => {
+    if (!navigator.onLine) throw new Error('You are offline. Please reconnect and try again.');
     const headers = { 'Content-Type': 'application/json' };
     // Use tokenRef.current (always up-to-date) instead of token state (stale closure risk in intervals)
     const currentToken = tokenRef.current || token;
@@ -1378,7 +1382,16 @@ const PlanAssist = () => {
       }
     };
     window.addEventListener('beforeinstallprompt', handler);
-    return () => window.removeEventListener('beforeinstallprompt', handler);
+    // Online / offline detection
+    const goOffline = () => setIsOffline(true);
+    const goOnline  = () => { setIsOffline(false); /* Re-run background sync when reconnected */ if (isAuthenticated) runBackgroundSync().catch(()=>{}); };
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online',  goOnline);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handler);
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online',  goOnline);
+    };
   }, []);
 
   // Load user data
@@ -4383,50 +4396,110 @@ const PlanAssist = () => {
     ambience:   '/sounds/Ambience.mp3',
   };
 
+  // ── Focus sound engine — uses Web Audio API (AudioContext + AudioBufferSourceNode)
+  // instead of <Audio> elements to prevent Chromium/Edge from throttling/stopping
+  // audio when the tab is backgrounded or the user switches to another window.
+  // AudioContext audio is classified as a real-time audio worklet and is exempt
+  // from background tab throttling; <Audio> elements are not.
+  const focusAudioCtxRef  = React.useRef(null); // shared AudioContext
+  const focusAudioSrcRef  = React.useRef(null); // current AudioBufferSourceNode
+  const focusAudioGainRef = React.useRef(null); // GainNode for volume control
+  const focusAudioBufRef  = React.useRef({});   // cache: type → AudioBuffer
+
+  // Resume AudioContext on visibility change — Chromium can suspend it when hidden
+  useEffect(() => {
+    const handleVis = () => {
+      if (document.visibilityState === 'visible' && focusAudioCtxRef.current?.state === 'suspended') {
+        focusAudioCtxRef.current.resume().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', handleVis);
+    return () => document.removeEventListener('visibilitychange', handleVis);
+  }, []);
+
+  const _getAudioCtx = () => {
+    if (!focusAudioCtxRef.current || focusAudioCtxRef.current.state === 'closed') {
+      focusAudioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return focusAudioCtxRef.current;
+  };
+
+  const _stopFocusSource = () => {
+    if (focusAudioSrcRef.current) {
+      try { focusAudioSrcRef.current.stop(); } catch(e) {}
+      try { focusAudioSrcRef.current.disconnect(); } catch(e) {}
+      focusAudioSrcRef.current = null;
+    }
+  };
+
+  const playWhiteNoise = async (type) => {
+    const src = FOCUS_SOUND_FILES[type] || FOCUS_SOUND_FILES.whitenoise;
+    _stopFocusSource();
+    setIsWhiteNoisePlaying(false);
+    setWhiteNoiseType(type);
+    try {
+      const ctx = _getAudioCtx();
+      await ctx.resume();
+
+      // Use cached AudioBuffer if available, else decode
+      if (!focusAudioBufRef.current[type]) {
+        const resp = await fetch(src);
+        const arrayBuf = await resp.arrayBuffer();
+        focusAudioBufRef.current[type] = await ctx.decodeAudioData(arrayBuf);
+      }
+      const buf = focusAudioBufRef.current[type];
+
+      const gainNode = ctx.createGain();
+      gainNode.gain.setValueAtTime(whiteNoiseVolume * 0.55, ctx.currentTime);
+      gainNode.connect(ctx.destination);
+      focusAudioGainRef.current = gainNode;
+
+      const source = ctx.createBufferSource();
+      source.buffer = buf;
+      source.loop = true;
+      source.connect(gainNode);
+      source.start(0);
+      focusAudioSrcRef.current = source;
+
+      setWhiteNoiseAudio(true); // truthy flag — actual node is in ref
+      setIsWhiteNoisePlaying(true);
+
+      // MediaSession keeps audio alive in Edge even when backgrounded
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({ title: 'Focus Sounds — PlanAssist' });
+        navigator.mediaSession.setActionHandler('pause', toggleWhiteNoise);
+        navigator.mediaSession.setActionHandler('play',  toggleWhiteNoise);
+      }
+    } catch(e) {
+      console.warn('Focus sound error:', e);
+    }
+  };
+
   const toggleWhiteNoise = () => {
     if (isWhiteNoisePlaying) {
-      if (whiteNoiseAudio) {
-        whiteNoiseAudio.pause();
-        whiteNoiseAudio.src = '';
-      }
+      _stopFocusSource();
       setWhiteNoiseAudio(null);
       setIsWhiteNoisePlaying(false);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     } else {
       playWhiteNoise(whiteNoiseType);
     }
   };
 
-  const playWhiteNoise = (type) => {
-    if (whiteNoiseAudio) {
-      whiteNoiseAudio.pause();
-      whiteNoiseAudio.src = '';
-    }
-    const src = FOCUS_SOUND_FILES[type] || FOCUS_SOUND_FILES.whitenoise;
-    const audio = new Audio(src);
-    audio.loop = true;
-    audio.volume = whiteNoiseVolume * 0.55;
-    audio.play().catch(() => {});
-    setWhiteNoiseAudio(audio);
-    setIsWhiteNoisePlaying(true);
-    setWhiteNoiseType(type);
-  };
-
   const changeWhiteNoiseVolume = (volume) => {
     setWhiteNoiseVolume(volume);
-    if (whiteNoiseAudio) {
-      whiteNoiseAudio.volume = volume * 0.55;
+    if (focusAudioGainRef.current) {
+      focusAudioGainRef.current.gain.setValueAtTime(volume * 0.55, focusAudioGainRef.current.context.currentTime);
     }
   };
 
-  // Cleanup white noise on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (whiteNoiseAudio) {
-        whiteNoiseAudio.pause();
-        whiteNoiseAudio.src = '';
-      }
+      _stopFocusSource();
+      if (focusAudioCtxRef.current) { focusAudioCtxRef.current.close().catch(()=>{}); }
     };
-  }, [whiteNoiseAudio]);
+  }, []);
 
   // Pomodoro functions
   const startPomodoro = () => {
@@ -7060,6 +7133,14 @@ const PlanAssist = () => {
         </div>
       )}
 
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="bg-gray-800 text-white px-4 py-2 flex items-center justify-center gap-2 text-sm">
+          <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse flex-shrink-0" />
+          You're offline — PlanAssist is showing cached data. Some features are unavailable until you reconnect.
+        </div>
+      )}
+
       {/* Feature 6: Auto-sync toast */}
       {autoSyncToast && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-sm px-5 py-2.5 rounded-full shadow-lg z-50 flex items-center gap-2 animate-pulse">
@@ -7088,53 +7169,100 @@ const PlanAssist = () => {
       {/* ── User Profile Modal ───────────────────────────────────────── */}
       {profileModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setProfileModal(null)}>
-          <div className="absolute inset-0 bg-black bg-opacity-40" />
-          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setProfileModal(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 text-xl">✕</button>
+          <div className="absolute inset-0 bg-black bg-opacity-50 backdrop-blur-sm" />
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <button onClick={() => setProfileModal(null)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 z-10"><X className="w-5 h-5" /></button>
             {profileModalLoading ? (
-              <div className="flex flex-col items-center py-8 gap-3">
+              <div className="flex flex-col items-center py-12 gap-3">
                 <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
                 <p className="text-sm text-gray-500">Loading profile…</p>
               </div>
             ) : profileModalData?.error ? (
-              <div className="text-center py-8">
+              <div className="text-center py-12">
                 <p className="text-gray-500 text-sm">{profileModalData.error === 'Profile is private' ? '🔒 This profile is private.' : 'Profile unavailable.'}</p>
               </div>
-            ) : profileModalData ? (
-              <div className="space-y-4">
-                <div className="flex flex-col items-center gap-2 pb-4 border-b border-gray-100">
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-purple-500 to-blue-500 flex items-center justify-center text-white text-2xl font-bold">
-                    {profileModalData.name?.charAt(0) || '?'}
-                  </div>
-                  <div className="text-center">
-                    {renderInsigniaName(profileModalData.name, profileModalData.insignia, { fontSize:'1.1rem', fontWeight:700 })}
-                    <p className="text-xs text-gray-400 mt-1">{profileModalData.grade ? `Grade ${profileModalData.grade}` : ''}{profileModalData.grade && profileModalData.campus ? ' · ' : ''}{profileModalData.campus || ''}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-3 text-center">
-                  {[
-                    { label: 'Tasks Done', value: profileModalData.totalCompletions ?? 0 },
-                    { label: 'This Week', value: profileModalData.weeklyCompletions ?? 0 },
-                    { label: 'Badges', value: profileModalData.badgeCount ?? 0 },
-                  ].map(s => (
-                    <div key={s.label} className="bg-gray-50 rounded-xl p-3">
-                      <p className="text-lg font-bold text-gray-900">{s.value}</p>
-                      <p className="text-[10px] text-gray-500 uppercase tracking-wide">{s.label}</p>
+            ) : profileModalData ? (() => {
+              const PROFILE_BADGE_DEFS = {
+                first_completion: { emoji: '🎯', name: 'First Step', desc: 'First task completed' },
+                tasks_10:  { emoji: '📚', name: 'Getting Started', desc: '10 tasks' },
+                tasks_25:  { emoji: '💪', name: 'Building Momentum', desc: '25 tasks' },
+                tasks_50:  { emoji: '🔥', name: 'On Fire', desc: '50 tasks' },
+                tasks_100: { emoji: '💯', name: 'Century', desc: '100 tasks' },
+                tasks_250: { emoji: '⚡', name: 'Powerhouse', desc: '250 tasks' },
+                tasks_500: { emoji: '👑', name: 'Legend', desc: '500 tasks' },
+                streak_7:  { emoji: '📅', name: 'Week Warrior', desc: '7-day streak' },
+                streak_14: { emoji: '🌟', name: 'Fortnight Focus', desc: '14-day streak' },
+                streak_30: { emoji: '🗓️', name: 'Monthly Devotion', desc: '30-day streak' },
+                streak_60: { emoji: '🏆', name: 'Champion', desc: '60-day streak' },
+                streak_100:{ emoji: '🎖️', name: 'Elite', desc: '100-day streak' },
+                day_3:     { emoji: '🌅', name: 'Productive Day', desc: '3 in one day' },
+                day_5:     { emoji: '⚡', name: 'High Output', desc: '5 in one day' },
+                day_10:    { emoji: '🚀', name: 'Beast Mode', desc: '10 in one day' },
+                day_20:    { emoji: '🌋', name: 'Unstoppable', desc: '20 in one day' },
+                early_bird:{ emoji: '🐦', name: 'Early Bird', desc: 'Task before 8am' },
+                night_owl: { emoji: '🦉', name: 'Night Owl', desc: 'Task after 10pm' },
+              };
+              return (
+                <div>
+                  {/* Header strip */}
+                  <div className="bg-gradient-to-br from-purple-600 to-indigo-600 px-6 pt-8 pb-6 text-white text-center">
+                    <div className="w-16 h-16 rounded-full bg-white bg-opacity-20 border-2 border-white border-opacity-40 flex items-center justify-center text-3xl font-bold mx-auto mb-3">
+                      {profileModalData.name?.charAt(0) || '?'}
                     </div>
-                  ))}
-                </div>
-                {profileModalData.badges?.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Recent Badges</p>
-                    <div className="flex flex-wrap gap-2">
-                      {profileModalData.badges.slice(0,6).map(b => (
-                        <span key={b.badge_key} className="bg-purple-50 text-purple-700 text-xs font-semibold px-2 py-0.5 rounded-full border border-purple-200">{b.badge_key.replace(/_/g,' ')}</span>
+                    <div className="text-lg font-bold">
+                      {renderInsigniaName(profileModalData.name, profileModalData.insignia, { fontSize:'1.1rem', fontWeight:700, color:'#fff' })}
+                    </div>
+                    <p className="text-purple-200 text-xs mt-1">
+                      {[profileModalData.grade && `Grade ${profileModalData.grade}`, profileModalData.campus].filter(Boolean).join(' · ')}
+                    </p>
+                  </div>
+
+                  <div className="p-5 space-y-4 max-h-[65vh] overflow-y-auto">
+                    {/* Stats row */}
+                    <div className="grid grid-cols-4 gap-2 text-center">
+                      {[
+                        { label: 'Tasks',    value: profileModalData.totalCompletions ?? 0, icon: '✅' },
+                        { label: 'This Week',value: profileModalData.weeklyCompletions ?? 0, icon: '📈' },
+                        { label: 'Streak',   value: `${profileModalData.streakDays ?? 0}d`,  icon: '🔥' },
+                        { label: 'Credits',  value: profileModalData.credits ?? 0,           icon: '🪙' },
+                      ].map(s => (
+                        <div key={s.label} className="bg-gray-50 rounded-xl p-2.5">
+                          <p className="text-base mb-0.5">{s.icon}</p>
+                          <p className="text-sm font-bold text-gray-900">{s.value}</p>
+                          <p className="text-[9px] text-gray-400 uppercase tracking-wide leading-tight">{s.label}</p>
+                        </div>
                       ))}
                     </div>
+
+                    {/* Badges */}
+                    {profileModalData.badges?.length > 0 ? (
+                      <div>
+                        <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">
+                          Badges · {profileModalData.badgeCount}
+                        </p>
+                        <div className="grid grid-cols-3 gap-2">
+                          {profileModalData.badges.map(b => {
+                            const def = PROFILE_BADGE_DEFS[b.badge_key] || { emoji: '🏅', name: b.badge_key.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '), desc: '' };
+                            return (
+                              <div key={b.badge_key} className="bg-gradient-to-br from-amber-50 to-yellow-50 border border-amber-200 rounded-xl p-3 text-center flex flex-col items-center gap-1">
+                                <span className="text-xl">{def.emoji}</span>
+                                <p className="text-xs font-bold text-gray-800 leading-tight">{def.name}</p>
+                                <p className="text-[9px] text-gray-400 leading-tight">{def.desc}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {profileModalData.badgeCount > profileModalData.badges.length && (
+                          <p className="text-center text-xs text-gray-400 mt-2">+{profileModalData.badgeCount - profileModalData.badges.length} more badge{profileModalData.badgeCount - profileModalData.badges.length !== 1 ? 's' : ''}</p>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-center py-3 text-gray-400 text-xs">No badges earned yet</div>
+                    )}
                   </div>
-                )}
-              </div>
-            ) : null}
+                </div>
+              );
+            })() : null}
           </div>
         </div>
       )}
@@ -7437,7 +7565,56 @@ const PlanAssist = () => {
                   const ins = hubInsights;
                   const insights = [];
 
-                  // ── Global-comparative insights ──────────────────────────
+                  // ── Local data insights ──────────────────────────────────
+                  // 1. Estimate accuracy over last 5 completions
+                  if (completionHistory && completionHistory.length >= 5) {
+                    const last5 = completionHistory.slice(0, 5).filter(t => t.estimated_time > 0 && t.actual_time > 0);
+                    if (last5.length >= 3) {
+                      const overBy = last5.filter(t => t.actual_time > t.estimated_time * 1.4);
+                      const underBy = last5.filter(t => t.actual_time < t.estimated_time * 0.6);
+                      if (overBy.length >= 3) {
+                        const avgPct = Math.round(last5.reduce((s, t) => s + ((t.actual_time - t.estimated_time) / t.estimated_time * 100), 0) / last5.length);
+                        insights.push(`⏱ Your last ${last5.length} tasks took ${avgPct}% longer than estimated on average. Try adding a buffer when planning.`);
+                      } else if (underBy.length >= 3) {
+                        insights.push(`🎯 Your last ${last5.length} tasks finished well under estimate. Your instincts are sharper than you think!`);
+                      }
+                    }
+                  }
+
+                  // 2. Heavy day warning — look 3–4 days ahead for a day with high estimated load
+                  if (tasks && tasks.length > 0) {
+                    const today = new Date();
+                    for (let daysAhead = 3; daysAhead <= 4; daysAhead++) {
+                      const target = new Date(today); target.setDate(today.getDate() + daysAhead);
+                      const targetStr = `${target.getFullYear()}-${String(target.getMonth()+1).padStart(2,'0')}-${String(target.getDate()).padStart(2,'0')}`;
+                      const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][target.getDay()];
+                      const dueThat = tasks.filter(t => !t.completed && !t.deleted && t.deadline_date === targetStr);
+                      const totalMins = dueThat.reduce((s, t) => s + (t.estimated_time || 20), 0);
+                      if (totalMins >= 90) {
+                        insights.push(`⚠️ Heavy day ahead — ${dayName} has ${dueThat.length} task${dueThat.length !== 1 ? 's' : ''} totalling ~${Math.round(totalMins/60*10)/10}h estimated. Plan ahead!`);
+                        break;
+                      }
+                    }
+                  }
+
+                  // 3. Session time as % of available study time
+                  // Assume 1 productive hour (60 min) per weekday as "available study time"
+                  if (hubStats && hubStats.studyTime > 0) {
+                    const now = new Date();
+                    // Count weekdays elapsed this week (Mon–Fri, up to today)
+                    const dow = now.getDay(); // 0=Sun, 6=Sat
+                    const weekdaysElapsed = dow === 0 ? 0 : dow === 6 ? 5 : dow; // Mon=1…Fri=5
+                    if (weekdaysElapsed > 0) {
+                      const availableMins = weekdaysElapsed * 60;
+                      const usedMins = hubStats.studyTime; // in minutes
+                      const pct = Math.min(100, Math.round((usedMins / availableMins) * 100));
+                      if (pct >= 50) insights.push(`📊 You've spent ${pct}% of your available study time this week actually executing. ${pct >= 80 ? "Outstanding focus!" : "Keep it up!"}`);
+                      else if (pct > 0 && pct < 30) insights.push(`📊 Only ${pct}% of this week's study time has been in sessions or agendas. There's room to do more!`);
+                    }
+                  }
+
+                  // 4. Easter egg
+                  insights.push('✍️(◔◡◔)');
                   if (ins) {
                     // Global share: only show if meaningful (not 100% and user has done >1)
                     if (ins.userCompletionsToday > 0 && ins.globalCompletionsToday > ins.userCompletionsToday) {
@@ -8504,11 +8681,33 @@ const PlanAssist = () => {
                             const hasProgress = (task.accumulatedTime || 0) > 0;
                             const pct = getProgressPct(task);
                             return (
-                              <div key={task.id} className="rounded-xl border border-gray-100 bg-gray-50 hover:bg-purple-50 hover:border-purple-200 transition-colors p-3 group">
+                              <div
+                                key={task.id}
+                                draggable
+                                onDragStart={() => { focusDragIndexRef.current = idx; }}
+                                onDragEnter={() => { focusDragOverIndexRef.current = idx; }}
+                                onDragOver={e => e.preventDefault()}
+                                onDrop={() => {
+                                  const from = focusDragIndexRef.current;
+                                  const to   = focusDragOverIndexRef.current;
+                                  if (from === null || to === null || from === to) return;
+                                  const reordered = [...sessionPriorities];
+                                  const [moved] = reordered.splice(from, 1);
+                                  reordered.splice(to, 0, moved);
+                                  saveSessionPriorities(reordered);
+                                  focusDragIndexRef.current = null;
+                                  focusDragOverIndexRef.current = null;
+                                }}
+                                onDragEnd={() => { focusDragIndexRef.current = null; focusDragOverIndexRef.current = null; }}
+                                className="rounded-xl border border-gray-100 bg-gray-50 hover:bg-purple-50 hover:border-purple-200 transition-colors p-3 group cursor-grab active:cursor-grabbing active:opacity-60 active:scale-95 active:shadow-md"
+                              >
                                 <div className="flex items-start gap-2">
-                                  <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5">{idx + 1}</span>
+                                  <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                                    <span className="text-gray-300 group-hover:text-gray-400 select-none" style={{fontSize:'10px',lineHeight:1,letterSpacing:'-1px'}}>⣿</span>
+                                    <span className="w-5 h-5 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs font-bold">{idx + 1}</span>
+                                  </div>
                                   <div className="flex-1 min-w-0">
-                                    <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-900 text-xs font-semibold line-clamp-2 leading-snug hover:text-purple-700 hover:underline">{cleanTaskTitle(task)}</a>
+                                    <a href={task.url} target="_blank" rel="noopener noreferrer" className="text-gray-900 text-xs font-semibold line-clamp-2 leading-snug hover:text-purple-700 hover:underline" onClick={e => e.stopPropagation()}>{cleanTaskTitle(task)}</a>
                                     <p className="text-gray-500 text-xs mt-0.5 truncate">{task.class?.replace(/[\[\]]/g, '') || '—'}</p>
                                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                                       <span className={`text-xs ${dueColor}`}>{dueLabel}</span>
@@ -8532,6 +8731,7 @@ const PlanAssist = () => {
                               </div>
                             );
                           })}
+                          <p className="text-center text-gray-300 text-xs py-1 select-none">Drag to reorder</p>
                         </div>
                       ) : (
                         <div className="p-3">
