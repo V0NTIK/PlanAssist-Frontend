@@ -8082,7 +8082,7 @@ const PlanAssist = () => {
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
-                        <p className="text-gray-500 text-sm">Your Planning Quarry — all upcoming assignments</p>
+
                       </div>
                       <div className="flex gap-2 items-center">
                         <button
@@ -8396,7 +8396,7 @@ const PlanAssist = () => {
                                   <div className="flex-shrink-0 self-center flex items-center gap-2">
                                     {/* Progress bar — vertical, beside the button, only when in progress */}
                                     {hasProgress && !isHomeroom && (
-                                      <div className="flex flex-col items-center gap-1" style={{ width: '28px' }}>
+                                      <div className="flex flex-col items-center gap-1" style={{ width: '90px' }}>
                                         <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
                                           <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: classColor, opacity: 0.75 }} />
                                         </div>
