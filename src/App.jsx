@@ -1554,6 +1554,8 @@ const PlanAssist = () => {
       completed: t.completed, deleted: t.deleted || false,
       submittedAt: t.submitted_at || null, assignmentId: t.assignment_id || null,
       course_id: t.course_id || null, manuallyCreated: t.manually_created || false,
+      isMissing: t.is_missing || false, isLate: t.is_late || false,
+      pointsPossible: t.points_possible || null,
       deadlineDateRaw: t.deadline_date
         ? (typeof t.deadline_date === 'string' ? t.deadline_date.split('T')[0] : new Date(t.deadline_date).toISOString().split('T')[0])
         : null
@@ -8076,16 +8078,16 @@ const PlanAssist = () => {
                     </div>
                   ) : (
                   <div className="bg-white rounded-xl shadow-md p-6">
-                    {/* Header */}
-                    <div className="flex items-center justify-between mb-6">
+                    {/* Header row: title + action buttons */}
+                    <div className="flex items-center justify-between mb-4">
                       <div>
                         <h2 className="text-2xl font-bold text-gray-900">Task List</h2>
-                        <p className="text-gray-600">Manage your upcoming tasks</p>
+                        <p className="text-gray-500 text-sm">Your Planning Quarry — all upcoming assignments</p>
                       </div>
                       <div className="flex gap-2 items-center">
                         <button
                           onClick={() => { setAddTaskForm({ title: '', deadlineDate: '', deadlineTime: '', estimatedTime: '', description: '', url: '', course: 'Personal' }); setShowAddTask(true); }}
-                          className="bg-green-500 text-white px-4 py-2 rounded-lg hover:bg-green-600 font-medium flex items-center gap-2 transition-all"
+                          className="bg-green-500 text-white px-3 py-2 rounded-lg hover:bg-green-600 font-medium flex items-center gap-1.5 transition-all text-sm"
                         >
                           <Plus className="w-4 h-4" />
                           <span className="hidden sm:inline">Add Task</span>
@@ -8093,7 +8095,7 @@ const PlanAssist = () => {
                         <button
                           onClick={fetchCanvasTasks}
                           disabled={isLoadingTasks}
-                          className="bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-2 disabled:opacity-50 transition-all"
+                          className="bg-purple-600 text-white px-3 py-2 rounded-lg hover:bg-purple-700 font-medium flex items-center gap-1.5 disabled:opacity-50 transition-all text-sm"
                         >
                           {isLoadingTasks ? (
                             <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div><span className="hidden sm:inline">Sync</span></>
@@ -8104,30 +8106,44 @@ const PlanAssist = () => {
                       </div>
                     </div>
 
-                    {/* Task List */}
-                    {/* Quick filter chips — inside the card, under the header */}
-                    <div className="flex items-center gap-2 mb-4 flex-wrap">
-                      {[
-                        { id: null, label: 'All' },
-                        { id: 'today', label: '📅 Due Today' },
-                        { id: 'week', label: '📆 This Week' },
-                        { id: 'overdue', label: '🔴 Overdue' },
-                        { id: 'inprogress', label: '⏱ In Progress' },
-                      ].map(chip => (
-                        <button key={String(chip.id)}
-                          onClick={() => setQuickFilter(quickFilter === chip.id ? null : chip.id)}
-                          className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all border ${
-                            quickFilter === chip.id
-                              ? 'bg-purple-600 text-white border-purple-600'
-                              : 'bg-gray-100 text-gray-600 border-gray-200 hover:border-purple-400 hover:text-purple-600 hover:bg-white'
-                          }`}
-                        >{chip.label}</button>
-                      ))}
-                      {quickFilter && (
-                        <button onClick={() => setQuickFilter(null)} className="text-xs text-gray-400 hover:text-gray-600 ml-1">✕ Clear</button>
-                      )}
-                    </div>
-                    <div className="space-y-4">
+                    {/* Summary strip */}
+                    {(() => {
+                      const now = new Date();
+                      const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                      const weekEnd = new Date(todayMidnight); weekEnd.setDate(weekEnd.getDate() + 7);
+                      const active = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'));
+                      const overdueCount = active.filter(t => t.dueDate && t.dueDate < todayMidnight).length;
+                      const todayCount = active.filter(t => t.dueDate && t.dueDate >= todayMidnight && t.dueDate < new Date(todayMidnight.getTime() + 86400000)).length;
+                      const weekMins = active.filter(t => t.dueDate && t.dueDate >= todayMidnight && t.dueDate <= weekEnd).reduce((s,t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
+                      const inProgressCount = active.filter(t => (t.accumulatedTime||0) > 0).length;
+                      return (
+                        <div className="flex items-center gap-3 mb-4 flex-wrap">
+                          {overdueCount > 0 && (
+                            <button onClick={() => setQuickFilter(quickFilter === 'overdue' ? null : 'overdue')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${quickFilter === 'overdue' ? 'bg-red-600 text-white border-red-600' : 'bg-red-50 text-red-700 border-red-200 hover:border-red-400'}`}>
+                              <AlertCircle className="w-3.5 h-3.5" />{overdueCount} overdue
+                            </button>
+                          )}
+                          {todayCount > 0 && (
+                            <button onClick={() => setQuickFilter(quickFilter === 'today' ? null : 'today')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${quickFilter === 'today' ? 'bg-orange-500 text-white border-orange-500' : 'bg-orange-50 text-orange-700 border-orange-200 hover:border-orange-400'}`}>
+                              <Calendar className="w-3.5 h-3.5" />{todayCount} due today
+                            </button>
+                          )}
+                          <button onClick={() => setQuickFilter(quickFilter === 'week' ? null : 'week')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${quickFilter === 'week' ? 'bg-purple-600 text-white border-purple-600' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-purple-300'}`}>
+                            <Clock className="w-3.5 h-3.5" />{weekMins >= 60 ? `${Math.floor(weekMins/60)}h ${weekMins%60}m` : `${weekMins}m`} this week
+                          </button>
+                          {inProgressCount > 0 && (
+                            <button onClick={() => setQuickFilter(quickFilter === 'inprogress' ? null : 'inprogress')} className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${quickFilter === 'inprogress' ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-400'}`}>
+                              <Play className="w-3.5 h-3.5" />{inProgressCount} in progress
+                            </button>
+                          )}
+                          {quickFilter && (
+                            <button onClick={() => setQuickFilter(null)} className="text-xs text-gray-400 hover:text-gray-600 ml-auto">✕ Clear filter</button>
+                          )}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="space-y-3">
                       {(() => {
                         const now = new Date();
                         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -8152,116 +8168,169 @@ const PlanAssist = () => {
                           );
                         }
                         
-                        return incompleteTasks.map((task, index) => {
+                        // Helper: strip HTML for description preview
+                        const stripDescHtml = (html) => {
+                          if (!html) return '';
+                          return html.replace(/<br\s*\/?>/gi,' ').replace(/<\/p>/gi,' ').replace(/<li>/gi,'• ').replace(/<[^>]+>/g,'').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\s{2,}/g,' ').trim();
+                        };
+
+                        return incompleteTasks.map((task) => {
                             const taskTime = task.userEstimate || task.estimatedTime;
                             const className = extractClassName(task);
                             const classColor = getClassColor(task);
-                            const dueDate = new Date(task.dueDate);
-                            const dayName = dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                            
+                            const isHomeroom = className.toLowerCase().includes('homeroom');
+
+                            // Urgency — computed using local midnight boundaries (timezone-safe)
+                            const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                            const tomorrowMidnight = new Date(todayMidnight); tomorrowMidnight.setDate(tomorrowMidnight.getDate()+1);
+                            const weekMidnight = new Date(todayMidnight); weekMidnight.setDate(weekMidnight.getDate()+7);
+                            let urgency = 'later';
+                            if (task.dueDate) {
+                              if (task.dueDate < todayMidnight) urgency = 'overdue';
+                              else if (task.dueDate < tomorrowMidnight) urgency = 'today';
+                              else if (task.dueDate < weekMidnight) urgency = 'week';
+                            }
+
+                            // Deadline display string
+                            const dueDate = task.dueDate ? new Date(task.dueDate) : null;
+                            const dayName = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+                            const timeLabel = task.hasSpecificTime && dueDate
+                              ? ` at ${dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}`
+                              : '';
+
+                            // Urgency label + text colour (text only — no extra background colours to clash with class colours)
+                            const urgencyTextClass = urgency === 'overdue' ? 'text-red-600 font-semibold' : urgency === 'today' ? 'text-orange-600 font-semibold' : urgency === 'week' ? 'text-amber-600' : 'text-gray-500';
+
+                            // Progress
+                            const accMin = task.accumulatedTime || 0;
+                            const estMin = taskTime || 20;
+                            const progressPct = Math.min(100, Math.round((accMin / estMin) * 100));
+                            const hasProgress = accMin > 0;
+
+                            // Description preview (first 100 chars)
+                            const descPreview = task.description ? stripDescHtml(task.description).slice(0, 100) : '';
+
+                            // Status badges (missing / late)
+                            const statusBadges = [];
+                            if (task.isMissing) statusBadges.push({ label: 'Missing', cls: 'bg-red-100 text-red-700' });
+                            if (task.isLate) statusBadges.push({ label: 'Late', cls: 'bg-amber-100 text-amber-700' });
+
                             return (
                               <div 
                                 key={task.id}
-                                className="border-2 rounded-lg p-4 transition-all bg-white hover:shadow-lg"
-                                style={{ 
-                                  borderColor: classColor,
-                                  borderLeftWidth: '6px'
-                                }}
+                                className="rounded-lg transition-all bg-white hover:shadow-md border border-gray-100"
+                                style={{ borderLeft: `5px solid ${classColor}` }}
                               >
-                                <div className="flex items-center gap-3">
-                                  {/* Checkbox with loading state */}
-                                  {checkingTask === task.id ? (
-                                    <div className="w-5 h-5 flex-shrink-0 flex items-center justify-center">
-                                      <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
-                                    </div>
-                                  ) : (
-                                    <input
-                                      type="checkbox"
-                                      checked={task.completed || false}
-                                      onChange={() => {
-                                        toggleTaskCompletion(task.id);
-                                        if (!task.completed) {
-                                          // Task is being marked complete — offer undo
-                                          if (undoCompleteTask?.timeout) clearTimeout(undoCompleteTask.timeout);
-                                          const timeout = setTimeout(() => setUndoCompleteTask(null), 5000);
-                                          setUndoCompleteTask({ taskId: task.id, title: cleanTaskTitle(task), timeout });
-                                        }
-                                      }}
-                                      disabled={checkingTask !== null}
-                                      className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer flex-shrink-0"
-                                    />
-                                  )}
-                                  
+                                {/* Main card content */}
+                                <div className="p-3 flex items-start gap-3">
+                                  {/* Checkbox */}
+                                  <div className="flex-shrink-0 pt-0.5">
+                                    {checkingTask === task.id ? (
+                                      <div className="w-5 h-5 flex items-center justify-center">
+                                        <div className="w-4 h-4 border-2 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
+                                      </div>
+                                    ) : (
+                                      <input
+                                        type="checkbox"
+                                        checked={task.completed || false}
+                                        onChange={() => {
+                                          toggleTaskCompletion(task.id);
+                                          if (!task.completed) {
+                                            if (undoCompleteTask?.timeout) clearTimeout(undoCompleteTask.timeout);
+                                            const timeout = setTimeout(() => setUndoCompleteTask(null), 5000);
+                                            setUndoCompleteTask({ taskId: task.id, title: cleanTaskTitle(task), timeout });
+                                          }
+                                        }}
+                                        disabled={checkingTask !== null}
+                                        className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
+                                      />
+                                    )}
+                                  </div>
+
+                                  {/* Info block */}
                                   <div className="flex-1 min-w-0">
-                                    <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                      <a 
-                                        href={task.url} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer"
-                                        className="font-semibold text-gray-900 text-lg hover:text-purple-600 hover:underline transition-colors"
-                                      >
-                                        {cleanTaskTitle(task)}
-                                      </a>
-                                      <span 
-                                        className="px-2 py-0.5 rounded-full text-xs font-bold text-white flex-shrink-0"
-                                        style={{ backgroundColor: classColor }}
-                                      >
+                                    {/* Row 1: Title + class chip + status badges */}
+                                    <div className="flex items-start gap-2 flex-wrap mb-0.5">
+                                      {task.url ? (
+                                        <a href={task.url} target="_blank" rel="noopener noreferrer"
+                                          className="font-semibold text-gray-900 text-base hover:text-purple-600 hover:underline transition-colors leading-snug">
+                                          {cleanTaskTitle(task)}
+                                        </a>
+                                      ) : (
+                                        <span className="font-semibold text-gray-900 text-base leading-snug">{cleanTaskTitle(task)}</span>
+                                      )}
+                                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white flex-shrink-0 mt-0.5"
+                                        style={{ backgroundColor: classColor }}>
                                         {className}
                                       </span>
+                                      {statusBadges.map(b => (
+                                        <span key={b.label} className={`px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0 mt-0.5 ${b.cls}`}>{b.label}</span>
+                                      ))}
                                     </div>
-                                    
-                                    <div className="flex items-center gap-3 text-sm text-gray-600">
-                                      <span className="flex items-center gap-1">
-                                        <Calendar className="w-4 h-4" />
-                                        {task.hasSpecificTime ? (
-                                          <>
-                                            {dayName} at <span title="Specific deadline time from Canvas">{dueDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}</span>
-                                          </>
-                                        ) : (
-                                          <span title="Due date (no specific time)">{dayName}</span>
-                                        )}
+
+                                    {/* Row 2: Deadline + time estimate + grade impact */}
+                                    <div className="flex items-center gap-3 flex-wrap text-xs">
+                                      <span className={`flex items-center gap-1 ${urgencyTextClass}`}>
+                                        <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
+                                        {urgency === 'overdue' ? `Overdue · ${dayName}${timeLabel}` : `${dayName}${timeLabel}`}
                                       </span>
-                                      {!className.toLowerCase().includes('homeroom') && taskTime > 0 && (
-                                        <span className="flex items-center gap-2">
-                                          <Brain className="w-4 h-4" />
+                                      {!isHomeroom && taskTime > 0 && (
+                                        <span className="flex items-center gap-1.5 text-gray-500">
+                                          <Brain className="w-3.5 h-3.5 flex-shrink-0" />
                                           {editingTimeTaskId === task.id ? (
-                                            <div className="flex items-center gap-2">
-                                              <input
-                                                type="text"
-                                                value={tempTimeValue}
-                                                onChange={handleTimeInputChange}
-                                                className="w-14 px-2 py-1 border border-purple-400 rounded focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
+                                            <div className="flex items-center gap-1.5">
+                                              <input type="text" value={tempTimeValue} onChange={handleTimeInputChange}
+                                                className="w-12 px-1.5 py-0.5 border border-purple-400 rounded focus:ring-1 focus:ring-purple-500 text-xs"
                                                 autoFocus
                                                 onKeyDown={(e) => {
-                                                  if (e.key === 'Enter') { handleSaveTimeEstimate(task.id); }
-                                                  else if (e.key === 'Escape') { handleCancelEditTime(); }
-                                                }}
-                                              />
+                                                  if (e.key === 'Enter') handleSaveTimeEstimate(task.id);
+                                                  else if (e.key === 'Escape') handleCancelEditTime();
+                                                }} />
                                               <span>min</span>
-                                              <button onClick={() => handleSaveTimeEstimate(task.id)} className="text-green-600 hover:text-green-700"><Check className="w-4 h-4" /></button>
-                                              <button onClick={handleCancelEditTime} className="text-red-600 hover:text-red-700"><X className="w-4 h-4" /></button>
+                                              <button onClick={() => handleSaveTimeEstimate(task.id)} className="text-green-600 hover:text-green-700"><Check className="w-3.5 h-3.5" /></button>
+                                              <button onClick={handleCancelEditTime} className="text-red-600 hover:text-red-700"><X className="w-3.5 h-3.5" /></button>
                                             </div>
                                           ) : (
-                                            <div className="flex items-center gap-2">
-                                              <span>{taskTime} min</span>
-                                              <button onClick={() => handleStartEditTime(task.id, taskTime)} className="text-purple-600 hover:text-purple-700" title="Edit time estimate"><Edit2 className="w-4 h-4" /></button>
-                                              {gradeImpact[task.id] && (
-                                                <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${gradeImpact[task.id] === 'High' ? 'bg-red-100 text-red-700' : gradeImpact[task.id] === 'Moderate' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
-                                                  <TrendingUp className="w-3 h-3" />
-                                                  {gradeImpact[task.id]}
-                                                </span>
-                                              )}
-                                            </div>
+                                            <span className="flex items-center gap-1">
+                                              {taskTime} min
+                                              <button onClick={() => handleStartEditTime(task.id, taskTime)}
+                                                className="text-gray-400 hover:text-purple-600 transition-colors" title="Edit time estimate">
+                                                <Edit2 className="w-3 h-3" />
+                                              </button>
+                                            </span>
                                           )}
                                         </span>
                                       )}
+                                      {gradeImpact[task.id] && (
+                                        <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${gradeImpact[task.id] === 'High' ? 'bg-red-100 text-red-700' : gradeImpact[task.id] === 'Moderate' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                                          <TrendingUp className="w-3 h-3" />
+                                          {gradeImpact[task.id]} Impact
+                                        </span>
+                                      )}
                                     </div>
+
+                                    {/* Row 3: Description preview (How) */}
+                                    {descPreview && (
+                                      <p className="text-xs text-gray-400 mt-1 leading-relaxed line-clamp-1">
+                                        {descPreview}{task.description && stripDescHtml(task.description).length > 100 ? '…' : ''}
+                                      </p>
+                                    )}
+
+                                    {/* Row 4: Progress bar (if in progress) */}
+                                    {hasProgress && (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: classColor, opacity: 0.7 }} />
+                                        </div>
+                                        <span className="text-xs text-gray-400 flex-shrink-0">{accMin}m / {estMin}m</span>
+                                      </div>
+                                    )}
                                   </div>
-                                  
-                                  <div className="flex gap-2 flex-shrink-0 items-center">
-                                    {/* Start/Resume Session — prominent, distinct from management buttons */}
-                                    {!className.toLowerCase().includes('homeroom') && (() => {
-                                      const hasProgress = (task.accumulatedTime || 0) > 0;
+
+                                  {/* Action buttons — right side */}
+                                  <div className="flex flex-col gap-1.5 flex-shrink-0 items-end">
+                                    {/* Start/Resume — always visible for non-homeroom */}
+                                    {!isHomeroom && (() => {
                                       const isStarting = sessionStartingId === task.id;
                                       return (
                                         <button
@@ -8279,42 +8348,39 @@ const PlanAssist = () => {
                                             startTaskSession(sessionTask);
                                           }}
                                           disabled={isStarting}
-                                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg font-semibold text-sm transition-all shadow-sm ${isStarting ? 'opacity-80 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
-                                          title={hasProgress ? `Resume session (${task.accumulatedTime}m logged)` : 'Start a timed session on this task'}
+                                          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg font-semibold text-xs transition-all shadow-sm ${isStarting ? 'opacity-70 cursor-not-allowed' : 'hover:shadow-md'} ${hasProgress ? 'bg-blue-500 hover:bg-blue-600 text-white' : 'bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-green-600 hover:to-emerald-700'}`}
                                         >
                                           {isStarting
-                                            ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /><span className="hidden sm:inline">Loading…</span></>
-                                            : <><Play className="w-3.5 h-3.5" /><span className="hidden sm:inline">{hasProgress ? 'Resume' : 'Start'}</span>{hasProgress && <span className="hidden sm:inline text-blue-200 text-xs font-normal ml-0.5">({task.accumulatedTime}m)</span>}</>
+                                            ? <div className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                            : <Play className="w-3 h-3" />
                                           }
+                                          {hasProgress ? 'Resume' : 'Start'}
                                         </button>
                                       );
                                     })()}
-                                    {!className.toLowerCase().includes('homeroom') && (
-                                      <button 
-                                        onClick={() => setShowSplitTask(task.id)}
-                                        className="px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium transition-all"
-                                      >
-                                        Split
+                                    {/* Secondary actions row */}
+                                    <div className="flex gap-1">
+                                      <button onClick={() => setShowTaskDescription(task)}
+                                        className="px-2 py-1 bg-blue-50 text-blue-600 rounded text-xs font-medium hover:bg-blue-100 transition-all"
+                                        title="View assignment details">
+                                        Details
                                       </button>
-                                    )}
-                                    <button 
-                                      onClick={() => setShowTaskDescription(task)}
-                                      className="px-3 py-2 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 text-sm font-medium transition-all"
-                                    >
-                                      Details
-                                    </button>
-                                    <button 
-                                      onClick={() => openNotesPopup(task)}
-                                      className="px-3 py-2 bg-amber-100 text-amber-700 rounded-lg hover:bg-amber-200 text-sm font-medium transition-all relative"
-                                    >
-                                      <span className="flex items-center gap-1">
-                                        <FileText className="w-4 h-4" />
-                                        Notes
-                                      </span>
-                                      {tasksWithNotes.has(task.id) && (
-                                        <span className="absolute -top-1 -right-1 w-2 h-2 bg-green-500 rounded-full" title="Has notes" />
+                                      {!isHomeroom && (
+                                        <button onClick={() => setShowSplitTask(task.id)}
+                                          className="px-2 py-1 bg-purple-50 text-purple-600 rounded text-xs font-medium hover:bg-purple-100 transition-all"
+                                          title="Split task into segments">
+                                          Split
+                                        </button>
                                       )}
-                                    </button>
+                                      <button onClick={() => openNotesPopup(task)}
+                                        className="px-2 py-1 bg-amber-50 text-amber-600 rounded text-xs font-medium hover:bg-amber-100 transition-all relative"
+                                        title="Open notes">
+                                        <FileText className="w-3.5 h-3.5" />
+                                        {tasksWithNotes.has(task.id) && (
+                                          <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-green-500 rounded-full" />
+                                        )}
+                                      </button>
+                                    </div>
                                   </div>
                                 </div>
                               </div>
@@ -9889,9 +9955,7 @@ const PlanAssist = () => {
               .replace(/\s{2,}/g,' ').trim();
           };
 
-          // Priority lookup
-          const priorityMap = {};
-          // priorityOrder removed — tasks are deadline-sorted
+          // Priority lookup removed — tasks are deadline-sorted on calendar
 
 
           return (
@@ -9938,22 +10002,29 @@ const PlanAssist = () => {
                     const totalEstMin = pendingTasks.reduce((s, t) => s + (t.userEstimate || t.estimatedTime || 20), 0);
                     const loadLevel = isWeekend ? null : totalEstMin >= 180 ? 'high' : totalEstMin >= 90 ? 'medium' : totalEstMin >= 30 ? 'low' : null;
                     const loadConfig = { low: { bar: '#86efac', label: 'bg-green-100 text-green-700' }, medium: { bar: '#fbbf24', label: 'bg-amber-100 text-amber-700' }, high: { bar: '#f87171', label: 'bg-red-100 text-red-700' } };
+                    // Past day with incomplete tasks = overdue column
+                    const isPastDay = day < today && !isToday(day);
+                    const overdueInDay = isPastDay ? dayTasks.filter(t => !t.completed && !t.deleted).length : 0;
                     return (
                       <div
                         key={colIdx}
-                        className={`flex flex-col rounded-xl border-2 overflow-hidden ${todayCol ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-white'}`}
+                        className={`flex flex-col rounded-xl border-2 overflow-hidden ${todayCol ? 'border-purple-400 bg-purple-50' : overdueInDay > 0 ? 'border-red-300 bg-red-50' : 'border-gray-200 bg-white'}`}
                       >
                         {/* Day header */}
-                        <div className={`px-2 py-2 text-center border-b ${todayCol ? 'bg-purple-600 border-purple-500' : 'bg-gray-50 border-gray-200'}`}>
-                          <p className={`text-xs font-semibold uppercase tracking-wide ${todayCol ? 'text-purple-100' : 'text-gray-500'}`}>
+                        <div className={`px-2 py-2 text-center border-b ${todayCol ? 'bg-purple-600 border-purple-500' : overdueInDay > 0 ? 'bg-red-500 border-red-400' : 'bg-gray-50 border-gray-200'}`}>
+                          <p className={`text-xs font-semibold uppercase tracking-wide ${todayCol || overdueInDay > 0 ? 'text-white opacity-80' : 'text-gray-500'}`}>
                             {DAY_NAMES[day.getDay()].slice(0,3)}
                           </p>
-                          <p className={`text-lg font-bold leading-tight ${todayCol ? 'text-white' : 'text-gray-900'}`}>
+                          <p className={`text-lg font-bold leading-tight ${todayCol || overdueInDay > 0 ? 'text-white' : 'text-gray-900'}`}>
                             {day.getDate()}
                           </p>
-                          <p className={`text-xs ${todayCol ? 'text-purple-200' : 'text-gray-400'}`}>
-                            {day.toLocaleDateString('en-US',{month:'short'})}
-                          </p>
+                          {overdueInDay > 0 ? (
+                            <p className="text-xs text-white opacity-90 font-semibold">{overdueInDay} overdue</p>
+                          ) : (
+                            <p className={`text-xs ${todayCol ? 'text-purple-200' : 'text-gray-400'}`}>
+                              {day.toLocaleDateString('en-US',{month:'short'})}
+                            </p>
+                          )}
                         </div>
                         {/* Workload indicator */}
                         {loadLevel && (
@@ -9980,7 +10051,6 @@ const PlanAssist = () => {
                           )}
                           {dayTasks.map((task) => {
                             const color = getClassColor(task.class || '');
-                            const priority = priorityMap[task.id];
                             const timeStr = task.hasSpecificTime && task.dueDate
                               ? task.dueDate.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true})
                               : null;
@@ -9989,12 +10059,14 @@ const PlanAssist = () => {
                               : (task.title||'').replace(/\s*\[[^\]]+\]\s*/,'');
                             const isDone = task.completed || task.deleted || !!task.submittedAt;
                             const isExpanded = calendarExpandedId === task.id;
+                            const taskMin = task.userEstimate || task.estimatedTime || null;
+                            const textCol = getTextColor(color);
 
                             return (
                               <div
                                 key={task.id}
                                 className={`rounded-lg text-xs cursor-pointer transition-all duration-200 select-none ${isExpanded ? 'shadow-lg z-10 relative' : 'hover:brightness-110'}`}
-                                style={{ backgroundColor: color, color: getTextColor(color) }}
+                                style={{ backgroundColor: color, color: textCol }}
                                 onClick={() => {
                                   if (isExpanded) {
                                     if (task.url) window.open(task.url, '_blank', 'noopener,noreferrer');
@@ -10006,18 +10078,20 @@ const PlanAssist = () => {
                               >
                                 {!isExpanded && (
                                   <div className="px-1.5 py-1 flex items-start gap-1">
-                                    {priority && <span className="font-bold opacity-80 flex-shrink-0">#{priority}</span>}
-                                    <span className={`truncate flex-1 ${isDone ? 'line-through opacity-60' : ''}`}>
+                                    <span className={`truncate flex-1 leading-snug ${isDone ? 'line-through opacity-60' : ''}`}>
                                       {timeStr && <span className="opacity-75 mr-1">{timeStr}</span>}
                                       {displayTitle}
                                     </span>
+                                    {taskMin && (
+                                      <span className="flex-shrink-0 opacity-70 font-medium ml-0.5">{taskMin >= 60 ? `${Math.floor(taskMin/60)}h${taskMin%60>0?`${taskMin%60}m`:''}` : `${taskMin}m`}</span>
+                                    )}
                                   </div>
                                 )}
                                 {isExpanded && (
                                   <div className="p-2 space-y-1.5">
+                                    {/* Title row */}
                                     <div className="flex items-start justify-between gap-1">
                                       <div className={`font-semibold leading-tight ${isDone ? 'line-through opacity-70' : ''}`}>
-                                        {priority && <span className="opacity-80">#{priority} · </span>}
                                         {timeStr && <span className="opacity-80">{timeStr} · </span>}
                                         {displayTitle}
                                       </div>
@@ -10026,14 +10100,35 @@ const PlanAssist = () => {
                                         onClick={(e) => { e.stopPropagation(); setCalendarExpandedId(null); }}
                                       >✕</button>
                                     </div>
-                                    {isDone && (
-                                      <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">✓ Done</span>
-                                    )}
+                                    {/* Meta row: time estimate + done badge + grade impact */}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      {taskMin && (
+                                        <span className="flex items-center gap-0.5 opacity-80 font-medium">
+                                          <Clock className="w-3 h-3" />{taskMin}m
+                                        </span>
+                                      )}
+                                      {isDone && (
+                                        <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">✓ Done</span>
+                                      )}
+                                      {task.isMissing && (
+                                        <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5 font-semibold">⚠ Missing</span>
+                                      )}
+                                      {task.isLate && !task.isMissing && (
+                                        <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5">Late</span>
+                                      )}
+                                      {gradeImpact[task.id] && (
+                                        <span className="inline-block text-xs bg-white bg-opacity-20 rounded px-1 py-0.5 font-semibold">
+                                          {gradeImpact[task.id]} Impact
+                                        </span>
+                                      )}
+                                    </div>
+                                    {/* Description preview */}
                                     {stripHtml(task.description) ? (
-                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-5">{stripHtml(task.description)}</p>
+                                      <p className="text-xs opacity-90 leading-relaxed line-clamp-3">{stripHtml(task.description)}</p>
                                     ) : (
                                       <p className="text-xs opacity-50 italic">No description</p>
                                     )}
+                                    {/* Actions */}
                                     {!isDone && (
                                       <button
                                         disabled={sessionStartingId === task.id}
@@ -10041,13 +10136,10 @@ const PlanAssist = () => {
                                           e.stopPropagation();
                                           if (sessionStartingId === task.id) return;
                                           setCalendarExpandedId(null);
-                                          // Ensure sessionTasks are loaded, then start
                                           if (sessionTasks.length === 0) await loadSessionTasks();
-                                          // Build a task object compatible with startTaskSession
-                                          // task is from hydrated `tasks` state: use camelCase fields
                                           const sessionTask = sessionTasks.find(t => t.id === task.id) || {
                                             ...task,
-                                            accumulatedTime: (task.accumulatedTime || 0) * 60, // already minutes → convert to seconds
+                                            accumulatedTime: (task.accumulatedTime || 0) * 60,
                                             userEstimate: task.userEstimate || task.estimatedTime,
                                             estimatedTime: task.estimatedTime,
                                           };
@@ -10061,7 +10153,7 @@ const PlanAssist = () => {
                                         }
                                       </button>
                                     )}
-                                    <p className="text-xs opacity-60 mt-1">Tap again to open in Canvas →</p>
+                                    <p className="text-xs opacity-60 mt-0.5">Tap again to open in Canvas →</p>
                                   </div>
                                 )}
                               </div>
