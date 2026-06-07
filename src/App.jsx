@@ -846,9 +846,16 @@ const PlanAssist = () => {
   const agendaTimerRef = React.useRef(null);    // { intervalRef, wallRef, baseElapsed, baseCountdown }
   const [agendaProceedLoading, setAgendaProceedLoading] = useState(false);
   const [agendaExitLoading, setAgendaExitLoading] = useState(false);   // Save & Exit spinner
-  const [agendaCreating, setAgendaCreating] = useState(false);          // Build Agenda save button
-  const [agendaSavingEdit, setAgendaSavingEdit] = useState(false);      // Edit Agenda save button
-  const [agendaDeletingId, setAgendaDeletingId] = useState(null);       // id of agenda currently being deleted
+  const [agendaCreating, setAgendaCreating] = useState(false);
+  const [agendaSavingEdit, setAgendaSavingEdit] = useState(false);
+  const [agendaDeletingId, setAgendaDeletingId] = useState(null);
+  const [agendaPageTab, setAgendaPageTab] = useState('unappointed'); // 'appointed' | 'unappointed'
+  // Build/Edit agenda date+period fields
+  const [buildAgendaDate, setBuildAgendaDate] = useState('');
+  const [buildAgendaPeriod, setBuildAgendaPeriod] = useState('');
+  const [editAgendaDate, setEditAgendaDate] = useState('');
+  const [editAgendaPeriod, setEditAgendaPeriod] = useState('');
+  const [itineraryShowAgenda, setItineraryShowAgenda] = useState(true);
   const [agendaTotalElapsed, setAgendaTotalElapsed] = useState(0); // accumulated across all rows
   const [agendaFinishedSummary, setAgendaFinishedSummary] = useState(null); // { name, totalSecs }
   // Build / edit agenda
@@ -1438,6 +1445,7 @@ const PlanAssist = () => {
         // Load itinerary panel toggle prefs
         setItineraryShowEvents(setupData.itinerary_show_events !== false);
         setItineraryShowOrganizer(setupData.itinerary_show_organizer !== false);
+        setItineraryShowAgenda(setupData.itinerary_show_agenda !== false);
         // Sync name + isAdmin from DB (in case admin changed it)
         if (setupData.name) {
           setUser(prev => prev ? { ...prev, name: setupData.name, isAdmin: setupData.is_admin || false } : prev);
@@ -3315,15 +3323,22 @@ const PlanAssist = () => {
   const createAgenda = async () => {
     if (!buildAgendaName.trim() || buildAgendaRows.length === 0) return;
     if (agendaCreating) return;
+    // Validate date+period: both or neither
+    if ((buildAgendaDate && !buildAgendaPeriod) || (!buildAgendaDate && buildAgendaPeriod)) {
+      alert('Please set both Date and Period, or leave both empty.');
+      return;
+    }
     setAgendaCreating(true);
     try {
       await apiCall('/agendas', 'POST', {
         name: buildAgendaName.trim(),
         rows: buildAgendaRows,
+        agendaDate: buildAgendaDate || undefined,
+        agendaPeriod: buildAgendaPeriod || undefined,
       });
       setShowBuildAgenda(false);
-      setBuildAgendaName('');
-      setBuildAgendaRows([]);
+      setBuildAgendaName(''); setBuildAgendaRows([]);
+      setBuildAgendaDate(''); setBuildAgendaPeriod('');
       await loadAgendas();
     } catch (err) {
       alert('Failed to create agenda: ' + err.message);
@@ -3525,11 +3540,26 @@ const PlanAssist = () => {
 
   const saveEditAgenda = async () => {
     if (!editingAgenda || agendaSavingEdit) return;
+    if ((editAgendaDate && !editAgendaPeriod) || (!editAgendaDate && editAgendaPeriod)) {
+      alert('Please set both Date and Period, or leave both empty.');
+      return;
+    }
     setAgendaSavingEdit(true);
     try {
+      // Save rows
       await apiCall(`/agendas/${editingAgenda.id}/rows`, 'PATCH', { rows: editAgendaRows });
+      // Save meta (date+period) if changed
+      const dateChanged = editAgendaDate !== (editingAgenda.agenda_date || '');
+      const periodChanged = editAgendaPeriod !== (editingAgenda.agenda_period || '');
+      if (dateChanged || periodChanged) {
+        await apiCall(`/agendas/${editingAgenda.id}/meta`, 'PATCH', {
+          agendaDate: editAgendaDate || null,
+          agendaPeriod: editAgendaPeriod || null,
+        });
+      }
       setEditingAgenda(null);
       setEditAgendaRows([]);
+      setEditAgendaDate(''); setEditAgendaPeriod('');
       await loadAgendas();
     } catch (err) {
       alert('Failed to save edits: ' + err.message);
@@ -7913,11 +7943,12 @@ const PlanAssist = () => {
                     <h3 className="text-lg font-bold text-gray-900 mb-1">Manage Tasks</h3>
                     <p className="text-sm text-gray-600">View your task list</p>
                   </button>
-                  {user?.grade && parseInt(user.grade) >= 7 && parseInt(user.grade) <= 12 && (
-                    <button onClick={openHubTutorialDialog} className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-orange-200">
+                  {user?.grade && parseInt(user.grade) >= 7 && parseInt(user.grade) <= 12 && scheduleEnhanced && (
+                    <button onClick={() => { setBookingTab('tutorial'); setBookingDate(''); setBookingTime(''); setBookingCourse(''); setBookingMeetingTitle(''); setBookingZoom(''); setShowBookingModal('itinerary'); }}
+                      className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-orange-200">
                       <BookOpen className="w-10 h-10 text-orange-500 mb-3" />
-                      <h3 className="text-lg font-bold text-gray-900 mb-1">Book a Tutorial</h3>
-                      <p className="text-sm text-gray-600">Schedule a teacher meeting</p>
+                      <h3 className="text-lg font-bold text-gray-900 mb-1">Make a Booking</h3>
+                      <p className="text-sm text-gray-600">Book a Tutorial or Meeting</p>
                     </button>
                   )}
                 </div>
@@ -8777,16 +8808,42 @@ const PlanAssist = () => {
                                   )}
                                 </div>
                               </div>
-                              <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
-                                <button onClick={() => setShowBuildAgenda(false)}
-                                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
-                                <button onClick={createAgenda}
-                                  disabled={!buildAgendaName.trim() || buildAgendaRows.length === 0 || !allTasksSelected || agendaCreating}
-                                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                                  {agendaCreating
-                                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
-                                    : 'Create Agenda'}
-                                </button>
+                              <div className="p-6 border-t border-gray-100 flex-shrink-0 space-y-3">
+                                {/* Optional appointment */}
+                                {(() => {
+                                  const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+                                  const [pStart, pEnd] = range.split('-').map(Number);
+                                  const periodOpts = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+                                  const totalBuildMins = buildAgendaRows.reduce((s, r) => s + (r.timeMins || 0), 0);
+                                  const overSixty = totalBuildMins > 60;
+                                  return (
+                                    <div className="border border-gray-200 rounded-xl p-3 bg-gray-50">
+                                      <p className="text-xs font-semibold text-gray-600 mb-2">Appointment <span className="font-normal text-gray-400">(optional — set both or neither)</span></p>
+                                      <div className="flex gap-2">
+                                        <input type="date" value={buildAgendaDate} onChange={e => setBuildAgendaDate(e.target.value)}
+                                          className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500" />
+                                        <select value={buildAgendaPeriod} onChange={e => setBuildAgendaPeriod(e.target.value)}
+                                          className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500">
+                                          <option value="">Period</option>
+                                          {!overSixty && periodOpts.map(p => <option key={p} value={String(p)}>Period {p}</option>)}
+                                          <option value="outside">Outside School</option>
+                                        </select>
+                                      </div>
+                                      {overSixty && <p className="text-xs text-amber-600 mt-1.5">⚠ {totalBuildMins}m total — can only be assigned to Outside School.</p>}
+                                    </div>
+                                  );
+                                })()}
+                                <div className="flex gap-3">
+                                  <button onClick={() => setShowBuildAgenda(false)}
+                                    className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50">Cancel</button>
+                                  <button onClick={createAgenda}
+                                    disabled={!buildAgendaName.trim() || buildAgendaRows.length === 0 || !allTasksSelected || agendaCreating}
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                    {agendaCreating
+                                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Creating...</>
+                                      : 'Create Agenda'}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -8905,15 +8962,42 @@ const PlanAssist = () => {
                                   </button>
                                 )}
                               </div>
-                              <div className="p-6 border-t border-gray-100 flex gap-3 flex-shrink-0">
-                                <button onClick={() => setEditingAgenda(null)} disabled={agendaSavingEdit}
-                                  className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50">Cancel</button>
-                                <button onClick={saveEditAgenda} disabled={agendaSavingEdit}
-                                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-60 transition-colors">
-                                  {agendaSavingEdit
-                                    ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
-                                    : 'Save Changes'}
-                                </button>
+                              <div className="p-6 border-t border-gray-100 flex-shrink-0 space-y-3">
+                                {/* Appointment */}
+                                {(() => {
+                                  const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+                                  const [pStart, pEnd] = range.split('-').map(Number);
+                                  const periodOpts = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+                                  const allRows = [...(editingAgenda.rows || []).slice(0, (editingAgenda.current_row || 0) + 1), ...editAgendaRows];
+                                  const totalEditMins = allRows.reduce((s, r) => s + (r.timeMins || 0), 0);
+                                  const overSixty = totalEditMins > 60;
+                                  return (
+                                    <div className="border border-gray-200 rounded-xl p-3 bg-gray-50">
+                                      <p className="text-xs font-semibold text-gray-600 mb-2">Appointment <span className="font-normal text-gray-400">(optional — set both or neither)</span></p>
+                                      <div className="flex gap-2">
+                                        <input type="date" value={editAgendaDate} onChange={e => setEditAgendaDate(e.target.value)}
+                                          className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500" />
+                                        <select value={editAgendaPeriod} onChange={e => setEditAgendaPeriod(e.target.value)}
+                                          className="flex-1 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500">
+                                          <option value="">Period</option>
+                                          {!overSixty && periodOpts.map(p => <option key={p} value={String(p)}>Period {p}</option>)}
+                                          <option value="outside">Outside School</option>
+                                        </select>
+                                      </div>
+                                      {overSixty && <p className="text-xs text-amber-600 mt-1.5">⚠ {totalEditMins}m total — can only be assigned to Outside School.</p>}
+                                    </div>
+                                  );
+                                })()}
+                                <div className="flex gap-3">
+                                  <button onClick={() => setEditingAgenda(null)} disabled={agendaSavingEdit}
+                                    className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-lg font-medium hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+                                  <button onClick={saveEditAgenda} disabled={agendaSavingEdit}
+                                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 disabled:opacity-60 transition-colors">
+                                    {agendaSavingEdit
+                                      ? <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</>
+                                      : 'Save Changes'}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -8921,76 +9005,104 @@ const PlanAssist = () => {
                       })()}
 
                       {/* ── AGENDA LIST ── */}
-                      {agendasLoading ? (
-                        <div className="flex items-center justify-center py-16">
-                          <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
-                        </div>
-                      ) : agendas.length === 0 ? (
-                        <div className="text-center py-16 text-gray-400">
-                          <LayoutList className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                          <p className="font-medium">No agendas yet</p>
-                          <p className="text-sm mt-1">Build an agenda to plan a focused work block row by row.</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          {agendas.map(agenda => {
-                            const rows = agenda.rows || [];
-                            const currentRowIdx = agenda.current_row || 0;
-                            const currentRowData = rows[currentRowIdx];
-                            const currentRowTask = currentRowData?.task;
-                            const totalMins = rows.reduce((s, r) => s + (r.timeMins || 0), 0);
-                            const classColor = currentRowTask ? getClassColor(currentRowTask.class) : '#a855f7';
-                            const dueDate = currentRowTask ? tasks.find(t => t.id === currentRowTask.id)?.dueDate : null;
-                            return (
-                              <div key={agenda.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                                <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
-                                  <div>
-                                    <h3 className="font-bold text-gray-900 text-lg">{agenda.name}</h3>
-                                    <p className="text-sm text-gray-400 mt-0.5">{rows.length} row{rows.length !== 1 ? 's' : ''} · {totalMins} min total · Row {currentRowIdx + 1} of {rows.length}</p>
-                                  </div>
-                                  <div className="flex items-center gap-2">
-                                    <button onClick={() => {
-                                      setEditingAgenda(agenda);
-                                      const lockedCount = (agenda.current_row || 0) + 1;
-                                      const editableRows = rows.slice(lockedCount).map((r, i) => ({ ...r, rowIndex: lockedCount + i }));
-                                      setEditAgendaRows(editableRows);
-                                    }} disabled={!!agendaDeletingId} className="p-2 text-gray-300 hover:text-purple-500 transition-colors disabled:opacity-40" title="Edit agenda">
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                    <button onClick={() => openAgenda(agenda)} disabled={!!agendaDeletingId}
-                                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors disabled:opacity-40">
-                                      <Play className="w-3.5 h-3.5" /> Open
-                                    </button>
-                                    <button onClick={() => deleteAgenda(agenda.id)} disabled={agendaDeletingId === agenda.id}
-                                      className="p-2 text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40" title="Delete agenda">
-                                      {agendaDeletingId === agenda.id
-                                        ? <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
-                                        : <Trash2 className="w-4 h-4" />}
-                                    </button>
-                                  </div>
-                                </div>
-                                {/* Current row preview */}
-                                {currentRowData && (
-                                  <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center gap-3">
-                                    <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
-                                    <div className="flex-shrink-0">
-                                      <span className="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">{currentRowIdx + 1}</span>
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-semibold text-gray-900 truncate">{currentRowTask ? cleanTaskTitle(currentRowTask) : `Task ${currentRowData.taskId}`}</p>
-                                      <p className="text-xs text-purple-600 mt-0.5 truncate">{currentRowData.action || 'Work on Task'}</p>
-                                    </div>
-                                    <div className="flex-shrink-0 text-right">
-                                      <p className="text-sm font-bold text-gray-700">{currentRowData.timeMins}m</p>
-                                      {dueDate && <p className="text-xs text-gray-400">Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</p>}
-                                    </div>
-                                  </div>
-                                )}
+                      {(() => {
+                        const range = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+                        const [pStart, pEnd] = range.split('-').map(Number);
+                        const periodOpts = Array.from({ length: pEnd - pStart + 1 }, (_, i) => pStart + i);
+                        const appointed = agendas.filter(a => a.agenda_date && a.agenda_period);
+                        const unappointed = agendas.filter(a => !a.agenda_date || !a.agenda_period);
+                        const listToShow = agendaPageTab === 'appointed' ? appointed : unappointed;
+
+                        return (
+                          <>
+                            {/* Tab strip */}
+                            <div className="flex gap-1 bg-gray-100 rounded-xl p-1 mb-4">
+                              {[{ id: 'unappointed', label: `Unappointed (${unappointed.length})` }, { id: 'appointed', label: `Appointed (${appointed.length})` }].map(tab => (
+                                <button key={tab.id} onClick={() => setAgendaPageTab(tab.id)}
+                                  className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-all ${agendaPageTab === tab.id ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`}>
+                                  {tab.label}
+                                </button>
+                              ))}
+                            </div>
+
+                            {agendasLoading ? (
+                              <div className="flex items-center justify-center py-16">
+                                <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
                               </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                            ) : listToShow.length === 0 ? (
+                              <div className="text-center py-16 text-gray-400">
+                                <LayoutList className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                                <p className="font-medium">{agendaPageTab === 'appointed' ? 'No appointed agendas' : 'No agendas yet'}</p>
+                                <p className="text-sm mt-1">{agendaPageTab === 'appointed' ? 'Assign a date and period when building an agenda.' : 'Build an agenda to plan a focused work block row by row.'}</p>
+                              </div>
+                            ) : (
+                              <div className="space-y-4">
+                                {listToShow.map(agenda => {
+                                  const rows = agenda.rows || [];
+                                  const currentRowIdx = agenda.current_row || 0;
+                                  const currentRowData = rows[currentRowIdx];
+                                  const currentRowTask = currentRowData?.task;
+                                  const totalMins = rows.reduce((s, r) => s + (r.timeMins || 0), 0);
+                                  const classColor = currentRowTask ? getClassColor(currentRowTask.class) : '#a855f7';
+                                  const dueDate = currentRowTask ? tasks.find(t => t.id === currentRowTask.id)?.dueDate : null;
+                                  const periodLabel = agenda.agenda_period === 'outside' ? 'Outside School' : agenda.agenda_period ? `Period ${agenda.agenda_period}` : '';
+                                  return (
+                                    <div key={agenda.id} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                                      <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                                        <div>
+                                          <h3 className="font-bold text-gray-900 text-lg">{agenda.name}</h3>
+                                          <p className="text-sm text-gray-400 mt-0.5">
+                                            {rows.length} row{rows.length !== 1 ? 's' : ''} · {totalMins} min total · Row {currentRowIdx + 1} of {rows.length}
+                                            {agenda.agenda_date && <span className="ml-2 text-purple-500 font-medium">{agenda.agenda_date} · {periodLabel}</span>}
+                                          </p>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                          <button onClick={() => {
+                                            setEditingAgenda(agenda);
+                                            const lockedCount = (agenda.current_row || 0) + 1;
+                                            const editableRows = rows.slice(lockedCount).map((r, i) => ({ ...r, rowIndex: lockedCount + i }));
+                                            setEditAgendaRows(editableRows);
+                                            setEditAgendaDate(agenda.agenda_date || '');
+                                            setEditAgendaPeriod(agenda.agenda_period || '');
+                                          }} disabled={!!agendaDeletingId} className="p-2 text-gray-300 hover:text-purple-500 transition-colors disabled:opacity-40" title="Edit agenda">
+                                            <Edit2 className="w-4 h-4" />
+                                          </button>
+                                          <button onClick={() => openAgenda(agenda)} disabled={!!agendaDeletingId}
+                                            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 text-sm transition-colors disabled:opacity-40">
+                                            <Play className="w-3.5 h-3.5" /> Open
+                                          </button>
+                                          <button onClick={() => deleteAgenda(agenda.id)} disabled={agendaDeletingId === agenda.id}
+                                            className="p-2 text-gray-300 hover:text-red-400 transition-colors disabled:opacity-40" title="Delete agenda">
+                                            {agendaDeletingId === agenda.id
+                                              ? <div className="w-4 h-4 border-2 border-red-400 border-t-transparent rounded-full animate-spin" />
+                                              : <Trash2 className="w-4 h-4" />}
+                                          </button>
+                                        </div>
+                                      </div>
+                                      {currentRowData && (
+                                        <div className="px-5 py-3 bg-purple-50 border-b border-purple-100 flex items-center gap-3">
+                                          <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: classColor }} />
+                                          <div className="flex-shrink-0">
+                                            <span className="w-6 h-6 bg-purple-600 text-white rounded-full flex items-center justify-center text-xs font-bold">{currentRowIdx + 1}</span>
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-sm font-semibold text-gray-900 truncate">{currentRowTask ? cleanTaskTitle(currentRowTask) : `Task ${currentRowData.taskId}`}</p>
+                                            <p className="text-xs text-purple-600 mt-0.5 truncate">{currentRowData.action || 'Work on Task'}</p>
+                                          </div>
+                                          <div className="flex-shrink-0 text-right">
+                                            <p className="text-sm font-bold text-gray-700">{currentRowData.timeMins}m</p>
+                                            {dueDate && <p className="text-xs text-gray-400">Due {dueDate.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</p>}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                     </div>
                   );
@@ -9539,7 +9651,7 @@ const PlanAssist = () => {
                   zone: null,
                 }));
 
-                await apiCall('/agendas', 'POST', { name: title, rows });
+                await apiCall('/agendas', 'POST', { name: title, rows, agendaDate: slot.dateStr, agendaPeriod: slot.isOutside ? 'outside' : String(slot.period) });
               }
               await loadAgendas();
               setShowGenerateAgendasModal(false);
@@ -10421,6 +10533,17 @@ const PlanAssist = () => {
 
           const showEvents = itineraryShowEvents;
           const showOrganizer = itineraryShowOrganizer;
+          const showAgenda = itineraryShowAgenda;
+
+          // Agendas scheduled for today (by agenda_date matching viewDateStr)
+          const todayAppointedAgendas = agendas.filter(ag =>
+            ag.agenda_date && ag.agenda_date === viewDateStr && ag.agenda_period
+          );
+          // Outside School agendas for today
+          const outsideSchoolAgendas = todayAppointedAgendas.filter(ag => ag.agenda_period === 'outside');
+          // Get agendas for a specific period (not outside)
+          const getAgendaForPeriod = (period) =>
+            todayAppointedAgendas.filter(ag => ag.agenda_period === String(period));
 
           return (
             <div className="h-full overflow-y-auto scrollbar-stable">
@@ -10463,6 +10586,7 @@ const PlanAssist = () => {
               )}
 
               {!isViewWeekend && (
+                <>
                 <div className="space-y-3">
                   {selectedPeriods.map(period => {
                     const periodType = viewSchedule[String(period)] || 'Study';
@@ -10540,12 +10664,12 @@ const PlanAssist = () => {
                           {isCurrentPeriod && <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full font-semibold flex-shrink-0">Now</span>}
                         </div>
 
-                        {/* Period body — two-column layout */}
+                        {/* Period body — multi-column layout */}
                         <div className={`flex ${isLesson ? 'bg-blue-50 bg-opacity-30' : 'bg-white'}`}>
 
                           {/* LEFT: Events pane */}
                           {showEvents && (
-                            <div className={`flex-1 min-w-0 border-r ${showOrganizer ? 'border-gray-100' : ''} p-3 space-y-2`}>
+                            <div className={`flex-1 min-w-0 ${(showOrganizer || showAgenda) ? 'border-r border-gray-100' : ''} p-3 space-y-2`}>
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Events</p>
 
                               {isLesson && (
@@ -10595,30 +10719,12 @@ const PlanAssist = () => {
                                     className="text-gray-300 hover:text-red-400 flex-shrink-0 ml-2"><X className="w-3.5 h-3.5" /></button>
                                 </div>
                               ))}
-
-                              {/* Linked agenda */}
-                              {periodAgenda && !isLesson && (
-                                <div className="flex items-center justify-between p-2.5 bg-purple-50 border border-purple-200 rounded-xl">
-                                  <div className="flex items-center gap-2 min-w-0">
-                                    <LayoutList className="w-4 h-4 text-purple-500 flex-shrink-0" />
-                                    <div className="min-w-0">
-                                      <p className="text-xs font-semibold text-purple-900 truncate">{periodAgenda.name}</p>
-                                      <p className="text-xs text-purple-400">{periodAgenda.rows?.length || 0} tasks</p>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={() => { const a = agendas.find(ag => ag.id === periodAgenda.id); if (a) openAgenda(a); }}
-                                    className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded-lg text-xs font-semibold hover:bg-purple-700 flex-shrink-0">
-                                    <Play className="w-3 h-3" /> Open
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           )}
 
-                          {/* RIGHT: Organizer pane */}
+                          {/* CENTRE: Organizer pane */}
                           {showOrganizer && (
-                            <div className={`flex-1 min-w-0 p-3 ${isLesson ? 'opacity-50' : ''}`}>
+                            <div className={`flex-1 min-w-0 ${showAgenda ? 'border-r border-gray-100' : ''} p-3 ${isLesson ? 'opacity-50' : ''}`}>
                               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Study Plan</p>
                               {isLesson ? (
                                 <div className="flex items-center justify-center h-12 rounded-xl border-2 border-dashed border-blue-200">
@@ -10645,11 +10751,159 @@ const PlanAssist = () => {
                               )}
                             </div>
                           )}
+
+                          {/* RIGHT: Agenda pane */}
+                          {showAgenda && (
+                            <div className="flex-1 min-w-0 p-3">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Agenda</p>
+                              {(() => {
+                                const periodAgendas = getAgendaForPeriod(period);
+                                if (periodAgendas.length === 0) return <p className="text-xs text-gray-300 italic">No agendas appointed</p>;
+                                return (
+                                  <div className="space-y-1.5">
+                                    {periodAgendas.map(ag => {
+                                      const totalMins = (ag.rows || []).reduce((s, r) => s + (r.timeMins || 0), 0);
+                                      return (
+                                        <div key={ag.id} className="flex items-center justify-between p-2 bg-purple-50 border border-purple-100 rounded-xl">
+                                          <div className="min-w-0">
+                                            <p className="text-xs font-semibold text-purple-900 truncate">{ag.name}</p>
+                                            <p className="text-xs text-purple-400">{ag.rows?.length || 0} rows · {totalMins}m</p>
+                                          </div>
+                                          <button onClick={() => openAgenda(ag)}
+                                            className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded text-xs font-semibold hover:bg-purple-700 flex-shrink-0 ml-2">
+                                            <Play className="w-3 h-3" /> Open
+                                          </button>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
                         </div>
                       </div>
                     );
                   })}
                 </div>
+
+                {/* Outside School Block */}
+                <div className="rounded-2xl border-2 border-dashed border-gray-200 overflow-hidden mt-3">
+                  <div className="px-4 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-gray-600">Outside School</p>
+                    <p className="text-xs text-gray-400">Work done outside study periods</p>
+                  </div>
+                  <div className="flex bg-white">
+                    {/* Events */}
+                    {showEvents && (
+                      <div className={`flex-1 min-w-0 ${(showOrganizer || showAgenda) ? 'border-r border-gray-100' : ''} p-3`}>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Events</p>
+                        {(() => {
+                          const allPeriodWindows = selectedPeriods.map(p => {
+                            const sm = periodCampusStartMins(p);
+                            return sm !== null ? { start: sm, end: sm + PERIOD_DURATION_MINS } : null;
+                          }).filter(Boolean);
+                          const eventLocalMinsFn = (utcHHMM) => {
+                            if (!utcHHMM) return null;
+                            const offsetHours = getCampusOffsetHours(accountSetup.campus || 'Ashland');
+                            const [h, m] = utcHHMM.split(':').map(Number);
+                            return ((h * 60 + m) + offsetHours * 60 + 1440 * 2) % 1440;
+                          };
+                          const outsideTuts = itineraryTutorials.filter(t => {
+                            const lm = eventLocalMinsFn(t.scheduled_time);
+                            return lm !== null && !allPeriodWindows.some(w => lm >= w.start && lm < w.end);
+                          });
+                          const outsideMtgs = itineraryMeetings.filter(m => {
+                            const lm = eventLocalMinsFn(m.scheduled_time);
+                            return lm !== null && !allPeriodWindows.some(w => lm >= w.start && lm < w.end);
+                          });
+                          if (outsideTuts.length === 0 && outsideMtgs.length === 0) {
+                            return <p className="text-xs text-gray-300 italic">No outside-hours events</p>;
+                          }
+                          return (
+                            <div className="space-y-1.5">
+                              {outsideTuts.map(tut => (
+                                <div key={tut.id} className="flex items-center justify-between p-2 bg-orange-50 border border-orange-200 rounded-xl">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-orange-900 truncate">{tut.title}</p>
+                                    <p className="text-xs text-orange-400">{campusUTCToLocal(tut.scheduled_time, accountSetup.campus)}</p>
+                                  </div>
+                                  {tut.zoom_number && <a href={`https://oneschoolglobal.zoom.us/j/${tut.zoom_number.replace(/[\s\-]/g,'')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-orange-600 hover:underline ml-2 flex-shrink-0">Join Zoom</a>}
+                                </div>
+                              ))}
+                              {outsideMtgs.map(mtg => (
+                                <div key={mtg.id} className="flex items-center justify-between p-2 bg-indigo-50 border border-indigo-200 rounded-xl">
+                                  <div className="min-w-0">
+                                    <p className="text-xs font-semibold text-indigo-900 truncate">{mtg.title}</p>
+                                    <p className="text-xs text-indigo-400">{campusUTCToLocal(mtg.scheduled_time, accountSetup.campus)}</p>
+                                  </div>
+                                  {mtg.zoom_number && <a href={`https://oneschoolglobal.zoom.us/j/${mtg.zoom_number.replace(/[\s\-]/g,'')}`} target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:underline ml-2 flex-shrink-0">Join Zoom</a>}
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    {/* Organizer */}
+                    {showOrganizer && (
+                      <div className={`flex-1 min-w-0 ${showAgenda ? 'border-r border-gray-100' : ''} p-3`}>
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Study Plan</p>
+                        {(() => {
+                          const osAgenda = itineraryAgendas.find(ag => ag.name && ag.name.startsWith('Outside School'));
+                          if (!osAgenda) return <p className="text-xs text-gray-300 italic">No outside-school work planned</p>;
+                          return (
+                            <div className="space-y-1.5">
+                              {(osAgenda.rows || []).map((row, i) => {
+                                const t = tasks.find(tk => tk.id === row.taskId);
+                                if (!t) return null;
+                                const cc = getClassColor(t);
+                                return (
+                                  <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
+                                    <div style={{ backgroundColor: cc, minHeight: '28px', width: '3px' }} className="rounded-full flex-shrink-0 self-stretch" />
+                                    <div className="flex-1 min-w-0">
+                                      <p className="text-xs font-semibold truncate" style={{ color: cc }}>{cleanTaskTitle(t)}</p>
+                                    </div>
+                                    <span className="text-xs font-semibold text-gray-500">{row.timeMins}m</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                    {/* Agenda */}
+                    {showAgenda && (
+                      <div className="flex-1 min-w-0 p-3">
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Agenda</p>
+                        {outsideSchoolAgendas.length === 0
+                          ? <p className="text-xs text-gray-300 italic">No agendas appointed</p>
+                          : (
+                            <div className="space-y-1.5">
+                              {outsideSchoolAgendas.map(ag => {
+                                const totalMins = (ag.rows || []).reduce((s, r) => s + (r.timeMins || 0), 0);
+                                return (
+                                  <div key={ag.id} className="flex items-center justify-between p-2 bg-purple-50 border border-purple-100 rounded-xl">
+                                    <div className="min-w-0">
+                                      <p className="text-xs font-semibold text-purple-900 truncate">{ag.name}</p>
+                                      <p className="text-xs text-purple-400">{ag.rows?.length || 0} rows · {totalMins}m</p>
+                                    </div>
+                                    <button onClick={() => openAgenda(ag)}
+                                      className="flex items-center gap-1 px-2 py-1 bg-purple-600 text-white rounded text-xs font-semibold hover:bg-purple-700 flex-shrink-0 ml-2">
+                                      <Play className="w-3 h-3" /> Open
+                                    </button>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )
+                        }
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
               )}
             </div>
             </div>
@@ -11468,11 +11722,11 @@ const PlanAssist = () => {
                                 <button
                                   onClick={async () => {
                                     const next = !itineraryShowEvents;
-                                    if (!next && !itineraryShowOrganizer) return; // at least one must be on
+                                    if (!next && !itineraryShowOrganizer && !itineraryShowAgenda) return;
                                     setItineraryShowEvents(next);
-                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: next, itinerary_show_organizer: itineraryShowOrganizer }); } catch(e) {}
+                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: next, itinerary_show_organizer: itineraryShowOrganizer, itinerary_show_agenda: itineraryShowAgenda }); } catch(e) {}
                                   }}
-                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowEvents ? 'bg-purple-600' : 'bg-gray-200'} ${!itineraryShowEvents && !itineraryShowOrganizer ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowEvents ? 'bg-purple-600' : 'bg-gray-200'}`}
                                 >
                                   <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${itineraryShowEvents ? 'translate-x-5' : 'translate-x-0'}`} />
                                 </button>
@@ -11485,13 +11739,30 @@ const PlanAssist = () => {
                                 <button
                                   onClick={async () => {
                                     const next = !itineraryShowOrganizer;
-                                    if (!next && !itineraryShowEvents) return; // at least one must be on
+                                    if (!next && !itineraryShowEvents && !itineraryShowAgenda) return;
                                     setItineraryShowOrganizer(next);
-                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: itineraryShowEvents, itinerary_show_organizer: next }); } catch(e) {}
+                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: itineraryShowEvents, itinerary_show_organizer: next, itinerary_show_agenda: itineraryShowAgenda }); } catch(e) {}
                                   }}
-                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowOrganizer ? 'bg-purple-600' : 'bg-gray-200'} ${!itineraryShowEvents && !itineraryShowOrganizer ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowOrganizer ? 'bg-purple-600' : 'bg-gray-200'}`}
                                 >
                                   <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${itineraryShowOrganizer ? 'translate-x-5' : 'translate-x-0'}`} />
+                                </button>
+                              </div>
+                              <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
+                                <div>
+                                  <p className="font-medium text-gray-900 text-sm">Show Agenda panel</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">Shows the Agenda panel on the Itinerary with appointed agendas per period.</p>
+                                </div>
+                                <button
+                                  onClick={async () => {
+                                    const next = !itineraryShowAgenda;
+                                    if (!next && !itineraryShowEvents && !itineraryShowOrganizer) return;
+                                    setItineraryShowAgenda(next);
+                                    try { await apiCall('/user/itinerary-prefs', 'PUT', { itinerary_show_events: itineraryShowEvents, itinerary_show_organizer: itineraryShowOrganizer, itinerary_show_agenda: next }); } catch(e) {}
+                                  }}
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${itineraryShowAgenda ? 'bg-purple-600' : 'bg-gray-200'}`}
+                                >
+                                  <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${itineraryShowAgenda ? 'translate-x-5' : 'translate-x-0'}`} />
                                 </button>
                               </div>
                             </div>
