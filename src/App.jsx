@@ -2438,7 +2438,6 @@ const PlanAssist = () => {
   // ── Sessions v2: single-task count-up timer ─────────────────────────────
 
   const loadSessionTasks = async () => {
-    setSessionsLoading(true);
     try {
       const data = await apiCall('/sessions/tasks', 'GET');
       if (!Array.isArray(data)) return;
@@ -2466,8 +2465,6 @@ const PlanAssist = () => {
       setSessionTasks(hydratedTasks);
     } catch (err) {
       console.error('Failed to load session tasks:', err);
-    } finally {
-      setSessionsLoading(false);
     }
   };
 
