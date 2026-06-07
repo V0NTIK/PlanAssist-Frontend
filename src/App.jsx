@@ -861,6 +861,12 @@ const PlanAssist = () => {
   const [sessionPriorities, setSessionPriorities] = useState(null); // null=not set today, []=empty, [...ids]=set
   const [sessionPrioritiesLoading, setSessionPrioritiesLoading] = useState(false);
   const [sessionPrioritiesPickerOpen, setSessionPrioritiesPickerOpen] = useState(false);
+
+  // ── Organizer page state ──────────────────────────────────────────────────
+  const [organizerSelectedStudy, setOrganizerSelectedStudy] = useState(0); // tab index (0 = first study, last = Outside School)
+  const [showGenerateAgendasModal, setShowGenerateAgendasModal] = useState(false);
+  const [generateAgendasMode, setGenerateAgendasMode] = useState('current'); // 'current' | 'all'
+  const [organizerExporting, setOrganizerExporting] = useState(false);
   const focusDragIndexRef = React.useRef(null); // index being dragged
   const focusDragOverIndexRef = React.useRef(null); // index being dragged over
   const [sessionPickerSel, setSessionPickerSel] = useState([]); // selected task IDs in picker modal
@@ -1286,7 +1292,7 @@ const PlanAssist = () => {
       const key = e.key.toLowerCase();
       const pageMap = {
         'c': 'calendar', 't': 'tasks', 'f': 'sessions',
-        'a': 'agendas', 'i': 'itinerary', 'm': 'marks',
+        'a': 'agendas', 'i': 'itinerary', 'm': 'marks', 'o': 'organizer',
       };
       if (pageMap[key]) {
         e.preventDefault();
@@ -6512,6 +6518,9 @@ const PlanAssist = () => {
       loadAgendas();
       loadSessionTasks();
     }
+    if (currentPage === 'organizer') {
+      loadAgendas();
+    }
     if (currentPage === 'itinerary') {
       const todayDate = new Date();
       const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth()+1).padStart(2,'0')}-${String(todayDate.getDate()).padStart(2,'0')}`;
@@ -6627,8 +6636,8 @@ const PlanAssist = () => {
     },
     {
       page: 'sessions',
-      title: '⏱ Focus',
-      body: "Focus is your productivity launchpad. Set today's priority list, start timed work sessions on individual tasks, and track your progress. The timer runs while you work.",
+      title: '⏱ Organizer',
+      body: "The Organizer is your daily scheduling engine. It reads your study periods and automatically distributes your tasks across available study time, showing exactly how long to spend on each task today. Export your day as Agendas in one tap.",
       arrow: null,
     },
     {
@@ -6640,7 +6649,7 @@ const PlanAssist = () => {
     {
       page: 'hub',
       title: '🚀 You\'re all set!',
-      body: "Start by syncing your Canvas tasks, then use Focus to set today's priorities and start working. Good luck!",
+      body: "Start by syncing your Canvas tasks, then use the Organizer to see today's schedule and export Agendas. Good luck!",
       arrow: null,
     },
   ];
@@ -6781,6 +6790,10 @@ const PlanAssist = () => {
             <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('tasks')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'tasks' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <List className="w-5 h-5" />
               <span className="font-medium">Tasks</span>
+            </button>
+            <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('organizer')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'organizer' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
+              <LayoutList className="w-5 h-5" />
+              <span className="font-medium">Organizer</span>
             </button>
             <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('sessions')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'sessions' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <span className="relative">
@@ -7303,7 +7316,7 @@ const PlanAssist = () => {
               </div>
               <div className="bg-purple-50 rounded-xl p-4 border border-purple-100">
                 <p className="font-semibold text-purple-900 mb-1">⚡ Quick Actions</p>
-                <p className="text-purple-800">Open Focus to set today's priorities and start timed work sessions. Manage Tasks opens your priority-ordered Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
+                <p className="text-purple-800">Open the Organizer to see today's automatically scheduled priorities and export Agendas. Manage Tasks opens your Task List. Book a Tutorial lets you schedule a teacher meeting.</p>
               </div>
             </div>
           </div>
@@ -9924,6 +9937,783 @@ const PlanAssist = () => {
                   Back to Agendas
                 </button>
               </div>
+            </div>
+          );
+        })()}
+
+        {currentPage === 'organizer' && (() => {
+          // ── ORGANIZER PAGE ──────────────────────────────────────────────────
+          // All period timing constants (mirrors App-level constants)
+          const ORG_PERIOD_TIMES_UTC = {
+            1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
+            4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
+            7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
+          };
+          const PERIOD_DURATION_MINS = 60;
+
+          const now = new Date();
+          const campusOffsetHours = getCampusOffsetHours(accountSetup.campus || 'Ashland');
+
+          // Campus-local "now" as minutes since midnight
+          const campusNowMs = now.getTime() + campusOffsetHours * 3600000;
+          const campusNowDate = new Date(campusNowMs);
+          const campusNowMinsSinceMidnight = campusNowDate.getUTCHours() * 60 + campusNowDate.getUTCMinutes();
+          const campusTodayStr = getCampusTodayStr(accountSetup.campus || 'Ashland');
+          const todayDayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][campusNowDate.getUTCDay()];
+          const isWeekend = todayDayName === 'Saturday' || todayDayName === 'Sunday';
+
+          // Period range for this campus
+          const periodRangeStr = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus || 'Ashland');
+          const [pRangeStart, pRangeEnd] = periodRangeStr.split('-').map(Number);
+          const allCampusPeriods = Array.from({ length: pRangeEnd - pRangeStart + 1 }, (_, i) => pRangeStart + i);
+
+          // Convert UTC period start to campus-local minutes since midnight
+          const periodCampusStartMins = (pNum) => {
+            const utc = ORG_PERIOD_TIMES_UTC[pNum];
+            if (!utc) return null;
+            const utcTotalMins = utc.h * 60 + utc.m;
+            // Add campus offset (in minutes) and wrap around 24h
+            return ((utcTotalMins + campusOffsetHours * 60) % 1440 + 1440) % 1440;
+          };
+          const periodCampusEndMins = (pNum) => {
+            const s = periodCampusStartMins(pNum);
+            return s === null ? null : s + PERIOD_DURATION_MINS;
+          };
+
+          // Today's schedule
+          const todaySchedule = accountSetup.schedule?.[todayDayName] || {};
+
+          // Classify today's periods: get study periods for today
+          const todayStudyPeriods = isWeekend ? [] : allCampusPeriods.filter(p => {
+            const t = todaySchedule[String(p)];
+            return t === 'Study' || t === 'study' || !t; // default is Study if not set
+          });
+
+          // Identify which study periods are "available" today (upcoming or current)
+          // A period is current if now is within [start, start+60min). It is upcoming if start > now.
+          const studyPeriodStatus = todayStudyPeriods.map(p => {
+            const startMins = periodCampusStartMins(p);
+            const endMins = startMins + PERIOD_DURATION_MINS;
+            if (campusNowMinsSinceMidnight >= endMins) return { period: p, status: 'past', startMins, endMins };
+            if (campusNowMinsSinceMidnight >= startMins) return { period: p, status: 'current', startMins, endMins };
+            return { period: p, status: 'upcoming', startMins, endMins };
+          });
+          const availableStudyPeriods = studyPeriodStatus.filter(s => s.status !== 'past');
+
+          // Remaining minutes in a current period (rounded down to nearest 10)
+          const getCurrentPeriodRemainingMins = (pInfo) => {
+            if (pInfo.status !== 'current') return PERIOD_DURATION_MINS;
+            const elapsed = campusNowMinsSinceMidnight - pInfo.startMins;
+            const remaining = PERIOD_DURATION_MINS - elapsed;
+            return Math.floor(remaining / 10) * 10;
+          };
+
+          // Total available study minutes today
+          const totalStudyMinsToday = availableStudyPeriods.reduce((s, p) => s + getCurrentPeriodRemainingMins(p), 0);
+
+          // ── MULTI-DAY STUDY SLOT GENERATOR ──────────────────────────────────
+          // Generates all study slots from now forward for a given number of future days
+          // Returns array of { dateStr, dayName, period, startMins (campus), capacityMins, isToday, isCurrent }
+          const generateFutureStudySlots = (daysAhead = 90) => {
+            const slots = [];
+            for (let d = 0; d <= daysAhead; d++) {
+              const dayMs = campusNowMs + d * 86400000;
+              const dayDate = new Date(dayMs);
+              const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayDate.getUTCDay()];
+              const dateStr = `${dayDate.getUTCFullYear()}-${String(dayDate.getUTCMonth()+1).padStart(2,'0')}-${String(dayDate.getUTCDate()).padStart(2,'0')}`;
+              if (dayName === 'Saturday' || dayName === 'Sunday') continue;
+              const daySchedule = accountSetup.schedule?.[dayName] || {};
+              for (let p = pRangeStart; p <= pRangeEnd; p++) {
+                const t = daySchedule[String(p)];
+                if (t === 'Study' || t === 'study' || !t) {
+                  const startMins = periodCampusStartMins(p);
+                  if (startMins === null) continue;
+                  const isCurrent = d === 0 && campusNowMinsSinceMidnight >= startMins && campusNowMinsSinceMidnight < startMins + PERIOD_DURATION_MINS;
+                  const isPast = d === 0 && campusNowMinsSinceMidnight >= startMins + PERIOD_DURATION_MINS;
+                  if (isPast) continue;
+                  const capacityMins = isCurrent
+                    ? Math.floor(Math.max(0, (startMins + PERIOD_DURATION_MINS - campusNowMinsSinceMidnight)) / 10) * 10
+                    : PERIOD_DURATION_MINS;
+                  if (capacityMins <= 0) continue;
+                  slots.push({ dateStr, dayName, period: p, startMins, capacityMins, isToday: d === 0, isCurrent });
+                }
+              }
+            }
+            return slots;
+          };
+
+          // ── TASK DEADLINE AS UTC ──────────────────────────────────────────
+          // Returns ms timestamp of deadline in campus time, or Infinity if no deadline
+          const getDeadlineMs = (task) => {
+            if (!task.dueDate) return Infinity;
+            return task.dueDate instanceof Date ? task.dueDate.getTime() : new Date(task.dueDate).getTime();
+          };
+
+          // Convert a dateStr + campus period number to a UTC timestamp for the END of that period
+          const slotEndUTCMs = (dateStr, period) => {
+            const utc = ORG_PERIOD_TIMES_UTC[period];
+            if (!utc) return null;
+            const [y, mo, d] = dateStr.split('-').map(Number);
+            return Date.UTC(y, mo - 1, d, utc.h, utc.m, 0) + PERIOD_DURATION_MINS * 60000;
+          };
+
+          // ── SCHEDULING ALGORITHM ─────────────────────────────────────────
+          // Returns: { allSlots, todayAllocation, warnings }
+          // allSlots: array of study slots with { ...slot, tasks: [{taskId, taskObj, mins, startOffset}] }
+          // todayAllocation: [{task, minsToday, totalMins, warning}]
+          // warnings: [{taskId, type: 'impossible'|'tight'}]
+          const runSchedulingAlgorithm = () => {
+            const activeTasks = tasks
+              .filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'))
+              .sort((a, b) => {
+                const da = getDeadlineMs(a), db = getDeadlineMs(b);
+                return da - db;
+              });
+
+            if (activeTasks.length === 0) return { slotMap: {}, todayAllocation: [], warnings: [] };
+
+            const allSlots = generateFutureStudySlots(120);
+            // Deep copy slots with mutable remaining capacity and task list
+            const slots = allSlots.map(s => ({ ...s, remaining: s.capacityMins, tasks: [] }));
+
+            const warnings = [];
+            const todayTaskMins = {}; // taskId → mins allocated today
+
+            for (const task of activeTasks) {
+              const estMins = task.userEstimate || task.estimatedTime || 20;
+              const deadlineMs = getDeadlineMs(task);
+
+              // Find slots that end before the deadline
+              const slotsBeforeDeadline = deadlineMs === Infinity
+                ? slots
+                : slots.filter(s => {
+                    const endMs = slotEndUTCMs(s.dateStr, s.period);
+                    return endMs !== null && endMs <= deadlineMs;
+                  });
+
+              // Total available minutes before deadline (accounting for already-used capacity)
+              const totalAvailableMins = slotsBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
+
+              if (totalAvailableMins < estMins) {
+                // IMPOSSIBLE: not enough time — fill all remaining slots for today + outside school warning
+                warnings.push({ taskId: task.id, type: 'impossible', task });
+                let minsLeft = estMins;
+                for (const slot of slotsBeforeDeadline) {
+                  if (slot.remaining <= 0 || minsLeft <= 0) continue;
+                  const alloc = Math.min(slot.remaining, minsLeft);
+                  slot.tasks.push({ taskId: task.id, task, mins: alloc });
+                  slot.remaining -= alloc;
+                  minsLeft -= alloc;
+                  if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                }
+              } else {
+                // POSSIBLE: check excess
+                const excessMins = totalAvailableMins - estMins;
+
+                if (excessMins < 120) {
+                  // Fill from the start, leaving last <120 min for next tasks
+                  let minsLeft = estMins;
+                  for (const slot of slotsBeforeDeadline) {
+                    if (slot.remaining <= 0 || minsLeft <= 0) break;
+                    const alloc = Math.min(slot.remaining, minsLeft);
+                    slot.tasks.push({ taskId: task.id, task, mins: alloc });
+                    slot.remaining -= alloc;
+                    minsLeft -= alloc;
+                    if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                  }
+                  // Tight warning: <120 min left before deadline after completion
+                  const remainingAfter = slotsBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
+                  if (remainingAfter < 120) {
+                    warnings.push({ taskId: task.id, type: 'tight', task });
+                  }
+                } else {
+                  // Spread with middle-study gap
+                  const halfExcess = Math.floor(excessMins / 2);
+                  // Count days with ≥1 study slot before deadline that still have capacity
+                  const daysWithStudy = [...new Set(slotsBeforeDeadline.filter(s => s.remaining > 0).map(s => s.dateStr))];
+                  const numDays = daysWithStudy.length;
+                  const gapPerDay = numDays > 0 ? Math.floor(halfExcess / numDays) : 0;
+
+                  if (gapPerDay < 30) {
+                    // Gap too small — fall back to fill-from-start
+                    let minsLeft = estMins;
+                    for (const slot of slotsBeforeDeadline) {
+                      if (slot.remaining <= 0 || minsLeft <= 0) break;
+                      const alloc = Math.min(slot.remaining, minsLeft);
+                      slot.tasks.push({ taskId: task.id, task, mins: alloc });
+                      slot.remaining -= alloc;
+                      minsLeft -= alloc;
+                      if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                    }
+                  } else {
+                    // Find the "middle study" slot index (round up)
+                    const validSlots = slotsBeforeDeadline.filter(s => s.remaining > 0);
+                    const midIdx = Math.ceil(validSlots.length / 2) - 1; // 0-based, rounded up
+                    // gapPerDay mins at midpoint will be reserved for following tasks
+                    // Fill before mid, skip gapPerDay at mid, continue filling after mid
+                    let minsLeft = estMins;
+                    for (let si = 0; si < validSlots.length; si++) {
+                      if (minsLeft <= 0) break;
+                      const slot = validSlots[si];
+                      if (slot.remaining <= 0) continue;
+                      if (si === midIdx) {
+                        // Reserve gapPerDay for later tasks; only use what's above the gap
+                        const usable = Math.max(0, slot.remaining - gapPerDay);
+                        if (usable > 0) {
+                          const alloc = Math.min(usable, minsLeft);
+                          slot.tasks.push({ taskId: task.id, task, mins: alloc });
+                          slot.remaining -= alloc;
+                          minsLeft -= alloc;
+                          if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                        }
+                      } else {
+                        const alloc = Math.min(slot.remaining, minsLeft);
+                        slot.tasks.push({ taskId: task.id, task, mins: alloc });
+                        slot.remaining -= alloc;
+                        minsLeft -= alloc;
+                        if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                      }
+                    }
+                    const remainingAfter = slotsBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
+                    if (remainingAfter < 120) warnings.push({ taskId: task.id, type: 'tight', task });
+                  }
+                }
+              }
+            }
+
+            // Build today's priority list from today's allocations
+            const todayAllocation = activeTasks
+              .filter(t => todayTaskMins[t.id] > 0)
+              .map(t => ({
+                task: t,
+                minsToday: todayTaskMins[t.id],
+                totalMins: t.userEstimate || t.estimatedTime || 20,
+                warning: warnings.find(w => w.taskId === t.id)?.type || null,
+              }));
+
+            // Build a slot map keyed by `${dateStr}-${period}` for today's slots only
+            const slotMap = {};
+            for (const slot of slots) {
+              if (slot.isToday && slot.tasks.length > 0) {
+                slotMap[`${slot.dateStr}-${slot.period}`] = slot;
+              }
+            }
+
+            return { slotMap, todayAllocation, warnings, todaySlots: slots.filter(s => s.isToday) };
+          };
+
+          const { slotMap, todayAllocation, warnings, todaySlots } = runSchedulingAlgorithm();
+
+          // Today's study slots for tabs (in period order)
+          const todayStudySlotsForTabs = todayStudyPeriods.map(p => {
+            const key = `${campusTodayStr}-${p}`;
+            return slotMap[key] || { period: p, tasks: [], remaining: PERIOD_DURATION_MINS, isToday: true, dateStr: campusTodayStr };
+          });
+
+          // Action defaulting logic
+          const getDefaultAction = (task, minsToday, totalMins) => {
+            const acc = task.accumulatedTime || 0;
+            const hasProgress = acc > 0;
+            const willFinish = minsToday >= (totalMins - acc);
+            if (!hasProgress && willFinish) return 'Get it Done';
+            if (!hasProgress && !willFinish) return 'Make a Start';
+            if (hasProgress && willFinish) return 'Wrap it Up';
+            return 'Build Progress';
+          };
+
+          // Format date for agenda title: M/D/YYYY
+          const fmtDate = (dateStr) => {
+            const [y, mo, d] = dateStr.split('-').map(Number);
+            return `${mo}/${d}/${y}`;
+          };
+
+          // Agenda title for a study period
+          const agendaTitle = (period, taskCount, dateStr) =>
+            `Period ${period} Study - ${taskCount} Task${taskCount !== 1 ? 's' : ''} - ${fmtDate(dateStr)}`;
+          const agendaTitleOutside = (taskCount, dateStr) =>
+            `Outside School - ${taskCount} Task${taskCount !== 1 ? 's' : ''} - ${fmtDate(dateStr)}`;
+
+          // Collision detection: match "Period X Study - # Tasks - date" or "Outside School - # Tasks - date"
+          const titleMatchesExported = (existingName, newName) => {
+            // Extract prefix (e.g. "Period 3 Study") and date suffix
+            const parts = newName.split(' - ');
+            if (parts.length < 3) return false;
+            const prefix = parts[0];
+            const dateSuffix = parts[parts.length - 1];
+            const existingParts = existingName.split(' - ');
+            if (existingParts.length < 3) return false;
+            return existingParts[0] === prefix && existingParts[existingParts.length - 1] === dateSuffix;
+          };
+
+          // Export agendas for given slots
+          const handleExportAgendas = async (slotsToExport) => {
+            setOrganizerExporting(true);
+            try {
+              for (const slot of slotsToExport) {
+                const slotTasks = slot.tasks || [];
+                if (slotTasks.length === 0) continue;
+                const title = slot.isOutside
+                  ? agendaTitleOutside(slotTasks.length, slot.dateStr)
+                  : agendaTitle(slot.period, slotTasks.length, slot.dateStr);
+
+                // Delete any existing agenda with a matching title pattern
+                const existing = agendas.find(a => titleMatchesExported(a.name, title));
+                if (existing) {
+                  await apiCall(`/agendas/${existing.id}`, 'DELETE');
+                }
+
+                // Build rows
+                const rows = slotTasks.map((st, i) => ({
+                  rowIndex: i,
+                  taskId: st.taskId || st.task?.id,
+                  action: getDefaultAction(st.task, st.mins, st.task?.userEstimate || st.task?.estimatedTime || 20),
+                  timeMins: st.mins,
+                  zone: null,
+                }));
+
+                await apiCall('/agendas', 'POST', { name: title, rows });
+              }
+              await loadAgendas();
+              setShowGenerateAgendasModal(false);
+            } catch (err) {
+              console.error('Export agendas error:', err);
+            } finally {
+              setOrganizerExporting(false);
+            }
+          };
+
+          // Active tasks list (same as tasks page)
+          const organizerTaskList = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'));
+
+          // Tabs: study periods + Outside School
+          const outsideSchoolTasks = (todayAllocation || []).filter(a => {
+            // Tasks with 0 study mins but still allocated for outside school
+            const inStudy = todayStudySlotsForTabs.some(s => s.tasks.some(st => st.taskId === a.task.id || st.task?.id === a.task.id));
+            return !inStudy;
+          });
+          const tabs = [
+            ...todayStudySlotsForTabs.map((slot, i) => ({ type: 'study', slot, period: slot.period, idx: i })),
+            { type: 'outside', idx: todayStudySlotsForTabs.length },
+          ];
+          const selectedTab = tabs[Math.min(organizerSelectedStudy, tabs.length - 1)];
+          const selectedSlot = selectedTab?.type === 'study' ? selectedTab.slot : null;
+
+          // Format time for display
+          const fmtMins = (m) => m >= 60 ? `${Math.floor(m/60)}h ${m%60 > 0 ? `${m%60}m` : ''}`.trim() : `${m}m`;
+
+          // Reset selected tab to first upcoming study when page mounts/day changes
+          // (handled implicitly by organizerSelectedStudy defaulting to 0)
+
+          return (
+            <div className="flex-1 overflow-hidden flex flex-col h-full">
+              {/* Page header */}
+              <div className="px-6 pt-4 pb-2 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">Organizer</h1>
+                  <p className="text-gray-500 text-sm mt-0.5">
+                    {isWeekend ? 'Weekend — Outside School only' : `${availableStudyPeriods.length} stud${availableStudyPeriods.length !== 1 ? 'ies' : 'y'} available today · ${fmtMins(totalStudyMinsToday)} study time`}
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setGenerateAgendasMode('current'); setShowGenerateAgendasModal(true); }}
+                  className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold text-sm transition-all shadow-sm"
+                >
+                  <ClipboardList className="w-4 h-4" />
+                  Generate Agendas
+                </button>
+              </div>
+
+              {/* Main 3-column layout */}
+              <div className="flex-1 overflow-hidden flex gap-4 px-6 pb-4 min-h-0">
+
+                {/* ── LEFT: Task list ──────────────────────────────────────── */}
+                <div className="flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ width: '220px', flexShrink: 0 }}>
+                  <div className="px-3 py-2 border-b border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">All Tasks</p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                    {organizerTaskList.length === 0 && (
+                      <p className="text-xs text-gray-400 text-center py-4">No tasks</p>
+                    )}
+                    {organizerTaskList.map(task => {
+                      const cc = getClassColor(task);
+                      const cn = extractClassName(task);
+                      const estMin = task.userEstimate || task.estimatedTime || 20;
+                      const dueDate = task.dueDate ? new Date(task.dueDate) : null;
+                      const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+                      const todayMins = (todayAllocation.find(a => a.task.id === task.id)?.minsToday) || 0;
+                      return (
+                        <div
+                          key={task.id}
+                          className="rounded-lg border border-gray-100 overflow-hidden cursor-pointer hover:shadow-sm transition-all"
+                          onClick={() => setShowTaskDescription(task)}
+                        >
+                          <div className="flex overflow-hidden" style={{ height: '4px' }}>
+                            <div style={{ width: '100%', backgroundColor: cc }} />
+                          </div>
+                          <div className="px-2 py-1.5">
+                            {task.url ? (
+                              <a href={task.url} target="_blank" rel="noopener noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                className="text-xs font-semibold leading-tight line-clamp-2 hover:underline"
+                                style={{ color: cc }}>
+                                {cleanTaskTitle(task)}
+                              </a>
+                            ) : (
+                              <p className="text-xs font-semibold leading-tight line-clamp-2" style={{ color: cc }}>{cleanTaskTitle(task)}</p>
+                            )}
+                            <div className="flex items-center justify-between mt-0.5">
+                              <span className="text-gray-400" style={{ fontSize: '9px' }}>{dueStr}</span>
+                              <span className="text-gray-400" style={{ fontSize: '9px' }}>{fmtMins(estMin)}</span>
+                            </div>
+                            {todayMins > 0 && (
+                              <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round(todayMins / estMin * 100))}%`, backgroundColor: cc, opacity: 0.7 }} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ── CENTRE: Today's priority list ───────────────────────── */}
+                <div className="flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden" style={{ width: '220px', flexShrink: 0 }}>
+                  <div className="px-3 py-2 border-b border-gray-100">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Today's Priorities</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{fmtMins(totalStudyMinsToday)} available</p>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
+                    {todayAllocation.length === 0 && (
+                      <div className="text-center py-6">
+                        <Check className="w-8 h-8 text-green-500 mx-auto mb-2" />
+                        <p className="text-xs text-gray-500">Nothing scheduled today</p>
+                      </div>
+                    )}
+                    {todayAllocation.map(({ task, minsToday, totalMins, warning }, idx) => {
+                      const cc = getClassColor(task);
+                      const estMin = task.userEstimate || task.estimatedTime || 20;
+                      return (
+                        <div key={task.id} className="rounded-lg border overflow-hidden"
+                          style={{ borderColor: warning === 'impossible' ? '#fca5a5' : warning === 'tight' ? '#fcd34d' : '#e5e7eb' }}>
+                          <div className="flex overflow-hidden" style={{ height: '3px' }}>
+                            <div style={{ width: '100%', backgroundColor: cc }} />
+                          </div>
+                          <div className="px-2 py-1.5">
+                            <div className="flex items-start gap-1.5">
+                              <span className="text-xs font-bold text-gray-400 flex-shrink-0 mt-0.5">#{idx + 1}</span>
+                              <p className="text-xs font-semibold leading-tight line-clamp-2 flex-1" style={{ color: cc }}>{cleanTaskTitle(task)}</p>
+                            </div>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-gray-500 font-semibold" style={{ fontSize: '10px' }}>Today: {fmtMins(minsToday)}</span>
+                              <span className="text-gray-400" style={{ fontSize: '9px' }}>of {fmtMins(estMin)}</span>
+                            </div>
+                            {warning === 'impossible' && (
+                              <div className="mt-1 flex items-center gap-1 text-red-600" style={{ fontSize: '9px' }}>
+                                <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                                <span className="font-semibold">Not enough study time!</span>
+                              </div>
+                            )}
+                            {warning === 'tight' && (
+                              <div className="mt-1 flex items-center gap-1 text-amber-600" style={{ fontSize: '9px' }}>
+                                <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                                <span>Tight — limited buffer</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* ── RIGHT: Study viewer ──────────────────────────────────── */}
+                <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
+                  {/* Tab bar */}
+                  <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0">
+                    {tabs.map((tab, ti) => {
+                      const isSelected = organizerSelectedStudy === ti;
+                      const hasContent = tab.type === 'study'
+                        ? (tab.slot.tasks?.length > 0)
+                        : (outsideSchoolTasks.length > 0);
+                      return (
+                        <button
+                          key={ti}
+                          onClick={() => setOrganizerSelectedStudy(ti)}
+                          className={`flex-shrink-0 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                            isSelected
+                              ? 'border-purple-600 text-purple-700 bg-purple-50'
+                              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                          }`}
+                        >
+                          {tab.type === 'study' ? `Period ${tab.period}` : 'Outside School'}
+                          {hasContent && (
+                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-purple-500' : 'bg-amber-400'}`} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Tab content */}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {selectedTab?.type === 'study' && (() => {
+                      const slot = selectedSlot;
+                      const pStatus = studyPeriodStatus.find(s => s.period === slot?.period);
+                      const startMins = slot ? periodCampusStartMins(slot.period) : null;
+                      const startLabel = startMins !== null
+                        ? (() => { const h = Math.floor(startMins / 60); const m = startMins % 60; return `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`; })()
+                        : '';
+
+                      if (!slot || slot.tasks.length === 0) {
+                        return (
+                          <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                            <Check className="w-12 h-12 text-green-400 mb-3" />
+                            <p className="font-semibold text-gray-700">Period {slot?.period} Study is free</p>
+                            <p className="text-sm text-gray-400 mt-1">{startLabel && `Starts at ${startLabel} · `}No tasks scheduled</p>
+                          </div>
+                        );
+                      }
+
+                      // Build time offsets for display
+                      let cursor = 0;
+                      const tasksWithTimes = slot.tasks.map(st => {
+                        const offset = cursor;
+                        cursor += st.mins;
+                        return { ...st, startOffset: offset };
+                      });
+
+                      return (
+                        <div>
+                          <div className="flex items-center justify-between mb-3">
+                            <div>
+                              <p className="font-semibold text-gray-800">Period {slot.period} Study</p>
+                              {startLabel && <p className="text-xs text-gray-500">{startLabel} · {fmtMins(slot.capacityMins)} available</p>}
+                            </div>
+                            {pStatus?.status === 'current' && (
+                              <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded-full text-xs font-semibold">In Progress</span>
+                            )}
+                            {pStatus?.status === 'upcoming' && (
+                              <span className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">Upcoming</span>
+                            )}
+                          </div>
+                          <div className="space-y-2">
+                            {tasksWithTimes.map((st, i) => {
+                              const cc = getClassColor(st.task);
+                              const cn = extractClassName(st.task);
+                              const estMin = st.task.userEstimate || st.task.estimatedTime || 20;
+                              const action = getDefaultAction(st.task, st.mins, estMin);
+                              const startH = startMins !== null
+                                ? (() => { const totalMins = startMins + st.startOffset; const h = Math.floor(totalMins/60)%24; const m = totalMins%60; return `${h%12||12}:${String(m).padStart(2,'0')} ${h<12?'AM':'PM'}`; })()
+                                : null;
+                              const endH = startMins !== null
+                                ? (() => { const totalMins = startMins + st.startOffset + st.mins; const h = Math.floor(totalMins/60)%24; const m = totalMins%60; return `${h%12||12}:${String(m).padStart(2,'0')} ${h<12?'AM':'PM'}`; })()
+                                : null;
+                              const warn = warnings.find(w => w.taskId === st.task.id);
+
+                              return (
+                                <div key={i} className="rounded-xl border border-gray-100 overflow-hidden hover:shadow-sm transition-all">
+                                  <div style={{ height: '4px', backgroundColor: cc }} />
+                                  <div className="p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        {st.task.url ? (
+                                          <a href={st.task.url} target="_blank" rel="noopener noreferrer"
+                                            className="text-sm font-semibold hover:underline leading-tight"
+                                            style={{ color: cc }}>
+                                            {cleanTaskTitle(st.task)}
+                                          </a>
+                                        ) : (
+                                          <p className="text-sm font-semibold leading-tight" style={{ color: cc }}>{cleanTaskTitle(st.task)}</p>
+                                        )}
+                                        <p className="text-xs text-gray-400 mt-0.5">{cn}</p>
+                                      </div>
+                                      <div className="text-right flex-shrink-0">
+                                        <p className="text-sm font-bold text-gray-700">{fmtMins(st.mins)}</p>
+                                        {startH && <p className="text-xs text-gray-400">{startH}–{endH}</p>}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                                      <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs font-medium">{action}</span>
+                                      {warn?.type === 'impossible' && (
+                                        <span className="flex items-center gap-1 text-red-600 text-xs font-semibold">
+                                          <AlertCircle className="w-3 h-3" />Not enough time
+                                        </span>
+                                      )}
+                                      {warn?.type === 'tight' && (
+                                        <span className="flex items-center gap-1 text-amber-600 text-xs">
+                                          <AlertTriangle className="w-3 h-3" />Tight deadline
+                                        </span>
+                                      )}
+                                    </div>
+                                    {/* Progress bar if task has accumulated time */}
+                                    {(st.task.accumulatedTime || 0) > 0 && (
+                                      <div className="mt-2 flex items-center gap-2">
+                                        <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((st.task.accumulatedTime / estMin) * 100))}%`, backgroundColor: cc, opacity: 0.7 }} />
+                                        </div>
+                                        <span className="text-xs text-gray-400">{st.task.accumulatedTime}m logged</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
+
+                    {selectedTab?.type === 'outside' && (
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <p className="font-semibold text-gray-800">Outside School</p>
+                            <p className="text-xs text-gray-500">Tasks that overflow available study time</p>
+                          </div>
+                        </div>
+                        {outsideSchoolTasks.length === 0 ? (
+                          <div className="flex flex-col items-center justify-center py-12 text-center">
+                            <Check className="w-12 h-12 text-green-400 mb-3" />
+                            <p className="font-semibold text-gray-700">No overflow today</p>
+                            <p className="text-sm text-gray-400 mt-1">All tasks fit within your study periods</p>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {outsideSchoolTasks.map(({ task, minsToday }, i) => {
+                              const cc = getClassColor(task);
+                              const cn = extractClassName(task);
+                              return (
+                                <div key={task.id} className="rounded-xl border border-amber-200 overflow-hidden">
+                                  <div style={{ height: '4px', backgroundColor: cc }} />
+                                  <div className="p-3">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <div className="flex-1 min-w-0">
+                                        {task.url ? (
+                                          <a href={task.url} target="_blank" rel="noopener noreferrer"
+                                            className="text-sm font-semibold hover:underline" style={{ color: cc }}>
+                                            {cleanTaskTitle(task)}
+                                          </a>
+                                        ) : (
+                                          <p className="text-sm font-semibold" style={{ color: cc }}>{cleanTaskTitle(task)}</p>
+                                        )}
+                                        <p className="text-xs text-gray-400 mt-0.5">{cn}</p>
+                                      </div>
+                                      <p className="text-sm font-bold text-gray-700 flex-shrink-0">{fmtMins(minsToday)}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Generate Agendas Modal ────────────────────────────────── */}
+              {showGenerateAgendasModal && (() => {
+                // Build slots for export
+                const studySlotsForExport = todayStudySlotsForTabs.filter(s => s.tasks?.length > 0);
+                const outsideSlotsForExport = outsideSchoolTasks.length > 0
+                  ? [{ isOutside: true, dateStr: campusTodayStr, tasks: outsideSchoolTasks.map(a => ({ taskId: a.task.id, task: a.task, mins: a.minsToday })) }]
+                  : [];
+                const allSlotsForExport = [
+                  ...studySlotsForExport.map(s => ({ ...s, isOutside: false })),
+                  ...outsideSlotsForExport,
+                ];
+                const currentSlotForExport = selectedTab?.type === 'study'
+                  ? (selectedSlot && selectedSlot.tasks?.length > 0 ? [{ ...selectedSlot, isOutside: false }] : [])
+                  : outsideSlotsForExport;
+
+                // Check for existing collision titles
+                const wouldReplace = allSlotsForExport
+                  .map(slot => {
+                    const title = slot.isOutside
+                      ? agendaTitleOutside(slot.tasks.length, slot.dateStr)
+                      : agendaTitle(slot.period, slot.tasks.length, slot.dateStr);
+                    return agendas.find(a => titleMatchesExported(a.name, title));
+                  })
+                  .filter(Boolean);
+
+                return (
+                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white rounded-2xl shadow-xl p-6 max-w-md w-full mx-4">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="text-lg font-bold text-gray-900">Generate Agendas</h3>
+                        <button onClick={() => setShowGenerateAgendasModal(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                      </div>
+
+                      <div className="space-y-3 mb-4">
+                        <button
+                          onClick={() => setGenerateAgendasMode('current')}
+                          className={`w-full p-3 rounded-xl border-2 text-left transition-all ${generateAgendasMode === 'current' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}
+                        >
+                          <p className="font-semibold text-gray-900 text-sm">Export current view</p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {selectedTab?.type === 'study'
+                              ? `Period ${selectedTab.period} Study — ${selectedSlot?.tasks?.length || 0} task${selectedSlot?.tasks?.length !== 1 ? 's' : ''}`
+                              : `Outside School — ${outsideSchoolTasks.length} task${outsideSchoolTasks.length !== 1 ? 's' : ''}`}
+                          </p>
+                        </button>
+                        <button
+                          onClick={() => setGenerateAgendasMode('all')}
+                          className={`w-full p-3 rounded-xl border-2 text-left transition-all ${generateAgendasMode === 'all' ? 'border-purple-500 bg-purple-50' : 'border-gray-200 hover:border-gray-300'}`}
+                        >
+                          <p className="font-semibold text-gray-900 text-sm">Export all studies</p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {allSlotsForExport.length} agenda{allSlotsForExport.length !== 1 ? 's' : ''} total
+                            {allSlotsForExport.map(s => s.isOutside ? 'Outside School' : `Period ${s.period}`).join(', ')}
+                          </p>
+                        </button>
+                      </div>
+
+                      <div className="mb-4 bg-gray-50 rounded-xl p-3 space-y-1 text-xs text-gray-600">
+                        <p className="font-semibold text-gray-700 mb-1">Agenda names preview:</p>
+                        {(generateAgendasMode === 'all' ? allSlotsForExport : currentSlotForExport).map((slot, i) => (
+                          <p key={i} className="truncate">
+                            {slot.isOutside
+                              ? agendaTitleOutside(slot.tasks.length, slot.dateStr)
+                              : agendaTitle(slot.period, slot.tasks.length, slot.dateStr)}
+                          </p>
+                        ))}
+                      </div>
+
+                      {wouldReplace.length > 0 && (
+                        <div className="mb-4 flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <p className="text-xs text-amber-700">
+                            <span className="font-semibold">{wouldReplace.length} existing agenda{wouldReplace.length !== 1 ? 's' : ''} will be replaced</span> — they were previously exported from the Organizer for the same date.
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setShowGenerateAgendasModal(false)}
+                          className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold text-sm transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleExportAgendas(generateAgendasMode === 'all' ? allSlotsForExport : currentSlotForExport)}
+                          disabled={organizerExporting || (generateAgendasMode === 'all' ? allSlotsForExport : currentSlotForExport).length === 0}
+                          className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {organizerExporting ? (
+                            <><div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Exporting…</>
+                          ) : (
+                            <><ClipboardList className="w-4 h-4" />Export Agendas</>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}
