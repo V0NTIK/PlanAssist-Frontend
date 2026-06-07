@@ -8392,15 +8392,19 @@ const PlanAssist = () => {
                                     )}
                                   </div>
 
-                                  {/* Right side: optional progress bar + Start/Resume button */}
+                                  {/* Right side: optional vertical progress bar + Start/Resume button */}
                                   <div className="flex-shrink-0 self-center flex items-center gap-2">
-                                    {/* Progress bar — vertical, beside the button, only when in progress */}
+                                    {/* Vertical progress bar — just to the left of the button */}
                                     {hasProgress && !isHomeroom && (
-                                      <div className="flex flex-col items-center gap-1" style={{ width: '90px' }}>
-                                        <div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                          <div className="h-full rounded-full transition-all" style={{ width: `${progressPct}%`, backgroundColor: classColor, opacity: 0.75 }} />
-                                        </div>
+                                      <div className="flex flex-col items-center gap-1" title={`${accMin}m / ${estMin}m logged`}>
                                         <span className="text-gray-400 font-medium" style={{ fontSize: '9px', lineHeight: 1 }}>{accMin}m</span>
+                                        <div className="rounded-full overflow-hidden bg-gray-100 flex flex-col justify-end" style={{ width: '8px', height: '48px' }}>
+                                          <div
+                                            className="w-full rounded-full transition-all"
+                                            style={{ height: `${progressPct}%`, backgroundColor: classColor, opacity: 0.8 }}
+                                          />
+                                        </div>
+                                        <span className="text-gray-300 font-medium" style={{ fontSize: '9px', lineHeight: 1 }}>{estMin}m</span>
                                       </div>
                                     )}
 
