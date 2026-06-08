@@ -9493,7 +9493,14 @@ const PlanAssist = () => {
             const todayTaskMins = {}; // taskId → mins allocated today
 
             for (const task of activeTasks) {
-              const estMins = task.userEstimate || task.estimatedTime || 20;
+              const rawEst = task.userEstimate || task.estimatedTime || 20;
+              const acc = task.accumulatedTime || 0; // minutes already logged
+              const remainingEst = rawEst - acc;
+              if (remainingEst <= 0) {
+                // Already at or beyond estimate — schedule 5 min as a buffer, warn
+                warnings.push({ taskId: task.id, type: 'overrun', task });
+              }
+              const estMins = remainingEst > 0 ? remainingEst : 5;
               const deadlineMs = getDeadlineMs(task);
 
               // Find slots that end before the deadline
@@ -9623,11 +9630,13 @@ const PlanAssist = () => {
             return slotMap[key] || { period: p, tasks: [], remaining: PERIOD_DURATION_MINS, isToday: true, dateStr: campusTodayStr };
           });
 
-          // Action defaulting logic
+          // Action defaulting logic — uses remaining time (estimate minus accumulated)
           const getDefaultAction = (task, minsToday, totalMins) => {
             const acc = task.accumulatedTime || 0;
+            const remaining = Math.max(totalMins - acc, 0);
             const hasProgress = acc > 0;
-            const willFinish = minsToday >= (totalMins - acc);
+            const willFinish = minsToday >= remaining;
+            if (remaining === 0) return 'Final Push';
             if (!hasProgress && willFinish) return 'Get it Done';
             if (!hasProgress && !willFinish) return 'Make a Start';
             if (hasProgress && willFinish) return 'Wrap it Up';
@@ -9699,14 +9708,13 @@ const PlanAssist = () => {
           const organizerTaskList = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'));
 
           // Tabs: study periods + Outside School
-          // Outside School: tasks that exist but have zero minutes allocated today.
-          // These are tasks the algorithm will handle on future days (not enough today).
-          const todayAllocatedIds = new Set(todayAllocation.map(a => a.task.id));
-          const outsideSchoolTasks = organizerTaskList
-            .filter(t => !todayAllocatedIds.has(t.id))
-            .map(t => {
-              const warn = warnings.find(w => w.taskId === t.id);
-              return { task: t, minsToday: 0, warning: warn?.type || null };
+          // Outside School: only tasks the algorithm genuinely cannot fit before deadline
+          // (impossible warning). Tasks merely deferred to future study days are NOT shown here.
+          const outsideSchoolTasks = warnings
+            .filter(w => w.type === 'impossible' || w.type === 'overrun')
+            .map(w => {
+              const alloc = todayAllocation.find(a => a.task.id === w.taskId);
+              return { task: w.task, minsToday: alloc?.minsToday || 0, warning: w.type };
             });
           const tabs = [
             ...todayStudySlotsForTabs.map((slot, i) => ({ type: 'study', slot, period: slot.period, idx: i })),
@@ -9838,6 +9846,12 @@ const PlanAssist = () => {
                                 <span>Tight — limited buffer</span>
                               </div>
                             )}
+                            {warning === 'overrun' && (
+                              <div className="mt-1 flex items-center gap-1 text-orange-500" style={{ fontSize: '9px' }}>
+                                <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                                <span>Beyond estimate — taking longer than expected</span>
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -9963,14 +9977,19 @@ const PlanAssist = () => {
                                           <AlertTriangle className="w-3 h-3" />Tight deadline
                                         </span>
                                       )}
+                                      {warn?.type === 'overrun' && (
+                                        <span className="flex items-center gap-1 text-orange-500 text-xs">
+                                          <AlertTriangle className="w-3 h-3" />Beyond estimate
+                                        </span>
+                                      )}
                                     </div>
                                     {/* Progress bar if task has accumulated time */}
                                     {(st.task.accumulatedTime || 0) > 0 && (
                                       <div className="mt-2 flex items-center gap-2">
                                         <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((st.task.accumulatedTime / estMin) * 100))}%`, backgroundColor: cc, opacity: 0.7 }} />
+                                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((st.task.accumulatedTime / estMin) * 100))}%`, backgroundColor: st.task.accumulatedTime >= estMin ? '#f97316' : cc, opacity: 0.8 }} />
                                         </div>
-                                        <span className="text-xs text-gray-400">{st.task.accumulatedTime}m logged</span>
+                                        <span className="text-xs text-gray-400">{st.task.accumulatedTime}m / {estMin}m</span>
                                       </div>
                                     )}
                                     {/* Start / Resume button */}
@@ -10016,14 +10035,14 @@ const PlanAssist = () => {
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <p className="font-semibold text-gray-800">Outside School</p>
-                            <p className="text-xs text-gray-500">Tasks not scheduled for today — handled on future days by the algorithm</p>
+                            <p className="text-xs text-gray-500">Tasks that cannot be completed before deadline, or are running beyond their estimate</p>
                           </div>
                         </div>
                         {outsideSchoolTasks.length === 0 ? (
                           <div className="flex flex-col items-center justify-center py-12 text-center">
                             <Check className="w-12 h-12 text-green-400 mb-3" />
-                            <p className="font-semibold text-gray-700">All tasks are scheduled today</p>
-                            <p className="text-sm text-gray-400 mt-1">Nothing left for outside school time</p>
+                            <p className="font-semibold text-gray-700">Everything fits within your study periods</p>
+                            <p className="text-sm text-gray-400 mt-1">No tasks are impossible or overrunning estimates</p>
                           </div>
                         ) : (
                           <div className="space-y-2">
@@ -10060,14 +10079,17 @@ const PlanAssist = () => {
                                         <span className="font-semibold">Not enough time before deadline!</span>
                                       </div>
                                     )}
+                                    {warning === 'overrun' && (
+                                      <div className="mt-1.5 flex items-center gap-1 text-orange-500" style={{ fontSize: '10px' }}>
+                                        <AlertTriangle className="w-3 h-3 flex-shrink-0" />
+                                        <span className="font-semibold">Beyond estimate — taking longer than expected</span>
+                                      </div>
+                                    )}
                                     {warning === 'tight' && (
                                       <div className="mt-1.5 flex items-center gap-1 text-amber-600" style={{ fontSize: '10px' }}>
                                         <AlertTriangle className="w-3 h-3 flex-shrink-0" />
                                         <span>Tight — limited buffer before deadline</span>
                                       </div>
-                                    )}
-                                    {!warning && (
-                                      <p className="mt-1.5 text-xs text-gray-400">Scheduled for a future study period — check the Itinerary</p>
                                     )}
                                   </div>
                                 </div>
@@ -10626,7 +10648,9 @@ const PlanAssist = () => {
             const sorted = [...orgActiveTasks].sort((a, b) => getDeadlineMs(a) - getDeadlineMs(b));
 
             for (const task of sorted) {
-              const estMins = task.userEstimate || task.estimatedTime || 20;
+              const rawEst = task.userEstimate || task.estimatedTime || 20;
+              const acc = task.accumulatedTime || 0;
+              const estMins = Math.max(rawEst - acc, 5);
               const deadlineMs = getDeadlineMs(task);
               const slotsBeforeDeadline = deadlineMs === Infinity
                 ? allSlots
