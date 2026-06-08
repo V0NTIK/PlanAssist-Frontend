@@ -6515,6 +6515,9 @@ const PlanAssist = () => {
     if (currentPage === 'marks') {
       runCourseSync(false); // Course Sync with spinner
     }
+    if (currentPage === 'tasks') {
+      loadAgendas(); // needed to know which tasks are already in an agenda
+    }
     if (currentPage === 'agendas') {
       loadAgendas();
       loadSessionTasks();
@@ -8392,13 +8395,25 @@ const PlanAssist = () => {
                                         </span>
                                       )}
                                       {/* Split + Notes inline after grade impact */}
-                                      {!isHomeroom && (
-                                        <button onClick={() => setShowSplitTask(task.id)}
-                                          className="px-2 py-0.5 bg-purple-50 text-purple-600 rounded text-xs font-medium hover:bg-purple-100 transition-all"
-                                          title="Split task into segments">
-                                          Split
-                                        </button>
-                                      )}
+                                      {!isHomeroom && (() => {
+                                        const tasksInAgenda = new Set(
+                                          agendas.flatMap(ag => (ag.rows || []).map(r => r.taskId))
+                                        );
+                                        const inAgenda = tasksInAgenda.has(task.id);
+                                        return (
+                                          <button
+                                            onClick={() => { if (!inAgenda) setShowSplitTask(task.id); }}
+                                            disabled={inAgenda}
+                                            className={`px-2 py-0.5 rounded text-xs font-medium transition-all ${
+                                              inAgenda
+                                                ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                                                : 'bg-purple-50 text-purple-600 hover:bg-purple-100 cursor-pointer'
+                                            }`}
+                                            title={inAgenda ? 'Cannot split — task is already in an Agenda' : 'Split task into segments'}>
+                                            Split
+                                          </button>
+                                        );
+                                      })()}
                                       <button onClick={() => openNotesPopup(task)}
                                         className="px-2 py-0.5 bg-amber-50 text-amber-600 rounded text-xs font-medium hover:bg-amber-100 transition-all relative flex items-center gap-1"
                                         title="Open notes">
@@ -10727,19 +10742,22 @@ const PlanAssist = () => {
           // Look up tasks for a specific period on the viewed date
           const getOrgTasksForPeriod = (period) => {
             const slot = fullSlotMap[`${viewDateStr}-${period}`];
-            return (slot?.tasks || []).map(st => ({
-              task: st.task,
-              mins: st.mins,
-              action: (() => {
-                const acc = st.task.accumulatedTime || 0;
-                const hasProgress = acc > 0;
-                const willFinish = st.mins >= ((st.task.userEstimate || st.task.estimatedTime || 20) - acc);
-                if (!hasProgress && willFinish) return 'Get it Done';
-                if (!hasProgress && !willFinish) return 'Make a Start';
-                if (hasProgress && willFinish) return 'Wrap it Up';
-                return 'Build Progress';
-              })(),
-            }));
+            return (slot?.tasks || []).map(st => {
+              const acc = st.task.accumulatedTime || 0;
+              const rawEst = st.task.userEstimate || st.task.estimatedTime || 20;
+              const remaining = rawEst - acc;
+              const hasProgress = acc > 0;
+              const willFinish = st.mins >= Math.max(remaining, 0);
+              const isOverrun = remaining <= 0;
+              const action = isOverrun ? 'Final Push'
+                : !hasProgress && willFinish ? 'Get it Done'
+                : !hasProgress && !willFinish ? 'Make a Start'
+                : hasProgress && willFinish ? 'Wrap it Up'
+                : 'Build Progress';
+              // Derive warning from task state
+              const warning = isOverrun ? 'overrun' : null;
+              return { task: st.task, mins: st.mins, action, warning };
+            });
           };
 
           // Outside School tasks for viewed date — find an exported Outside School agenda for this date
@@ -11069,14 +11087,50 @@ const PlanAssist = () => {
                                 <div className="space-y-1.5">
                                   {orgTasks.map((ot, i) => {
                                     const cc = getClassColor(ot.task);
+                                    const hasAcc = (ot.task.accumulatedTime || 0) > 0;
+                                    const isStarting = sessionStartingId === ot.task.id;
+                                    const warningLabel = ot.warning === 'overrun' ? { text: 'Beyond estimate', color: '#f97316' }
+                                      : ot.warning === 'impossible' ? { text: 'Not enough time', color: '#ef4444' }
+                                      : ot.warning === 'tight' ? { text: 'Tight deadline', color: '#d97706' }
+                                      : null;
                                     return (
-                                      <div key={i} className="flex items-center gap-2 p-2 rounded-lg border border-gray-100">
-                                        <div className="w-1 h-full rounded-full flex-shrink-0 self-stretch" style={{ backgroundColor: cc, minHeight: '28px', width: '3px' }} />
-                                        <div className="flex-1 min-w-0">
-                                          <p className="text-xs font-semibold truncate" style={{ color: cc }}>{cleanTaskTitle(ot.task)}</p>
-                                          {ot.action && <p className="text-xs text-gray-400">{ot.action}</p>}
+                                      <div key={i} className="p-2 rounded-lg border border-gray-100">
+                                        <div className="flex items-center gap-2">
+                                          <div className="rounded-full flex-shrink-0 self-stretch" style={{ backgroundColor: cc, minHeight: '28px', width: '3px' }} />
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-xs font-semibold truncate" style={{ color: cc }}>{cleanTaskTitle(ot.task)}</p>
+                                            {ot.action && <p className="text-xs text-gray-400">{ot.action}</p>}
+                                            {warningLabel && (
+                                              <p className="text-xs font-medium" style={{ color: warningLabel.color }}>{warningLabel.text}</p>
+                                            )}
+                                          </div>
+                                          <span className="text-xs font-semibold text-gray-500 flex-shrink-0">{ot.mins}m</span>
+                                          <button
+                                            disabled={isStarting}
+                                            onClick={() => {
+                                              const sessionTask = {
+                                                id: ot.task.id, title: ot.task.title, segment: ot.task.segment,
+                                                class: ot.task.class, url: ot.task.url,
+                                                dueDate: ot.task.dueDate, deadlineDateRaw: ot.task.deadlineDateRaw,
+                                                estimatedTime: ot.task.estimatedTime, userEstimate: ot.task.userEstimate,
+                                                accumulatedTime: (ot.task.accumulatedTime || 0) * 60,
+                                                sessionActive: false, assignmentId: ot.task.assignmentId,
+                                                course_id: ot.task.course_id, manuallyCreated: ot.task.manuallyCreated || false,
+                                              };
+                                              startTaskSession(sessionTask);
+                                            }}
+                                            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold flex-shrink-0 transition-all ${
+                                              isStarting ? 'opacity-60 cursor-not-allowed bg-gray-100 text-gray-400'
+                                              : hasAcc ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                                              : 'bg-green-500 hover:bg-green-600 text-white'
+                                            }`}
+                                          >
+                                            {isStarting
+                                              ? <div className="w-3 h-3 border-2 border-gray-400 border-t-transparent rounded-full animate-spin" />
+                                              : <><Play className="w-3 h-3" />{hasAcc ? 'Resume' : 'Start'}</>
+                                            }
+                                          </button>
                                         </div>
-                                        <span className="text-xs font-semibold text-gray-500 flex-shrink-0">{ot.mins}m</span>
                                       </div>
                                     );
                                   })}
