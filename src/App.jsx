@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import AppHPT from './AppHPT';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy, Gift, CalendarClock } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy, Gift, CalendarClock, Grid, SlidersHorizontal, Columns } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -878,6 +878,15 @@ const PlanAssist = () => {
   const [showGenerateAgendasModal, setShowGenerateAgendasModal] = useState(false);
   const [generateAgendasMode, setGenerateAgendasMode] = useState('current'); // 'current' | 'all'
   const [organizerExporting, setOrganizerExporting] = useState(false);
+  // Urgency overrides: { [taskId]: { value: 'now'|'soon'|'later'|'ignore', setAt: Date } }
+  // Frontend-only, resets each day. useRef so changes don't trigger re-renders of the whole page.
+  const urgencyOverridesRef = React.useRef({});
+  const [urgencyOverridesTick, setUrgencyOverridesTick] = useState(0); // bump to re-render organizer after override change
+  const [showDayTimelineModal, setShowDayTimelineModal] = useState(false);
+  const [showAgendaEditModal, setShowAgendaEditModal] = useState(null); // { slot, slotIndex } for pre-export editing
+  const [agendaEditRows, setAgendaEditRows] = useState([]); // editable rows for the modal
+  const [showAgendaChunkView, setShowAgendaChunkView] = useState(false); // 15-min chunk view in active Agenda
+  const [exportEditedSlots, setExportEditedSlots] = useState(null); // overridden slots for Generate Agendas modal; null = use computed defaults
   const [sessionStartingId, setSessionStartingId] = useState(null); // task ID currently being started
   const [splitSegments, setSplitSegments] = useState([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }]);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -1325,7 +1334,10 @@ const PlanAssist = () => {
     const savedColors = localStorage.getItem('classColors');
     if (savedToken && savedUser) {
       setToken(savedToken);
-      setUser(JSON.parse(savedUser));
+      // isAdmin is intentionally NOT read from localStorage — it must come from
+      // the server (/account/setup) to prevent client-side privilege escalation.
+      const savedUserParsed = JSON.parse(savedUser);
+      setUser({ ...savedUserParsed, isAdmin: false });
       setIsAuthenticated(true);
       setIsAppLoading(true);
       if (savedColors) {
@@ -2547,17 +2559,10 @@ const PlanAssist = () => {
     if (!currentSessionTask || markingComplete) return;
     setMarkingComplete(true);
     try {
-      // Check if Canvas has also marked this task completed (for leaderboard)
-      let canvasCompleted = false;
-      try {
-        if (currentSessionTask.assignmentId && currentSessionTask.course_id) {
-          const canvasCheck = await apiCall(`/canvas/check-completed/${currentSessionTask.id}`, 'GET');
-          canvasCompleted = canvasCheck?.completed === true;
-        }
-      } catch (e) { /* silent — leaderboard just won't update */ }
+      // Canvas submission check is now done server-side inside the complete endpoint.
+      // No need to call check-completed from the client.
       await apiCall(`/tasks/${currentSessionTask.id}/complete`, 'POST', {
-        timeSpent: Math.round(sessionElapsed / 60),
-        canvasCompleted
+        timeSpent: Math.round(sessionElapsed / 60)
       });
       // Fire insignia unlock check and streak refresh while the loading state is still active.
       // Both run in parallel so they don't slow down the UI.
@@ -3572,19 +3577,11 @@ const PlanAssist = () => {
     setAgendaProceedLoading(true);
     const { snappedElapsed } = agendaStopTimer();
     try {
-      // Check if Canvas has also marked this task completed (for leaderboard)
-      let canvasCompleted = false;
-      const rowTask = sessionTasks.find(t => t.id === currentRow.taskId) || tasks.find(t => t.id === currentRow.taskId);
-      try {
-        if (rowTask?.assignmentId && rowTask?.course_id) {
-          const canvasCheck = await apiCall(`/canvas/check-completed/${currentRow.taskId}`, 'GET');
-          canvasCompleted = canvasCheck?.completed === true;
-        }
-      } catch (e) { /* silent */ }
+      // Canvas submission check is now done server-side inside the complete endpoint.
+      // No need to call check-completed from the client.
       // Complete the task (marks it done, saves time)
       await apiCall(`/tasks/${currentRow.taskId}/complete`, 'POST', {
-        timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60),
-        canvasCompleted
+        timeSpent: Math.round(Math.max(0, snappedElapsed - agendaBaseElapsed) / 60)
       });
       // Fire insignia unlock check and streak refresh in parallel while still loading.
       await Promise.allSettled([
@@ -4590,21 +4587,28 @@ const PlanAssist = () => {
 
   // Feature 1: Period Zoom — check every 30s. Window = the 1 minute BEFORE the period start.
   // e.g. period at 17:38 UTC → window is [17:37, 17:38). Each period fires exactly once per day.
-  useEffect(() => {
-    if (!isAuthenticated || !accountSetup.campus) return;
-    const PERIOD_TIMES_UTC = {
-      1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
-      4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
-      7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
-    };
+  //
+  // IMPORTANT: scheduleLessons/tutorials/pingSoundEnabled/colorTheme are accessed via refs so
+  // the interval is never torn down and recreated mid-window. Recreating the effect mid-window
+  // would cause check() to fire again immediately (on mount) while the period key is already
+  // in zoomFiredPeriodsRef — but setZoomBanner + launchZoomPing had already been called, so
+  // keeping a stable interval is the correct approach.
+  const scheduleLessonsRef = React.useRef(scheduleLessons);
+  const tutorialsRef       = React.useRef(tutorials);
+  const pingSoundEnabledRef = React.useRef(pingSoundEnabled);
+  const colorThemeRef      = React.useRef(colorTheme);
+  useEffect(() => { scheduleLessonsRef.current = scheduleLessons; }, [scheduleLessons]);
+  useEffect(() => { tutorialsRef.current = tutorials; }, [tutorials]);
+  useEffect(() => { pingSoundEnabledRef.current = pingSoundEnabled; }, [pingSoundEnabled]);
+  useEffect(() => { colorThemeRef.current = colorTheme; }, [colorTheme]);
 
-    // Unified alarm stop: stops audio + closes PiP + clears banner
+  // Separate effect: keep zoomAlarmStopRef up to date (no interval, just refs)
+  useEffect(() => {
     const stopAlarm = () => {
       if (zoomPingAudioRef.current) {
         try { zoomPingAudioRef.current.stop(); } catch(e) {}
         zoomPingAudioRef.current = null;
       }
-      // Close PiP if it's open for a zoom ping
       if (pipWindowRef.current) {
         try {
           pipIntentionalCloseRef.current = true;
@@ -4617,6 +4621,48 @@ const PlanAssist = () => {
       setZoomBanner(null);
     };
     zoomAlarmStopRef.current = stopAlarm;
+  }); // runs every render — keeps stopAlarm closure fresh without restarting interval
+
+  useEffect(() => {
+    if (!isAuthenticated || !accountSetup.campus) return;
+    const PERIOD_TIMES_UTC = {
+      1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
+      4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
+      7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
+    };
+
+    // Helper: play the looping alarm sound (sparser loop — plays every ~8s instead of every ~1.6s)
+    const startAlarmSound = (isMeeting) => {
+      if (!pingSoundEnabledRef.current) return;
+      if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        let stopped = false;
+        const tones = isMeeting ? [660, 880] : [880, 1100, 880, 1100];
+        const playAlarm = () => {
+          if (stopped) return;
+          let t = ctx.currentTime;
+          tones.forEach(freq => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.connect(gain); gain.connect(ctx.destination);
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(freq, t);
+            gain.gain.setValueAtTime(0, t);
+            gain.gain.linearRampToValueAtTime(0.35, t + 0.02);
+            gain.gain.setValueAtTime(0.35, t + 0.18);
+            gain.gain.linearRampToValueAtTime(0, t + 0.22);
+            osc.start(t); osc.stop(t + 0.22);
+            t += 0.25;
+          });
+          // Sparser loop: wait 8 seconds after the last tone before replaying
+          const loopId = setTimeout(playAlarm, tones.length * 250 + 8000);
+          ctx.__loopId = loopId;
+        };
+        playAlarm();
+        zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
+      } catch(e) { zoomPingAudioRef.current = null; }
+    };
 
     const check = () => {
       const now = new Date();
@@ -4643,104 +4689,44 @@ const PlanAssist = () => {
         const diff = periodMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
-          const lesson = scheduleLessons.find(sl => sl.day === todayName && sl.period === period);
+          const lesson = scheduleLessonsRef.current.find(sl => sl.day === todayName && sl.period === period);
           const zoomNumber = lesson?.zoom_number || null;
 
           if (zoomNumber) {
             zoomFiredPeriodsRef.current.add(periodKey);
-            if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
-            if (pingSoundEnabled) (() => {
-              try {
-                const ctx = new (window.AudioContext || window.webkitAudioContext)();
-                let stopped = false;
-                const playAlarm = () => {
-                  if (stopped) return;
-                  const tones = [880, 1100, 880, 1100];
-                  let t = ctx.currentTime;
-                  tones.forEach(freq => {
-                    const osc = ctx.createOscillator();
-                    const gain = ctx.createGain();
-                    osc.connect(gain); gain.connect(ctx.destination);
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(freq, t);
-                    gain.gain.setValueAtTime(0, t);
-                    gain.gain.linearRampToValueAtTime(0.35, t + 0.02);
-                    gain.gain.setValueAtTime(0.35, t + 0.18);
-                    gain.gain.linearRampToValueAtTime(0, t + 0.22);
-                    osc.start(t); osc.stop(t + 0.22);
-                    t += 0.25;
-                  });
-                  const loopId = setTimeout(playAlarm, tones.length * 250 + 600);
-                  ctx.__loopId = loopId;
-                };
-                playAlarm();
-                zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
-              } catch(e) { zoomPingAudioRef.current = null; }
-            })();
+            startAlarmSound(false);
             setZoomBanner({ period, zoomNumber, isTutorial: false, isMeeting: false, title: null });
-            launchZoomPing(zoomNumber, false, colorTheme);
+            launchZoomPing(zoomNumber, false, colorThemeRef.current);
           }
           break;
         }
       }
 
       // ── Loop 2: Tutorial / Meeting pings (time-based) ────────────────────
-      // tutorials map is keyed dateStr-HH:MM (UTC scheduled_time)
-      const nowHHMM = `${String(now.getUTCHours()).padStart(2,'0')}:${String(now.getUTCMinutes()).padStart(2,'0')}`;
-      for (const [key, event] of Object.entries(tutorials)) {
+      for (const [key, event] of Object.entries(tutorialsRef.current)) {
         if (!key.startsWith(todayStr)) continue;
         const eventTime = key.substring(todayStr.length + 1); // HH:MM
         const firedKey = `event-${key}`;
         if (zoomFiredPeriodsRef.current.has(firedKey)) continue;
 
-        // Fire within a 1-minute window: eventTime to eventTime+1
         const [eH, eM] = eventTime.split(':').map(Number);
         const eventUtcMins = eH * 60 + eM;
         const diff = eventUtcMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
           const zoomNumber = event.zoom_number || null;
-          if (!zoomNumber) continue; // no zoom = no ping
+          if (!zoomNumber) continue;
 
           zoomFiredPeriodsRef.current.add(firedKey);
-          if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} }
-          if (pingSoundEnabled) (() => {
-            try {
-              const ctx = new (window.AudioContext || window.webkitAudioContext)();
-              let stopped = false;
-              const playAlarm = () => {
-                if (stopped) return;
-                // Meetings get a slightly different tone pattern (lower, 2 notes)
-                const tones = event.isMeeting ? [660, 880] : [880, 1100, 880, 1100];
-                let t = ctx.currentTime;
-                tones.forEach(freq => {
-                  const osc = ctx.createOscillator();
-                  const gain = ctx.createGain();
-                  osc.connect(gain); gain.connect(ctx.destination);
-                  osc.type = 'sine';
-                  osc.frequency.setValueAtTime(freq, t);
-                  gain.gain.setValueAtTime(0, t);
-                  gain.gain.linearRampToValueAtTime(0.35, t + 0.02);
-                  gain.gain.setValueAtTime(0.35, t + 0.18);
-                  gain.gain.linearRampToValueAtTime(0, t + 0.22);
-                  osc.start(t); osc.stop(t + 0.22);
-                  t += 0.25;
-                });
-                const loopId = setTimeout(playAlarm, tones.length * 250 + 600);
-                ctx.__loopId = loopId;
-              };
-              playAlarm();
-              zoomPingAudioRef.current = { stop: () => { stopped = true; clearTimeout(ctx.__loopId); ctx.close().catch(()=>{}); } };
-            } catch(e) { zoomPingAudioRef.current = null; }
-          })();
+          startAlarmSound(!!event.isMeeting);
           setZoomBanner({ zoomNumber, isTutorial: !event.isMeeting, isMeeting: !!event.isMeeting, title: event.title, scheduledTime: eventTime });
-          launchZoomPing(zoomNumber, !event.isMeeting, colorTheme);
+          launchZoomPing(zoomNumber, !event.isMeeting, colorThemeRef.current);
         }
       }
     };
     check();
     const interval = setInterval(check, 30000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, accountSetup.campus, scheduleLessons, tutorials, pingSoundEnabled, colorTheme]);
+  }, [isAuthenticated, accountSetup.campus]);
 
   // Feature 6: Auto-sync every 30 minutes while app is visible
   useEffect(() => {
@@ -9185,6 +9171,13 @@ const PlanAssist = () => {
                 <div className="rounded-t-2xl bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between flex-shrink-0 shadow-sm">
                   <h2 className="text-base font-bold text-gray-900">{currentAgenda.name}</h2>
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowAgendaChunkView(v => !v)}
+                      title="Toggle 15-minute chunk view"
+                      className={`p-1.5 rounded-lg transition-colors ${showAgendaChunkView ? 'bg-purple-100 text-purple-600' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
+                    >
+                      <Columns className="w-3.5 h-3.5" />
+                    </button>
                     <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-base font-bold transition-colors ${agendaCountdownFlash ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-gray-100 text-gray-700'}`}>
                       <Timer className="w-3.5 h-3.5" />{countdownStr}
                     </div>
@@ -9212,37 +9205,119 @@ const PlanAssist = () => {
                 {/* ── Body: left list + right card ── */}
                 <div className="flex flex-1 overflow-hidden rounded-b-2xl shadow-2xl" style={{ minHeight:0 }}>
 
-                  {/* Left: row tracker */}
+                  {/* Left: row tracker / chunk view */}
                   <div className="w-52 flex-shrink-0 bg-white border-r border-gray-100 overflow-y-auto">
-                    <div className="p-3">
-                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Rows</p>
-                      <div className="space-y-1">
-                        {rows.map((row, idx) => {
-                          const isCurrentRow = idx === agendaCurrentRow;
-                          const isPast = idx < agendaCurrentRow;
-                          const rTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
-                          const rColor = rTask ? getClassColor(rTask.class) : '#d1d5db';
-                          return (
-                            <div key={idx} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors ${
-                              isCurrentRow ? 'bg-purple-100 border border-purple-300' :
-                              isPast ? 'opacity-40' : 'hover:bg-gray-50'
-                            }`}>
-                              <div className="w-1 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: isPast ? '#d1d5db' : rColor }} />
-                              <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                                isCurrentRow ? 'bg-purple-600 text-white' : isPast ? 'bg-gray-300 text-white' : 'bg-gray-100 text-gray-500'
-                              }`}>{idx + 1}</span>
-                              <div className="flex-1 min-w-0">
-                                <p className={`text-xs font-medium truncate ${isCurrentRow ? 'text-purple-900' : 'text-gray-700'}`}>
-                                  {rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}
-                                </p>
-                                <p className="text-xs text-gray-400 truncate">{row.action || 'Work'} · {row.timeMins}m{row.zone ? ` · ${row.zone==='focus'?'🎯':row.zone==='semi'?'🤝':'👥'}` : ''}</p>
+                    {!showAgendaChunkView ? (
+                      <div className="p-3">
+                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Rows</p>
+                        <div className="space-y-1">
+                          {rows.map((row, idx) => {
+                            const isCurrentRow = idx === agendaCurrentRow;
+                            const isPast = idx < agendaCurrentRow;
+                            const rTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
+                            const rColor = rTask ? getClassColor(rTask.class) : '#d1d5db';
+                            return (
+                              <div key={idx} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg transition-colors ${
+                                isCurrentRow ? 'bg-purple-100 border border-purple-300' :
+                                isPast ? 'opacity-40' : 'hover:bg-gray-50'
+                              }`}>
+                                <div className="w-1 h-7 rounded-full flex-shrink-0" style={{ backgroundColor: isPast ? '#d1d5db' : rColor }} />
+                                <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                                  isCurrentRow ? 'bg-purple-600 text-white' : isPast ? 'bg-gray-300 text-white' : 'bg-gray-100 text-gray-500'
+                                }`}>{idx + 1}</span>
+                                <div className="flex-1 min-w-0">
+                                  <p className={`text-xs font-medium truncate ${isCurrentRow ? 'text-purple-900' : 'text-gray-700'}`}>
+                                    {rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}
+                                  </p>
+                                  <p className="text-xs text-gray-400 truncate">{row.action || 'Work'} · {row.timeMins}m{row.zone ? ` · ${row.zone==='focus'?'🎯':row.zone==='semi'?'🤝':'👥'}` : ''}</p>
+                                </div>
+                                {isPast && <Check className="w-3 h-3 text-green-500 flex-shrink-0" />}
                               </div>
-                              {isPast && <Check className="w-3 h-3 text-green-500 flex-shrink-0" />}
-                            </div>
-                          );
-                        })}
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      /* 15-min chunk view — each agenda row split into 15-min increments,
+                         last chunk = remainder (may be <15 min). Rows are proportionally
+                         sized: 15-min base = 24px, others scale accordingly. */
+                      <div className="overflow-y-auto h-full">
+                        <div className="px-2 pt-2 pb-1">
+                          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">15-Min Plan</p>
+                        </div>
+                        <div className="flex flex-col divide-y divide-gray-50">
+                          {(() => {
+                            const PX_PER_MIN = 1.6;
+                            const MIN_ROW_PX = 18;
+                            const allChunks = [];
+                            rows.forEach((row, rowIdx) => {
+                              const rTask = row.task || (row.taskId ? tasks.find(t => t.id === row.taskId) : null);
+                              const rColor = rTask ? getClassColor(rTask.class) : '#a855f7';
+                              const isPast = rowIdx < agendaCurrentRow;
+                              const isCurrentRow = rowIdx === agendaCurrentRow;
+                              let left = row.timeMins;
+                              let chunkIdx = 0;
+                              while (left > 0) {
+                                const c = Math.min(15, left);
+                                const isFirst = chunkIdx === 0;
+                                // Only the first chunk of the CURRENT row is "live"
+                                const isLive = isCurrentRow && chunkIdx === 0 && agendaRunning;
+                                // Progress within the current row: agendaElapsed vs row.timeMins
+                                const progressPct = isLive && row.timeMins > 0
+                                  ? Math.min(100, Math.round((Math.floor(agendaElapsed / 60) / row.timeMins) * 100))
+                                  : 0;
+                                allChunks.push({ rTask, rColor, chunkMins: c, isPast, isCurrentRow, isLive, progressPct, isFirst, rowAction: row.action, rowIdx });
+                                left -= c;
+                                chunkIdx++;
+                              }
+                            });
+                            return allChunks.map((chunk, ci) => {
+                              const rowPx = Math.max(MIN_ROW_PX, Math.round(chunk.chunkMins * PX_PER_MIN));
+                              return (
+                                <div
+                                  key={ci}
+                                  className={`relative flex items-start gap-1.5 px-2 overflow-hidden transition-colors
+                                    ${chunk.isLive ? 'bg-purple-50' : chunk.isPast ? 'bg-white' : 'bg-white hover:bg-gray-50'}`}
+                                  style={{ minHeight: `${rowPx}px`, opacity: chunk.isPast ? 0.38 : 1 }}
+                                >
+                                  {/* Live fill */}
+                                  {chunk.isLive && (
+                                    <div className="absolute left-0 top-0 bottom-0 pointer-events-none" style={{ width: `${chunk.progressPct}%`, backgroundColor: chunk.rColor, opacity: 0.18 }} />
+                                  )}
+                                  {/* Color stripe */}
+                                  <div className="w-0.5 flex-shrink-0 self-stretch rounded-full mt-1" style={{ backgroundColor: chunk.isPast ? '#d1d5db' : chunk.rColor }} />
+                                  {/* Content — title + action only on first chunk of each row */}
+                                  <div className="flex-1 min-w-0 pt-1 pb-0.5 relative z-10">
+                                    {chunk.isFirst && (
+                                      <>
+                                        {chunk.rTask ? (
+                                          chunk.rTask.url ? (
+                                            <a href={chunk.rTask.url} target="_blank" rel="noopener noreferrer"
+                                              className="text-xs font-semibold hover:underline leading-tight block truncate"
+                                              style={{ color: chunk.isPast ? '#9ca3af' : chunk.rColor }}>
+                                              {cleanTaskTitle(chunk.rTask)}
+                                            </a>
+                                          ) : (
+                                            <p className="text-xs font-semibold leading-tight truncate" style={{ color: chunk.isPast ? '#9ca3af' : chunk.rColor }}>
+                                              {cleanTaskTitle(chunk.rTask)}
+                                            </p>
+                                          )
+                                        ) : null}
+                                        <p className="text-gray-400 truncate leading-tight" style={{ fontSize: '9px' }}>{chunk.rowAction || 'Work'}</p>
+                                      </>
+                                    )}
+                                    <p className="text-gray-300 leading-tight" style={{ fontSize: '9px' }}>{chunk.chunkMins}m</p>
+                                  </div>
+                                  {/* Indicators */}
+                                  {chunk.isLive && <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse flex-shrink-0 self-center relative z-10 mt-0.5" />}
+                                  {chunk.isPast && chunk.isFirst && <Check className="w-3 h-3 text-green-400 flex-shrink-0 self-center relative z-10" />}
+                                </div>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Right: in-session card */}
@@ -9439,10 +9514,11 @@ const PlanAssist = () => {
           // Total available study minutes today
           const totalStudyMinsToday = availableStudyPeriods.reduce((s, p) => s + getCurrentPeriodRemainingMins(p), 0);
 
-          // ── MULTI-DAY STUDY SLOT GENERATOR ──────────────────────────────────
-          // Generates all study slots from now forward for a given number of future days
-          // Returns array of { dateStr, dayName, period, startMins (campus), capacityMins, isToday, isCurrent }
-          const generateFutureStudySlots = (daysAhead = 90) => {
+          // ── STUDY SLOT GENERATOR ─────────────────────────────────────────────
+          // Generates study period slots only. Outside School is handled separately
+          // by the scheduling algorithm as an unlimited overflow bucket.
+          // Returns array of { dateStr, dayName, period, startMins, capacityMins, isToday, isCurrent, isOutside:false }
+          const generateFutureStudySlots = (daysAhead = 120) => {
             const slots = [];
             for (let d = 0; d <= daysAhead; d++) {
               const dayMs = campusNowMs + d * 86400000;
@@ -9463,9 +9539,26 @@ const PlanAssist = () => {
                     ? Math.floor(Math.max(0, (startMins + PERIOD_DURATION_MINS - campusNowMinsSinceMidnight)) / 10) * 10
                     : PERIOD_DURATION_MINS;
                   if (capacityMins <= 0) continue;
-                  slots.push({ dateStr, dayName, period: p, startMins, capacityMins, isToday: d === 0, isCurrent });
+                  slots.push({ dateStr, dayName, period: p, startMins, capacityMins, isToday: d === 0, isCurrent, isOutside: false });
                 }
               }
+            }
+            return slots;
+          };
+
+          // ── OUTSIDE SCHOOL SLOT GENERATOR ────────────────────────────────────
+          // Returns one OS slot per weekday: unlimited capacity, placed after last period.
+          // 'unlimited' means the algorithm fills exactly what it needs — no cap.
+          const generateOsSlots = (daysAhead = 120) => {
+            const slots = [];
+            for (let d = 0; d <= daysAhead; d++) {
+              const dayMs = campusNowMs + d * 86400000;
+              const dayDate = new Date(dayMs);
+              const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][dayDate.getUTCDay()];
+              const dateStr = `${dayDate.getUTCFullYear()}-${String(dayDate.getUTCMonth()+1).padStart(2,'0')}-${String(dayDate.getUTCDate()).padStart(2,'0')}`;
+              if (dayName === 'Saturday' || dayName === 'Sunday') continue;
+              const lastPeriodEnd = periodCampusEndMins(pRangeEnd) || (20 * 60);
+              slots.push({ dateStr, dayName, period: 'outside', startMins: lastPeriodEnd + 30, capacityMins: Infinity, isToday: d === 0, isCurrent: false, isOutside: true });
             }
             return slots;
           };
@@ -9477,172 +9570,221 @@ const PlanAssist = () => {
             return task.dueDate instanceof Date ? task.dueDate.getTime() : new Date(task.dueDate).getTime();
           };
 
-          // Convert a dateStr + campus period number to a UTC timestamp for the END of that period
+          // Convert a dateStr + campus period number (or 'outside') to a UTC timestamp for the END of that period
           const slotEndUTCMs = (dateStr, period) => {
+            if (period === 'outside') {
+              // Outside School ends at midnight local campus time (end of day)
+              const [y, mo, d] = dateStr.split('-').map(Number);
+              const campusMidnightUTC = Date.UTC(y, mo - 1, d, 0, 0, 0) - campusOffsetHours * 3600000 + 86400000;
+              return campusMidnightUTC;
+            }
             const utc = ORG_PERIOD_TIMES_UTC[period];
             if (!utc) return null;
             const [y, mo, d] = dateStr.split('-').map(Number);
             return Date.UTC(y, mo - 1, d, utc.h, utc.m, 0) + PERIOD_DURATION_MINS * 60000;
           };
 
-          // ── SCHEDULING ALGORITHM ─────────────────────────────────────────
-          // Returns: { allSlots, todayAllocation, warnings }
-          // allSlots: array of study slots with { ...slot, tasks: [{taskId, taskObj, mins, startOffset}] }
-          // todayAllocation: [{task, minsToday, totalMins, warning}]
-          // warnings: [{taskId, type: 'impossible'|'tight'}]
+          // ── SCHEDULING ALGORITHM ─────────────────────────────────────────────
+          // Two-pass approach:
+          //   Pass 1: schedule into study period slots (greedy, deadline-ordered).
+          //   Pass 2: any remaining minutes that couldn't fit in study slots before
+          //           the deadline get distributed EVENLY across the Outside School
+          //           blocks available between now and the deadline.
+          //
+          // Outside School is unlimited — no cap per day. The algorithm divides
+          // the overflow evenly (≥30 min tasks spread across multiple OS blocks;
+          // <30 min tasks go entirely to the earliest OS block before deadline).
+          //
+          // Returns: { slotMap, todayAllocation, warnings, todaySlots,
+          //            todayOsSlot, allOsSlots }
           const runSchedulingAlgorithm = () => {
             const activeTasks = tasks
               .filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'))
               .sort((a, b) => {
+                // Primary sort: deadline ascending (most urgent first)
                 const da = getDeadlineMs(a), db = getDeadlineMs(b);
-                return da - db;
+                if (da !== db) return da - db;
+                // Secondary sort: urgency override (now < soon < later < ignore < unset)
+                // Only applies within same deadline — earlier target block = higher priority
+                const urgOrder = { now: 0, soon: 1, later: 2, ignore: 3 };
+                const ovA = urgencyOverridesRef.current[a.id]?.day === campusTodayStr ? urgOrder[urgencyOverridesRef.current[a.id]?.value] ?? 4 : 4;
+                const ovB = urgencyOverridesRef.current[b.id]?.day === campusTodayStr ? urgOrder[urgencyOverridesRef.current[b.id]?.value] ?? 4 : 4;
+                return ovA - ovB;
               });
 
-            if (activeTasks.length === 0) return { slotMap: {}, todayAllocation: [], warnings: [] };
+            if (activeTasks.length === 0) {
+              return { slotMap: {}, todayAllocation: [], warnings: [],
+                       todaySlots: [], todayOsSlot: null, allOsSlots: [] };
+            }
 
-            const allSlots = generateFutureStudySlots(120);
-            // Deep copy slots with mutable remaining capacity and task list
-            const slots = allSlots.map(s => ({ ...s, remaining: s.capacityMins, tasks: [] }));
+            // Build mutable study slots (finite capacity)
+            const studySlots = generateFutureStudySlots(120).map(s => ({ ...s, remaining: s.capacityMins, tasks: [] }));
+
+            // Build mutable OS slots (unlimited — we'll fill exactly what's needed)
+            const osSlotsList = generateOsSlots(120).map(s => ({ ...s, remaining: Infinity, tasks: [] }));
 
             const warnings = [];
-            const todayTaskMins = {}; // taskId → mins allocated today
+            const todayStudyMins = {}; // taskId → study-period mins today
+            const todayOsMins   = {}; // taskId → OS mins today
 
             for (const task of activeTasks) {
               const rawEst = task.userEstimate || task.estimatedTime || 20;
-              const acc = task.accumulatedTime || 0; // minutes already logged
+              const acc = task.accumulatedTime || 0;
               const remainingEst = rawEst - acc;
               if (remainingEst <= 0) {
-                // Already at or beyond estimate — schedule 5 min as a buffer, warn
                 warnings.push({ taskId: task.id, type: 'overrun', task });
               }
               const estMins = remainingEst > 0 ? remainingEst : 5;
               const deadlineMs = getDeadlineMs(task);
 
-              // Find slots that end before the deadline
-              const slotsBeforeDeadline = deadlineMs === Infinity
-                ? slots
-                : slots.filter(s => {
-                    const endMs = slotEndUTCMs(s.dateStr, s.period);
-                    return endMs !== null && endMs <= deadlineMs;
+              // Study slots before deadline
+              const studyBeforeDeadline = deadlineMs === Infinity
+                ? studySlots
+                : studySlots.filter(s => {
+                    const e = slotEndUTCMs(s.dateStr, s.period);
+                    return e !== null && e <= deadlineMs;
                   });
 
-              // Total available minutes before deadline (accounting for already-used capacity)
-              const totalAvailableMins = slotsBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
+              // OS slots before deadline
+              const osBeforeDeadline = deadlineMs === Infinity
+                ? osSlotsList
+                : osSlotsList.filter(s => {
+                    const e = slotEndUTCMs(s.dateStr, s.period);
+                    return e !== null && e <= deadlineMs;
+                  });
 
-              if (totalAvailableMins < estMins) {
-                // IMPOSSIBLE: not enough time — fill all remaining slots for today + outside school warning
-                warnings.push({ taskId: task.id, type: 'impossible', task });
-                let minsLeft = estMins;
-                for (const slot of slotsBeforeDeadline) {
-                  if (slot.remaining <= 0 || minsLeft <= 0) continue;
-                  const alloc = Math.min(slot.remaining, minsLeft);
-                  slot.tasks.push({ taskId: task.id, task, mins: alloc });
-                  slot.remaining -= alloc;
-                  minsLeft -= alloc;
-                  if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
-                }
-              } else {
-                // POSSIBLE: check excess
-                const excessMins = totalAvailableMins - estMins;
+              // ── Pass 1: fill study slots ──────────────────────────────────
+              let minsLeft = estMins;
+              const totalStudyAvail = studyBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
 
+              if (totalStudyAvail >= minsLeft) {
+                // Enough study time — check excess to decide fill strategy
+                const excessMins = totalStudyAvail - minsLeft;
                 if (excessMins < 120) {
-                  // Fill from the start, leaving last <120 min for next tasks
-                  let minsLeft = estMins;
-                  for (const slot of slotsBeforeDeadline) {
+                  // Tight — fill from start
+                  for (const slot of studyBeforeDeadline) {
                     if (slot.remaining <= 0 || minsLeft <= 0) break;
                     const alloc = Math.min(slot.remaining, minsLeft);
                     slot.tasks.push({ taskId: task.id, task, mins: alloc });
                     slot.remaining -= alloc;
                     minsLeft -= alloc;
-                    if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                    if (slot.isToday) todayStudyMins[task.id] = (todayStudyMins[task.id] || 0) + alloc;
                   }
-                  // Tight warning: <120 min left before deadline after completion
-                  const remainingAfter = slotsBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
-                  if (remainingAfter < 120) {
-                    warnings.push({ taskId: task.id, type: 'tight', task });
-                  }
+                  const remainingAfter = studyBeforeDeadline.reduce((s, sl) => s + sl.remaining, 0);
+                  if (remainingAfter < 120) warnings.push({ taskId: task.id, type: 'tight', task });
                 } else {
-                  // Spread with middle-study gap
+                  // Plenty of time — spread with mid-gap
                   const halfExcess = Math.floor(excessMins / 2);
-                  // Count days with ≥1 study slot before deadline that still have capacity
-                  const daysWithStudy = [...new Set(slotsBeforeDeadline.filter(s => s.remaining > 0).map(s => s.dateStr))];
-                  const numDays = daysWithStudy.length;
-                  const gapPerDay = numDays > 0 ? Math.floor(halfExcess / numDays) : 0;
-
+                  const days = [...new Set(studyBeforeDeadline.filter(s => s.remaining > 0).map(s => s.dateStr))];
+                  const gapPerDay = days.length > 0 ? Math.floor(halfExcess / days.length) : 0;
                   if (gapPerDay < 30) {
-                    // Gap too small — fall back to fill-from-start
-                    let minsLeft = estMins;
-                    for (const slot of slotsBeforeDeadline) {
+                    for (const slot of studyBeforeDeadline) {
                       if (slot.remaining <= 0 || minsLeft <= 0) break;
                       const alloc = Math.min(slot.remaining, minsLeft);
                       slot.tasks.push({ taskId: task.id, task, mins: alloc });
                       slot.remaining -= alloc;
                       minsLeft -= alloc;
-                      if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                      if (slot.isToday) todayStudyMins[task.id] = (todayStudyMins[task.id] || 0) + alloc;
                     }
                   } else {
-                    // Find the "middle study" slot index (round up)
-                    const validSlots = slotsBeforeDeadline.filter(s => s.remaining > 0);
-                    const midIdx = Math.ceil(validSlots.length / 2) - 1; // 0-based, rounded up
-                    // gapPerDay mins at midpoint will be reserved for following tasks
-                    // Fill before mid, skip gapPerDay at mid, continue filling after mid
-                    let minsLeft = estMins;
+                    const validSlots = studyBeforeDeadline.filter(s => s.remaining > 0);
+                    const midIdx = Math.ceil(validSlots.length / 2) - 1;
                     for (let si = 0; si < validSlots.length; si++) {
                       if (minsLeft <= 0) break;
                       const slot = validSlots[si];
                       if (slot.remaining <= 0) continue;
-                      if (si === midIdx) {
-                        // Reserve gapPerDay for later tasks; only use what's above the gap
-                        const usable = Math.max(0, slot.remaining - gapPerDay);
-                        if (usable > 0) {
-                          const alloc = Math.min(usable, minsLeft);
-                          slot.tasks.push({ taskId: task.id, task, mins: alloc });
-                          slot.remaining -= alloc;
-                          minsLeft -= alloc;
-                          if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
-                        }
-                      } else {
-                        const alloc = Math.min(slot.remaining, minsLeft);
+                      const usable = si === midIdx ? Math.max(0, slot.remaining - gapPerDay) : slot.remaining;
+                      if (usable > 0) {
+                        const alloc = Math.min(usable, minsLeft);
                         slot.tasks.push({ taskId: task.id, task, mins: alloc });
                         slot.remaining -= alloc;
                         minsLeft -= alloc;
-                        if (slot.isToday) todayTaskMins[task.id] = (todayTaskMins[task.id] || 0) + alloc;
+                        if (slot.isToday) todayStudyMins[task.id] = (todayStudyMins[task.id] || 0) + alloc;
                       }
                     }
-                    const remainingAfter = slotsBeforeDeadline.reduce((sum, s) => sum + s.remaining, 0);
+                    const remainingAfter = studyBeforeDeadline.reduce((s, sl) => s + sl.remaining, 0);
                     if (remainingAfter < 120) warnings.push({ taskId: task.id, type: 'tight', task });
                   }
+                }
+                minsLeft = 0; // fully scheduled in study slots
+              } else {
+                // Not enough study time alone — fill what we can in study slots
+                for (const slot of studyBeforeDeadline) {
+                  if (slot.remaining <= 0 || minsLeft <= 0) break;
+                  const alloc = Math.min(slot.remaining, minsLeft);
+                  slot.tasks.push({ taskId: task.id, task, mins: alloc });
+                  slot.remaining -= alloc;
+                  minsLeft -= alloc;
+                  if (slot.isToday) todayStudyMins[task.id] = (todayStudyMins[task.id] || 0) + alloc;
+                }
+                // minsLeft > 0 — needs OS overflow
+                warnings.push({ taskId: task.id, type: 'impossible', task });
+              }
+
+              // ── Pass 2: OS overflow ───────────────────────────────────────
+              if (minsLeft > 0 && osBeforeDeadline.length > 0) {
+                // Spread evenly across OS blocks if task is ≥30 min and multiple days available
+                if (minsLeft >= 30 && osBeforeDeadline.length > 1) {
+                  const perBlock = Math.ceil(minsLeft / osBeforeDeadline.length);
+                  for (const osSlot of osBeforeDeadline) {
+                    if (minsLeft <= 0) break;
+                    const alloc = Math.min(perBlock, minsLeft);
+                    osSlot.tasks.push({ taskId: task.id, task, mins: alloc });
+                    // OS slots have infinite remaining — no need to subtract
+                    minsLeft -= alloc;
+                    if (osSlot.isToday) todayOsMins[task.id] = (todayOsMins[task.id] || 0) + alloc;
+                  }
+                } else {
+                  // <30 min or only one OS block — put it all in the first available OS block
+                  const osSlot = osBeforeDeadline[0];
+                  osSlot.tasks.push({ taskId: task.id, task, mins: minsLeft });
+                  if (osSlot.isToday) todayOsMins[task.id] = (todayOsMins[task.id] || 0) + minsLeft;
+                  minsLeft = 0;
                 }
               }
             }
 
-            // Build today's priority list from today's allocations
+            // Combine today's study + OS mins for todayAllocation
+            const todayTaskMinsAll = {};
+            for (const [id, m] of Object.entries(todayStudyMins)) todayTaskMinsAll[id] = (todayTaskMinsAll[id] || 0) + m;
+            for (const [id, m] of Object.entries(todayOsMins))    todayTaskMinsAll[id] = (todayTaskMinsAll[id] || 0) + m;
+
             const todayAllocation = activeTasks
-              .filter(t => todayTaskMins[t.id] > 0)
+              .filter(t => todayTaskMinsAll[t.id] > 0)
               .map(t => ({
                 task: t,
-                minsToday: todayTaskMins[t.id],
+                minsToday: todayTaskMinsAll[t.id],
                 totalMins: t.userEstimate || t.estimatedTime || 20,
                 warning: warnings.find(w => w.taskId === t.id)?.type || null,
               }));
 
-            // Build a slot map keyed by `${dateStr}-${period}` for today's slots only
+            // Study slot map (today only, keyed by dateStr-period)
             const slotMap = {};
-            for (const slot of slots) {
+            for (const slot of studySlots) {
               if (slot.isToday && slot.tasks.length > 0) {
                 slotMap[`${slot.dateStr}-${slot.period}`] = slot;
               }
             }
 
-            return { slotMap, todayAllocation, warnings, todaySlots: slots.filter(s => s.isToday) };
+            // Today's OS slot (always present for today, tasks may be empty)
+            const todayOsSlot = osSlotsList.find(s => s.isToday) || null;
+
+            // All OS slots that have tasks (for future reference)
+            const allOsSlots = osSlotsList.filter(s => s.tasks.length > 0);
+
+            return {
+              slotMap, todayAllocation, warnings,
+              todaySlots: studySlots.filter(s => s.isToday),
+              todayOsSlot, allOsSlots
+            };
           };
 
-          const { slotMap, todayAllocation, warnings, todaySlots } = runSchedulingAlgorithm();
+          const { slotMap, todayAllocation, warnings, todaySlots, todayOsSlot, allOsSlots } = runSchedulingAlgorithm();
 
-          // Today's study slots for tabs (in period order)
-          const todayStudySlotsForTabs = todayStudyPeriods.map(p => {
-            const key = `${campusTodayStr}-${p}`;
-            return slotMap[key] || { period: p, tasks: [], remaining: PERIOD_DURATION_MINS, isToday: true, dateStr: campusTodayStr };
+          // Today's study slots for tabs (only current/upcoming — past periods are excluded)
+          const todayStudySlotsForTabs = availableStudyPeriods.map(p => {
+            const key = `${campusTodayStr}-${p.period}`;
+            return slotMap[key] || { period: p.period, tasks: [], remaining: PERIOD_DURATION_MINS, isToday: true, dateStr: campusTodayStr };
           });
 
           // Action defaulting logic — uses remaining time (estimate minus accumulated)
@@ -9722,15 +9864,84 @@ const PlanAssist = () => {
           // Active tasks list (same as tasks page)
           const organizerTaskList = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'));
 
-          // Tabs: study periods + Outside School
-          // Outside School: only tasks the algorithm genuinely cannot fit before deadline
-          // (impossible warning). Tasks merely deferred to future study days are NOT shown here.
-          const outsideSchoolTasks = warnings
+          // Urgency override helpers (frontend-only, expires daily)
+          const todayDateStr = campusTodayStr;
+          const getUrgencyOverride = (taskId) => {
+            const ov = urgencyOverridesRef.current[taskId];
+            if (!ov) return null;
+            if (ov.day !== todayDateStr) { delete urgencyOverridesRef.current[taskId]; return null; }
+            return ov.value;
+          };
+
+          // Ranked blocks for today (study periods in time order, OS last)
+          // Used both by getAutoUrgency and by the override rearrangement.
+          const todayRankedBlocks = (() => {
+            const blocks = [];
+            for (const sp of availableStudyPeriods) {
+              blocks.push({ period: sp.period, isOutside: false, dateStr: campusTodayStr });
+            }
+            blocks.push({ period: 'outside', isOutside: true, dateStr: campusTodayStr });
+            return blocks; // index 0 = Now, 1 = Soon, 2 = Later, 3+ = Later
+          })();
+
+          // Map urgency label → target block index
+          const urgencyToBlockIdx = { now: 0, soon: 1, later: 2, ignore: null };
+
+          // Apply a user urgency override: re-insert task at front of target block.
+          // Validates that moving the task won't cause any OTHER task to miss its deadline.
+          // If the move is safe, commits to urgencyOverridesRef and re-renders.
+          const applyUrgencyOverride = (taskId, newValue) => {
+            // Store the raw preference — the algorithm will apply it on next render
+            urgencyOverridesRef.current[taskId] = { value: newValue, day: todayDateStr };
+            setUrgencyOverridesTick(t => t + 1);
+          };
+
+          // Compute urgency label for a task based on which block it falls in
+          // Block order: [current study, next study/OS, block after, ...rest]
+          const getAutoUrgency = (taskId) => {
+            // Rank today's available blocks in order
+            const rankedBlocks = [];
+            for (const sp of availableStudyPeriods) {
+              const slot = slotMap[`${campusTodayStr}-${sp.period}`];
+              if (slot?.tasks?.length > 0) rankedBlocks.push({ ...slot, isOutsideBlock: false });
+            }
+            if (todayOsSlot?.tasks?.length > 0) rankedBlocks.push({ ...todayOsSlot, isOutsideBlock: true });
+
+            const myBlockIdx = rankedBlocks.findIndex(b =>
+              b.isOutsideBlock
+                ? b.tasks?.some(st => st.task?.id === taskId)
+                : b.tasks?.some(st => st.taskId === taskId || st.task?.id === taskId)
+            );
+            if (myBlockIdx === 0) return 'now';
+            if (myBlockIdx === 1) return 'soon';
+            if (myBlockIdx >= 2) return 'later';
+            return 'ignore'; // -1 means not scheduled today
+          };
+
+          // Outside School tasks: tasks actually allocated to today's OS slot by the algorithm,
+          // plus any impossible/overrun warning tasks not covered by OS allocation.
+          const outsideSchoolTaskMap = new Map();
+          if (todayOsSlot) {
+            for (const st of todayOsSlot.tasks) {
+              outsideSchoolTaskMap.set(st.task.id, {
+                task: st.task,
+                minsToday: st.mins,
+                warning: warnings.find(w => w.taskId === st.task.id)?.type || null,
+              });
+            }
+          }
+          warnings
             .filter(w => w.type === 'impossible' || w.type === 'overrun')
-            .map(w => {
-              const alloc = todayAllocation.find(a => a.task.id === w.taskId);
-              return { task: w.task, minsToday: alloc?.minsToday || 0, warning: w.type };
+            .forEach(w => {
+              if (!outsideSchoolTaskMap.has(w.taskId)) {
+                const alloc = todayAllocation.find(a => a.task.id === w.taskId);
+                outsideSchoolTaskMap.set(w.taskId, { task: w.task, minsToday: alloc?.minsToday || 0, warning: w.type });
+              } else if (w.type === 'impossible') {
+                const existing = outsideSchoolTaskMap.get(w.taskId);
+                if (existing.warning !== 'impossible') outsideSchoolTaskMap.set(w.taskId, { ...existing, warning: 'impossible' });
+              }
             });
+          const outsideSchoolTasks = Array.from(outsideSchoolTaskMap.values());
           const tabs = [
             ...todayStudySlotsForTabs.map((slot, i) => ({ type: 'study', slot, period: slot.period, idx: i })),
             { type: 'outside', idx: todayStudySlotsForTabs.length },
@@ -9755,7 +9966,7 @@ const PlanAssist = () => {
                   </p>
                 </div>
                 <button
-                  onClick={() => { setGenerateAgendasMode('current'); setShowGenerateAgendasModal(true); }}
+                  onClick={() => { setGenerateAgendasMode('current'); setExportEditedSlots(null); setShowGenerateAgendasModal(true); }}
                   className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-semibold text-sm transition-all shadow-sm"
                 >
                   <LayoutList className="w-4 h-4" />
@@ -9777,11 +9988,13 @@ const PlanAssist = () => {
                     )}
                     {organizerTaskList.map(task => {
                       const cc = getClassColor(task);
-                      const cn = extractClassName(task);
                       const estMin = task.userEstimate || task.estimatedTime || 20;
                       const dueDate = task.dueDate ? new Date(task.dueDate) : null;
-                      const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+                      const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
                       const todayMins = (todayAllocation.find(a => a.task.id === task.id)?.minsToday) || 0;
+                      const autoUrg = getAutoUrgency(task.id);
+                      const urg = getUrgencyOverride(task.id) || autoUrg;
+                      const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
                       return (
                         <div
                           key={task.id}
@@ -9802,9 +10015,22 @@ const PlanAssist = () => {
                             ) : (
                               <p className="text-xs font-semibold leading-tight line-clamp-2" style={{ color: cc }}>{cleanTaskTitle(task)}</p>
                             )}
-                            <div className="flex items-center justify-between mt-0.5">
-                              <span className="text-gray-400" style={{ fontSize: '9px' }}>{dueStr}</span>
-                              <span className="text-gray-400" style={{ fontSize: '9px' }}>{fmtMins(estMin)}</span>
+                            <div className="flex items-center justify-between mt-1">
+                              <span className="text-gray-400" style={{ fontSize: '9px' }}>
+                                {dueStr ? `${dueStr} · ${fmtMins(estMin)}` : fmtMins(estMin)}
+                              </span>
+                              <select
+                                value={urg}
+                                onClick={e => e.stopPropagation()}
+                                onChange={e => { e.stopPropagation(); applyUrgencyOverride(task.id, e.target.value); }}
+                                className={`text-xs font-semibold px-1 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]}`}
+                                style={{ fontSize: '9px', outline: 'none' }}
+                              >
+                                <option value="now">Now</option>
+                                <option value="soon">Soon</option>
+                                <option value="later">Later</option>
+                                <option value="ignore">Ignore</option>
+                              </select>
                             </div>
                             {todayMins > 0 && (
                               <div className="mt-1 h-1 bg-gray-100 rounded-full overflow-hidden">
@@ -9834,6 +10060,11 @@ const PlanAssist = () => {
                     {todayAllocation.map(({ task, minsToday, totalMins, warning }, idx) => {
                       const cc = getClassColor(task);
                       const estMin = task.userEstimate || task.estimatedTime || 20;
+                      const dueDate = task.dueDate ? new Date(task.dueDate) : null;
+                      const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                      const autoUrg = getAutoUrgency(task.id);
+                      const urg = getUrgencyOverride(task.id) || autoUrg;
+                      const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
                       return (
                         <div key={task.id} className="rounded-lg border overflow-hidden"
                           style={{ borderColor: warning === 'impossible' ? '#fca5a5' : warning === 'tight' ? '#fcd34d' : '#e5e7eb' }}>
@@ -9846,6 +10077,22 @@ const PlanAssist = () => {
                               <p className="text-xs font-semibold leading-tight line-clamp-2 flex-1" style={{ color: cc }}>{cleanTaskTitle(task)}</p>
                             </div>
                             <div className="flex items-center justify-between mt-1">
+                              <span className="text-gray-400" style={{ fontSize: '9px' }}>
+                                {dueStr ? `${dueStr} · ${fmtMins(estMin)}` : fmtMins(estMin)}
+                              </span>
+                              <select
+                                value={urg}
+                                onChange={e => applyUrgencyOverride(task.id, e.target.value)}
+                                className={`text-xs font-semibold px-1 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]}`}
+                                style={{ fontSize: '9px', outline: 'none' }}
+                              >
+                                <option value="now">Now</option>
+                                <option value="soon">Soon</option>
+                                <option value="later">Later</option>
+                                <option value="ignore">Ignore</option>
+                              </select>
+                            </div>
+                            <div className="flex items-center justify-between mt-0.5">
                               <span className="text-gray-500 font-semibold" style={{ fontSize: '10px' }}>Today: {fmtMins(minsToday)}</span>
                               <span className="text-gray-400" style={{ fontSize: '9px' }}>of {fmtMins(estMin)}</span>
                             </div>
@@ -9877,29 +10124,38 @@ const PlanAssist = () => {
                 {/* ── RIGHT: Study viewer ──────────────────────────────────── */}
                 <div className="flex-1 flex flex-col bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden min-w-0">
                   {/* Tab bar */}
-                  <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0">
-                    {tabs.map((tab, ti) => {
-                      const isSelected = organizerSelectedStudy === ti;
-                      const hasContent = tab.type === 'study'
-                        ? (tab.slot.tasks?.length > 0)
-                        : (outsideSchoolTasks.length > 0);
-                      return (
-                        <button
-                          key={ti}
-                          onClick={() => setOrganizerSelectedStudy(ti)}
-                          className={`flex-shrink-0 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
-                            isSelected
-                              ? 'border-purple-600 text-purple-700 bg-purple-50'
-                              : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
-                          }`}
-                        >
-                          {tab.type === 'study' ? `Period ${tab.period}` : 'Outside School'}
-                          {hasContent && (
-                            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-purple-500' : 'bg-amber-400'}`} />
-                          )}
-                        </button>
-                      );
-                    })}
+                  <div className="flex border-b border-gray-100 overflow-x-auto flex-shrink-0 items-center">
+                    <div className="flex flex-1 overflow-x-auto">
+                      {tabs.map((tab, ti) => {
+                        const isSelected = organizerSelectedStudy === ti;
+                        const hasContent = tab.type === 'study'
+                          ? (tab.slot.tasks?.length > 0)
+                          : (outsideSchoolTasks.length > 0);
+                        return (
+                          <button
+                            key={ti}
+                            onClick={() => setOrganizerSelectedStudy(ti)}
+                            className={`flex-shrink-0 px-3 py-2.5 text-xs font-semibold border-b-2 transition-colors whitespace-nowrap flex items-center gap-1.5 ${
+                              isSelected
+                                ? 'border-purple-600 text-purple-700 bg-purple-50'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                            }`}
+                          >
+                            {tab.type === 'study' ? `Period ${tab.period}` : 'Outside School'}
+                            {hasContent && (
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isSelected ? 'bg-purple-500' : 'bg-amber-400'}`} />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => setShowDayTimelineModal(true)}
+                      title="View 15-minute day breakdown"
+                      className="flex-shrink-0 mx-2 p-1.5 text-gray-400 hover:text-purple-600 hover:bg-purple-50 rounded-lg transition-colors"
+                    >
+                      <Grid className="w-4 h-4" />
+                    </button>
                   </div>
 
                   {/* Tab content */}
@@ -9997,6 +10253,24 @@ const PlanAssist = () => {
                                           <AlertTriangle className="w-3 h-3" />Beyond estimate
                                         </span>
                                       )}
+                                      {(() => {
+                                        const autoUrg = getAutoUrgency(st.task.id);
+                                        const urg = getUrgencyOverride(st.task.id) || autoUrg;
+                                        const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
+                                        return (
+                                          <select
+                                            value={urg}
+                                            onChange={e => applyUrgencyOverride(st.task.id, e.target.value)}
+                                            className={`text-xs font-semibold px-1.5 py-0.5 rounded border-0 cursor-pointer ml-auto ${urgColors[urg]}`}
+                                            style={{ outline: 'none' }}
+                                          >
+                                            <option value="now">Now</option>
+                                            <option value="soon">Soon</option>
+                                            <option value="later">Later</option>
+                                            <option value="ignore">Ignore</option>
+                                          </select>
+                                        );
+                                      })()}
                                     </div>
                                     {/* Progress bar if task has accumulated time */}
                                     {(st.task.accumulatedTime || 0) > 0 && (
@@ -10120,18 +10394,25 @@ const PlanAssist = () => {
 
               {/* ── Generate Agendas Modal ────────────────────────────────── */}
               {showGenerateAgendasModal && (() => {
-                // Build slots for export
-                const studySlotsForExport = todayStudySlotsForTabs.filter(s => s.tasks?.length > 0);
-                const outsideSlotsForExport = outsideSchoolTasks.length > 0
-                  ? [{ isOutside: true, dateStr: campusTodayStr, tasks: outsideSchoolTasks.map(a => ({ taskId: a.task.id, task: a.task, mins: a.task.userEstimate || a.task.estimatedTime || 20 })) }]
+                // Build default slots for export from the algorithm's output
+                const computedStudySlots = todayStudySlotsForTabs.filter(s => s.tasks?.length > 0).map(s => ({ ...s, isOutside: false }));
+                const computedOsSlots = outsideSchoolTasks.length > 0
+                  ? [{ isOutside: true, dateStr: campusTodayStr, tasks: outsideSchoolTasks.map(a => ({
+                      taskId: a.task.id, task: a.task,
+                      mins: a.minsToday > 0 ? a.minsToday : (a.task.userEstimate || a.task.estimatedTime || 20)
+                    })) }]
                   : [];
-                const allSlotsForExport = [
-                  ...studySlotsForExport.map(s => ({ ...s, isOutside: false })),
-                  ...outsideSlotsForExport,
-                ];
+                const computedAllSlots = [...computedStudySlots, ...computedOsSlots];
+                // Use overridden slots if user has edited any, otherwise use computed defaults.
+                // Reset overrides when modal is freshly opened (exportEditedSlots is null).
+                const allSlotsForExport = exportEditedSlots ?? computedAllSlots;
+                const setAllSlotsForExport = (updater) => setExportEditedSlots(prev => {
+                  const base = prev ?? computedAllSlots;
+                  return typeof updater === 'function' ? updater(base) : updater;
+                });
                 const currentSlotForExport = selectedTab?.type === 'study'
-                  ? (selectedSlot && selectedSlot.tasks?.length > 0 ? [{ ...selectedSlot, isOutside: false }] : [])
-                  : outsideSlotsForExport;
+                  ? allSlotsForExport.filter(s => !s.isOutside && s.period === selectedSlot?.period && s.tasks?.length > 0)
+                  : allSlotsForExport.filter(s => s.isOutside && s.tasks?.length > 0);
 
                 // Check for existing collision titles
                 const wouldReplace = allSlotsForExport
@@ -10175,15 +10456,39 @@ const PlanAssist = () => {
                         </button>
                       </div>
 
-                      <div className="mb-4 bg-gray-50 rounded-xl p-3 space-y-1 text-xs text-gray-600">
+                      <div className="mb-4 bg-gray-50 rounded-xl p-3 space-y-1.5 text-xs text-gray-600">
                         <p className="font-semibold text-gray-700 mb-1">Agenda names preview:</p>
-                        {(generateAgendasMode === 'all' ? allSlotsForExport : currentSlotForExport).map((slot, i) => (
-                          <p key={i} className="truncate">
-                            {slot.isOutside
-                              ? agendaTitleOutside(slot.tasks.length, slot.dateStr)
-                              : agendaTitle(slot.period, slot.tasks.length, slot.dateStr)}
-                          </p>
-                        ))}
+                        {(generateAgendasMode === 'all' ? allSlotsForExport : currentSlotForExport).map((slot, si) => {
+                          const title = slot.isOutside
+                            ? agendaTitleOutside(slot.tasks.length, slot.dateStr)
+                            : agendaTitle(slot.period, slot.tasks.length, slot.dateStr);
+                          return (
+                            <div key={si} className="flex items-center gap-2">
+                              <p className="flex-1 truncate">{title}</p>
+                              <button
+                                onClick={() => {
+                                  setAgendaEditRows((slot.tasks || []).map(t => ({
+                                    taskId: t.taskId || t.task?.id,
+                                    task: t.task,
+                                    action: t.action || getDefaultAction(t.task, t.mins, t.task?.userEstimate || t.task?.estimatedTime || 20),
+                                    timeMins: t.mins || t.task?.userEstimate || t.task?.estimatedTime || 20,
+                                  })));
+                                  setShowAgendaEditModal({
+                                    slot,
+                                    onSave: (updatedSlot) => setAllSlotsForExport(prev => prev.map((s) => {
+                                      const sTitle = s.isOutside ? agendaTitleOutside(s.tasks.length, s.dateStr) : agendaTitle(s.period, s.tasks.length, s.dateStr);
+                                      return sTitle === title ? updatedSlot : s;
+                                    }))
+                                  });
+                                }}
+                                className="flex-shrink-0 text-gray-400 hover:text-purple-600 p-0.5 rounded transition-colors"
+                                title="Edit this agenda"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {wouldReplace.length > 0 && (
@@ -10212,6 +10517,275 @@ const PlanAssist = () => {
                           ) : (
                             <><LayoutList className="w-4 h-4" />Export Agendas</>
                           )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Day Timeline Modal (Item 3) ───────────────────────────── */}
+              {showDayTimelineModal && (() => {
+                const fmtTimeLocal = (minsSinceMidnight) => {
+                  const h = Math.floor(((minsSinceMidnight % 1440) + 1440) % 1440 / 60);
+                  const m = ((minsSinceMidnight % 60) + 60) % 60;
+                  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+                };
+
+                // Build block list: available study periods then OS (if needed)
+                const timelineBlocks = [];
+                for (const sp of availableStudyPeriods) {
+                  const slot = slotMap[`${campusTodayStr}-${sp.period}`] || { period: sp.period, tasks: [], capacityMins: PERIOD_DURATION_MINS };
+                  timelineBlocks.push({ label: `Period ${sp.period}`, startMins: sp.startMins, endMins: sp.endMins, slot, isOutside: false, status: sp.status });
+                }
+                if (todayOsSlot?.tasks?.length > 0) {
+                  const lastEnd = availableStudyPeriods.length > 0
+                    ? availableStudyPeriods[availableStudyPeriods.length - 1].endMins
+                    : campusNowMinsSinceMidnight + 30;
+                  const osStart = lastEnd + 30;
+                  const osTotalMins = todayOsSlot.tasks.reduce((s, t) => s + t.mins, 0);
+                  timelineBlocks.push({
+                    label: 'Outside School',
+                    startMins: osStart,
+                    endMins: osStart + osTotalMins,
+                    slot: todayOsSlot,
+                    isOutside: true,
+                    status: 'upcoming'
+                  });
+                }
+
+                // Slice a task allocation into 15-min rows (last row = remainder, may be < or > 15)
+                // Returns array of { chunkMins, chunkStart (relative to block start), task, color, url, isFirstChunk }
+                const sliceInto15 = (taskMins, task, offsetInBlock) => {
+                  const chunks = [];
+                  let cursor = offsetInBlock;
+                  let left = taskMins;
+                  let isFirst = true;
+                  while (left > 0) {
+                    const c = Math.min(15, left);
+                    chunks.push({ chunkMins: c, chunkStart: cursor, task, color: getClassColor(task), url: task?.url, isFirstChunk: isFirst, isEmpty: false });
+                    cursor += c;
+                    left -= c;
+                    isFirst = false;
+                  }
+                  return chunks;
+                };
+
+                // Build all chunks for a block
+                const buildBlockChunks = (slot, blockStartMins) => {
+                  if (!slot?.tasks?.length) {
+                    const capMins = slot?.capacityMins === Infinity ? 60 : (slot?.capacityMins || 60);
+                    return [{ chunkMins: capMins, chunkStart: 0, task: null, color: '#e5e7eb', url: null, isFirstChunk: true, isEmpty: true, label: 'Free time' }];
+                  }
+                  const allChunks = [];
+                  let offset = 0;
+                  for (const st of slot.tasks) {
+                    const taskChunks = sliceInto15(st.mins, st.task, offset);
+                    allChunks.push(...taskChunks);
+                    offset += st.mins;
+                  }
+                  // Free time remainder
+                  const totalUsed = slot.tasks.reduce((s, t) => s + t.mins, 0);
+                  const cap = slot.capacityMins === Infinity ? 0 : (slot.capacityMins || 60);
+                  if (cap > totalUsed) {
+                    allChunks.push({ chunkMins: cap - totalUsed, chunkStart: offset, task: null, color: '#e5e7eb', url: null, isFirstChunk: true, isEmpty: true, label: 'Free time' });
+                  }
+                  return allChunks;
+                };
+
+                // 15px = 1 min base, scaled so 15-min chunk = 24px, proportional otherwise
+                const PX_PER_MIN = 1.6;
+                const MIN_ROW_PX = 20;
+
+                return (
+                  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={() => setShowDayTimelineModal(false)}>
+                    <div className="bg-white rounded-2xl shadow-2xl flex flex-col" style={{ width: '96vw', maxWidth: '1100px', maxHeight: 'calc(100vh - 64px)' }} onClick={e => e.stopPropagation()}>
+
+                      {/* Header */}
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+                        <div>
+                          <h3 className="text-lg font-bold text-gray-900">Today's 15-Minute Plan</h3>
+                          <p className="text-sm text-gray-500 mt-0.5">
+                            {availableStudyPeriods.length} period{availableStudyPeriods.length !== 1 ? 's' : ''} remaining
+                            {totalStudyMinsToday > 0 ? ` · ${fmtMins(totalStudyMinsToday)} study time` : ''}
+                          </p>
+                        </div>
+                        <button onClick={() => setShowDayTimelineModal(false)} className="text-gray-400 hover:text-gray-600 p-1.5 hover:bg-gray-100 rounded-lg"><X className="w-5 h-5" /></button>
+                      </div>
+
+                      {/* Scrollable columns */}
+                      <div className="flex-1 overflow-auto p-5">
+                        {timelineBlocks.length === 0 ? (
+                          <div className="text-center py-16">
+                            <Check className="w-12 h-12 text-green-400 mx-auto mb-3" />
+                            <p className="font-semibold text-gray-700">No remaining study periods today</p>
+                            <p className="text-sm text-gray-400 mt-1">All periods have passed or nothing is scheduled.</p>
+                          </div>
+                        ) : (
+                          <div className="flex gap-4 items-start">
+                            {timelineBlocks.map((block, bi) => {
+                              const chunks = buildBlockChunks(block.slot, block.startMins);
+                              const now = campusNowMinsSinceMidnight;
+                              return (
+                                <div key={bi} className="flex flex-col rounded-xl border border-gray-100 overflow-hidden shadow-sm flex-shrink-0" style={{ width: '200px' }}>
+                                  {/* Column header */}
+                                  <div className="px-3 py-2.5 bg-gray-50 border-b border-gray-100">
+                                    <div className="flex items-center justify-between">
+                                      <p className="text-xs font-bold text-gray-800">{block.label}</p>
+                                      {block.status === 'current' && (
+                                        <span className="text-xs font-semibold px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full">Live</span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-0.5">
+                                      {fmtTimeLocal(block.startMins)}
+                                      {block.endMins !== block.startMins ? ` – ${fmtTimeLocal(block.endMins)}` : ''}
+                                    </p>
+                                  </div>
+                                  {/* 15-min rows */}
+                                  <div className="flex flex-col divide-y divide-gray-50">
+                                    {chunks.map((chunk, ci) => {
+                                      const absChunkStart = block.startMins + chunk.chunkStart;
+                                      const absChunkEnd = absChunkStart + chunk.chunkMins;
+                                      const isLive = block.status === 'current' && now >= absChunkStart && now < absChunkEnd;
+                                      const progressPct = isLive ? Math.round(((now - absChunkStart) / chunk.chunkMins) * 100) : 0;
+                                      const rowPx = Math.max(MIN_ROW_PX, Math.round(chunk.chunkMins * PX_PER_MIN));
+                                      return (
+                                        <div
+                                          key={ci}
+                                          className={`relative flex items-start gap-2 px-2.5 py-1.5 overflow-hidden transition-colors
+                                            ${isLive ? 'bg-purple-50' : chunk.isEmpty ? 'bg-white' : 'bg-white hover:bg-gray-50'}`}
+                                          style={{ minHeight: `${rowPx}px` }}
+                                        >
+                                          {/* Live progress fill */}
+                                          {isLive && (
+                                            <div
+                                              className="absolute left-0 top-0 bottom-0 pointer-events-none"
+                                              style={{ width: `${progressPct}%`, backgroundColor: chunk.color, opacity: 0.15 }}
+                                            />
+                                          )}
+
+                                          {/* Left: time label (first chunk of task only) */}
+                                          <div className="flex-shrink-0 w-10 text-right pt-0.5 relative z-10">
+                                            {chunk.isFirstChunk && (
+                                              <span className="text-gray-400 font-mono" style={{ fontSize: '9px' }}>
+                                                {fmtTimeLocal(absChunkStart)}
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          {/* Left border color stripe */}
+                                          <div className="flex-shrink-0 w-0.5 self-stretch rounded-full relative z-10"
+                                            style={{ backgroundColor: chunk.isEmpty ? '#e5e7eb' : chunk.color }} />
+
+                                          {/* Content */}
+                                          <div className="flex-1 min-w-0 relative z-10">
+                                            {chunk.isFirstChunk && !chunk.isEmpty && chunk.task && (
+                                              chunk.url ? (
+                                                <a href={chunk.url} target="_blank" rel="noopener noreferrer"
+                                                  className="text-xs font-semibold hover:underline leading-tight block truncate"
+                                                  style={{ color: chunk.color }}>
+                                                  {cleanTaskTitle(chunk.task)}
+                                                </a>
+                                              ) : (
+                                                <p className="text-xs font-semibold leading-tight truncate" style={{ color: chunk.color }}>
+                                                  {cleanTaskTitle(chunk.task)}
+                                                </p>
+                                              )
+                                            )}
+                                            {chunk.isFirstChunk && chunk.isEmpty && (
+                                              <p className="text-xs text-gray-300 italic leading-tight">{chunk.label}</p>
+                                            )}
+                                            <p className="text-gray-300 leading-tight" style={{ fontSize: '9px' }}>
+                                              {chunk.chunkMins}m
+                                            </p>
+                                          </div>
+
+                                          {/* Live pulse dot */}
+                                          {isLive && (
+                                            <div className="flex-shrink-0 self-center relative z-10">
+                                              <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse" />
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Agenda Edit Modal (Item 4) ────────────────────────────── */}
+              {showAgendaEditModal && (() => {
+                const { slot, onSave } = showAgendaEditModal;
+                const slotTitle = slot.isOutside
+                  ? agendaTitleOutside(agendaEditRows.length, slot.dateStr)
+                  : agendaTitle(slot.period, agendaEditRows.length, slot.dateStr);
+                return (
+                  <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4" onClick={() => setShowAgendaEditModal(null)}>
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col" style={{ maxHeight: 'calc(100vh - 80px)' }} onClick={e => e.stopPropagation()}>
+                      <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+                        <div>
+                          <h3 className="text-base font-bold text-gray-900">Edit Agenda</h3>
+                          <p className="text-xs text-gray-500 mt-0.5 truncate max-w-xs">{slotTitle}</p>
+                        </div>
+                        <button onClick={() => setShowAgendaEditModal(null)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                        {agendaEditRows.map((row, ri) => {
+                          const rTask = row.task;
+                          const cc = rTask ? getClassColor(rTask) : '#a855f7';
+                          return (
+                            <div key={ri} className="flex items-center gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50">
+                              <div className="w-1 h-10 rounded-full flex-shrink-0" style={{ backgroundColor: cc }} />
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold truncate" style={{ color: cc }}>{rTask ? cleanTaskTitle(rTask) : `Task ${row.taskId}`}</p>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <select
+                                    value={row.action || 'Make a Start'}
+                                    onChange={e => setAgendaEditRows(rows => rows.map((r, i) => i === ri ? { ...r, action: e.target.value } : r))}
+                                    className="text-xs border border-gray-200 rounded-lg px-2 py-1 bg-white text-gray-700 flex-shrink-0"
+                                  >
+                                    {['Make a Start', 'Build Progress', 'Wrap it Up', 'Get it Done', 'Final Push'].map(a => (
+                                      <option key={a} value={a}>{a}</option>
+                                    ))}
+                                  </select>
+                                  <div className="flex items-center gap-1 flex-shrink-0">
+                                    <button onClick={() => setAgendaEditRows(rows => rows.map((r, i) => i === ri ? { ...r, timeMins: Math.max(5, r.timeMins - 5) } : r))} className="w-6 h-6 flex items-center justify-center rounded bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-bold">−</button>
+                                    <span className="text-xs font-bold text-gray-800 w-10 text-center">{row.timeMins}m</span>
+                                    <button onClick={() => setAgendaEditRows(rows => rows.map((r, i) => i === ri ? { ...r, timeMins: Math.min(120, r.timeMins + 5) } : r))} className="w-6 h-6 flex items-center justify-center rounded bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-bold">+</button>
+                                  </div>
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => setAgendaEditRows(rows => rows.filter((_, i) => i !== ri))}
+                                className="text-gray-300 hover:text-red-400 flex-shrink-0"
+                              >
+                                <X className="w-4 h-4" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                        {agendaEditRows.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No rows</p>}
+                      </div>
+                      <div className="flex gap-3 px-6 py-4 border-t border-gray-100 flex-shrink-0">
+                        <button onClick={() => setShowAgendaEditModal(null)} className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl font-semibold text-sm transition-colors">Cancel</button>
+                        <button
+                          onClick={() => {
+                            // Update the slot in the export list
+                            const updatedSlot = { ...slot, tasks: agendaEditRows.map(r => ({ taskId: r.taskId, task: r.task, mins: r.timeMins, action: r.action })) };
+                            onSave(updatedSlot);
+                            setShowAgendaEditModal(null);
+                          }}
+                          className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-semibold text-sm transition-colors"
+                        >
+                          Save Changes
                         </button>
                       </div>
                     </div>
@@ -15008,11 +15582,19 @@ const PlanAssist = () => {
                       const raw = showTaskDescription.description
                         .replace(/<p>\s*<\/p>/gi, '')
                         .replace(/\n{3,}/g, '\n\n');
+                      // Robust sanitizer: strip dangerous tags, ALL event handlers,
+                      // and javascript:/data: URIs regardless of quoting style
                       return raw
                         .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-                        .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
-                        .replace(/\son\w+\s*=\s*[^\s>]*/gi, '')
-                        .replace(/javascript\s*:/gi, 'blocked:');
+                        .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
+                        .replace(/<iframe\b[^>]*>[\s\S]*?<\/iframe>/gi, '')
+                        .replace(/<object\b[^>]*>[\s\S]*?<\/object>/gi, '')
+                        .replace(/<embed\b[^>]*(\/)?>/gi, '')
+                        .replace(/<form\b[^>]*>[\s\S]*?<\/form>/gi, '')
+                        .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|`[^`]*`|[^\s>]*)/gi, '')
+                        .replace(/\s+(?:formaction|srcdoc)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
+                        .replace(/((?:href|src|action|poster)\s*=\s*["']?)\s*(?:javascript|vbscript|data)\s*:[^"'\s>]*/gi, '$1#')
+                        .replace(/\s+(?:src|href)\s*=\s*["']?\s*data:[^"'\s>]*/gi, '');
                     })()
                   }}
                 />
