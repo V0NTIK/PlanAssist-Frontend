@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import AppHPT from './AppHPT';
-import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy, Gift, CalendarClock, Grid, SlidersHorizontal, Columns } from 'lucide-react';
+import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, BookOpen, Brain, TrendingUp, AlertCircle, Upload, Save, Pause, X, Send, Lock, Unlock, Info, Edit2, FileText, Trophy, Zap, Target, Award, TrendingDown, Timer, RefreshCw, LayoutList, Trash2, Plus, ClipboardList, Shield, Ban, UserCheck, Search, Bell, BellOff, ChevronDown, ChevronRight, Eye, AlertTriangle, HelpCircle, CheckCircle, UserCircle, MessageSquare, Users, Share2, Copy, Gift, CalendarClock, Grid, SlidersHorizontal } from 'lucide-react';
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
@@ -9188,7 +9188,7 @@ const PlanAssist = () => {
                       title="Toggle 15-minute chunk view"
                       className={`p-1.5 rounded-lg transition-colors ${showAgendaChunkView ? 'bg-purple-100 text-purple-600' : 'text-gray-400 hover:text-purple-600 hover:bg-purple-50'}`}
                     >
-                      <Columns className="w-3.5 h-3.5" />
+                      <Grid className="w-3.5 h-3.5" />
                     </button>
                     <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-mono text-base font-bold transition-colors ${agendaCountdownFlash ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-gray-100 text-gray-700'}`}>
                       <Timer className="w-3.5 h-3.5" />{countdownStr}
@@ -9897,10 +9897,10 @@ const PlanAssist = () => {
             return slotMap[key] || { period: p.period, tasks: [], remaining: PERIOD_DURATION_MINS, isToday: true, dateStr: campusTodayStr };
           });
 
-          // Action defaulting logic — uses remaining time (estimate minus accumulated)
-          const getDefaultAction = (task, minsToday, totalMins) => {
+          // Action defaulting logic — uses remaining time (raw estimate minus accumulated)
+          const getDefaultAction = (task, minsToday, rawTotalMins) => {
             const acc = task.accumulatedTime || 0;
-            const remaining = Math.max(totalMins - acc, 0);
+            const remaining = Math.max(rawTotalMins - acc, 0);
             const hasProgress = acc > 0;
             const willFinish = minsToday >= remaining;
             if (remaining === 0) return 'Final Push';
@@ -10095,9 +10095,14 @@ const PlanAssist = () => {
                     )}
                     {organizerTaskList.map(task => {
                       const cc = getClassColor(task);
-                      const estMin = task.userEstimate || task.estimatedTime || 20;
-                      const dueDate = task.dueDate ? new Date(task.dueDate) : null;
-                      const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                      const rawEst = task.userEstimate || task.estimatedTime || 20;
+                      const acc = task.accumulatedTime || 0;
+                      const remainingEst = Math.max(0, rawEst - acc);
+                      const estMin = rawEst; // display raw estimate in label
+                      // Use deadlineDateRaw (YYYY-MM-DD from DB) for display — never browser-TZ-shifted
+                      const dueStr = task.deadlineDateRaw
+                        ? (() => { const [y,mo,d] = task.deadlineDateRaw.split('-').map(Number); return new Date(y,mo-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric'}); })()
+                        : null;
                       const todayMins = (todayAllocation.find(a => a.task.id === task.id)?.minsToday) || 0;
                       const urg = getEffectiveUrgency(task.id);
                       const urgUserSet = isUrgencyUserSet(task.id);
@@ -10167,9 +10172,12 @@ const PlanAssist = () => {
                     )}
                     {todayAllocation.map(({ task, minsToday, totalMins, warning }, idx) => {
                       const cc = getClassColor(task);
-                      const estMin = task.userEstimate || task.estimatedTime || 20;
-                      const dueDate = task.dueDate ? new Date(task.dueDate) : null;
-                      const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
+                      const rawEst = task.userEstimate || task.estimatedTime || 20;
+                      const acc = task.accumulatedTime || 0;
+                      const estMin = rawEst; // full estimate for context; minsToday is what's scheduled
+                      const dueStr = task.deadlineDateRaw
+                        ? (() => { const [y,mo,d] = task.deadlineDateRaw.split('-').map(Number); return new Date(y,mo-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric'}); })()
+                        : null;
                       const urg = getEffectiveUrgency(task.id);
                       const urgUserSet = isUrgencyUserSet(task.id);
                       const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
@@ -10314,8 +10322,11 @@ const PlanAssist = () => {
                             {tasksWithTimes.map((st, i) => {
                               const cc = getClassColor(st.task);
                               const cn = extractClassName(st.task);
-                              const estMin = st.task.userEstimate || st.task.estimatedTime || 20;
-                              const action = getDefaultAction(st.task, st.mins, estMin);
+                              const rawEstMin = st.task.userEstimate || st.task.estimatedTime || 20;
+                              const accMin = st.task.accumulatedTime || 0;
+                              const remainingEstMin = Math.max(0, rawEstMin - accMin);
+                              const estMin = rawEstMin; // keep for progress bar denominator
+                              const action = getDefaultAction(st.task, st.mins, rawEstMin);
                               const startH = startMins !== null
                                 ? (() => { const totalMins = startMins + st.startOffset; const h = Math.floor(totalMins/60)%24; const m = totalMins%60; return `${h%12||12}:${String(m).padStart(2,'0')} ${h<12?'AM':'PM'}`; })()
                                 : null;
@@ -10383,13 +10394,13 @@ const PlanAssist = () => {
                                         );
                                       })()}
                                     </div>
-                                    {/* Progress bar if task has accumulated time */}
-                                    {(st.task.accumulatedTime || 0) > 0 && (
+                                    {/* Progress bar: shows accumulated progress vs raw estimate */}
+                                    {accMin > 0 && (
                                       <div className="mt-2 flex items-center gap-2">
                                         <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((st.task.accumulatedTime / estMin) * 100))}%`, backgroundColor: st.task.accumulatedTime >= estMin ? '#f97316' : cc, opacity: 0.8 }} />
+                                          <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((accMin / rawEstMin) * 100))}%`, backgroundColor: accMin >= rawEstMin ? '#f97316' : cc, opacity: 0.8 }} />
                                         </div>
-                                        <span className="text-xs text-gray-400">{st.task.accumulatedTime}m / {estMin}m</span>
+                                        <span className="text-xs text-gray-400">{accMin}m done · {remainingEstMin > 0 ? `${remainingEstMin}m left` : 'complete'}</span>
                                       </div>
                                     )}
                                     {/* Start / Resume button */}
@@ -10446,12 +10457,13 @@ const PlanAssist = () => {
                           </div>
                         ) : (
                           <div className="space-y-2">
-                            {outsideSchoolTasks.map(({ task, warning }, i) => {
+                            {outsideSchoolTasks.map(({ task, minsToday, warning }, i) => {
                               const cc = getClassColor(task);
                               const cn = extractClassName(task);
                               const estMin = task.userEstimate || task.estimatedTime || 20;
-                              const dueDate = task.dueDate ? new Date(task.dueDate) : null;
-                              const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+                              const dueStr = task.deadlineDateRaw
+                                ? (() => { const [y,mo,d] = task.deadlineDateRaw.split('-').map(Number); return new Date(y,mo-1,d).toLocaleDateString('en-US',{month:'short',day:'numeric'}); })()
+                                : '—';
                               return (
                                 <div key={task.id} className="rounded-xl border border-amber-200 overflow-hidden">
                                   <div style={{ height: '4px', backgroundColor: cc }} />
@@ -10469,7 +10481,10 @@ const PlanAssist = () => {
                                         <p className="text-xs text-gray-400 mt-0.5">{cn}</p>
                                       </div>
                                       <div className="text-right flex-shrink-0">
-                                        <p className="text-xs text-gray-500">{fmtMins(estMin)}</p>
+                                        {minsToday > 0
+                                          ? <p className="text-xs font-semibold text-amber-600">{fmtMins(minsToday)} today</p>
+                                          : <p className="text-xs text-gray-500">{fmtMins(estMin)}</p>
+                                        }
                                         <p className="text-xs text-gray-400">Due {dueStr}</p>
                                       </div>
                                     </div>
