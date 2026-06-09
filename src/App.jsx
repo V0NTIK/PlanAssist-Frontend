@@ -4020,6 +4020,12 @@ const PlanAssist = () => {
     }
   };
 
+  // Complete a task from the confirm modal (task list / non-session path)
+  const handleCompleteTask = async (taskId) => {
+    setShowCompleteConfirm(null);
+    await toggleTaskCompletion(taskId);
+  };
+
   // ── Create manual task ────────────────────────────────────────────────────────
   const submitManualTask = async () => {
     const { title, deadlineDate, deadlineTime, estimatedTime } = addTaskForm;
@@ -4121,6 +4127,13 @@ const PlanAssist = () => {
     // Close Canvas window if open
     if (canvasWindow && !canvasWindow.closed) {
       canvasWindow.close();
+    }
+    // Stop focus sounds if playing
+    if (isWhiteNoisePlaying) {
+      _stopFocusSource();
+      setIsWhiteNoisePlaying(false);
+      setWhiteNoiseAudio(null);
+      if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     }
     // Stop free timer if running
     if (freeTimerIntervalRef.current) { clearInterval(freeTimerIntervalRef.current); freeTimerIntervalRef.current = null; }
@@ -4770,21 +4783,9 @@ const PlanAssist = () => {
   useEffect(() => {
     const loadTasksWithNotes = async () => {
       if (!isAuthenticated || tasks.length === 0) return;
-      
       try {
-        const notesPromises = tasks.map(task => 
-          apiCall(`/tasks/${task.id}/notes`, 'GET').catch(() => ({ notes: '' }))
-        );
-        const notesResults = await Promise.all(notesPromises);
-        
-        const tasksWithNotesSet = new Set();
-        notesResults.forEach((result, index) => {
-          if (result.notes && result.notes.trim()) {
-            tasksWithNotesSet.add(tasks[index].id);
-          }
-        });
-        
-        setTasksWithNotes(tasksWithNotesSet);
+        const data = await apiCall('/tasks/notes-index', 'GET');
+        setTasksWithNotes(new Set(data.taskIds || []));
       } catch (error) {
         console.error('Failed to load tasks with notes:', error);
       }
@@ -8400,7 +8401,7 @@ const PlanAssist = () => {
                                         const inAgenda = tasksInAgenda.has(task.id);
                                         return (
                                           <button
-                                            onClick={() => { if (!inAgenda) setShowSplitTask(task.id); }}
+                                            onClick={() => { if (!inAgenda) { setSplitSegments([{ name: 'Part 1', deadlineDate: '', deadlineTime: '' }, { name: 'Part 2', deadlineDate: '', deadlineTime: '' }]); setShowSplitTask(task.id); } }}
                                             disabled={inAgenda}
                                             className={`px-2 py-0.5 rounded text-xs font-medium transition-all ${
                                               inAgenda
