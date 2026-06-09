@@ -2981,6 +2981,11 @@ const PlanAssist = () => {
   // NOTE: Audio is started in the Zoom check useEffect BEFORE this is called.
   // This function only handles the PiP window. Dismiss/Join both call zoomAlarmStopRef
   // which stops the audio, closes PiP, and clears the banner simultaneously.
+  //
+  // PiP (Document Picture-in-Picture) requires a user gesture in Chrome 116+.
+  // When called from a setInterval it will throw NotAllowedError. We catch that
+  // and fall back gracefully — the in-page banner already shows, so the alert is
+  // still fully functional. PiP is a bonus if the browser allows it.
   const launchZoomPing = (zoomNumber, isTutorial, theme) => {
     if (typeof window.documentPictureInPicture === 'undefined') return;
     // Close any existing session/agenda PiP without triggering Save & Exit
@@ -3047,7 +3052,12 @@ const PlanAssist = () => {
         if (zoomPingAudioRef.current) { try { zoomPingAudioRef.current.stop(); } catch(e){} zoomPingAudioRef.current = null; }
         setZoomBanner(null);
       });
-    }).catch(err => console.error('Zoom Ping PiP failed:', err));
+    }).catch(err => {
+      // PiP requires a user gesture — from a setInterval this will always fail in Chrome 116+.
+      // This is expected. The in-page banner (setZoomBanner) already shows and the sound plays,
+      // so the alert is fully functional without PiP. Log quietly and move on.
+      console.log('[Zoom Ping] PiP unavailable (no user gesture):', err.message);
+    });
   };
 
   // ── Agenda Ping — Document PiP notification when an agenda row timer expires ─
@@ -4677,35 +4687,37 @@ const PlanAssist = () => {
       const periodRange = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus);
       const [rangeStart, rangeEnd] = periodRange.split('-').map(Number);
 
-      // ── Loop 1: Lesson zoom pings (period-based, existing behaviour) ─────
+      // ── Loop 1: Lesson zoom pings (period-based) ─────────────────────────
       for (const [p, t] of Object.entries(PERIOD_TIMES_UTC)) {
         const period = parseInt(p);
         if (period < rangeStart || period > rangeEnd) continue;
 
         const periodKey = `lesson-${todayStr}-${period}`;
-        if (zoomFiredPeriodsRef.current.has(periodKey)) continue;
-
+        // Always mark in-window periods as fired — even if no zoom number —
+        // so re-runs of check() within the same window never double-fire.
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
+          if (zoomFiredPeriodsRef.current.has(periodKey)) break; // already fired this window
+          zoomFiredPeriodsRef.current.add(periodKey); // mark fired immediately, before any async
+
           const todayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
           const lesson = scheduleLessonsRef.current.find(sl => sl.day === todayName && sl.period === period);
           const zoomNumber = lesson?.zoom_number || null;
 
           if (zoomNumber) {
-            zoomFiredPeriodsRef.current.add(periodKey);
             startAlarmSound(false);
             setZoomBanner({ period, zoomNumber, isTutorial: false, isMeeting: false, title: null });
             launchZoomPing(zoomNumber, false, colorThemeRef.current);
           }
-          break;
+          break; // only one period can be in-window at a time
         }
       }
 
       // ── Loop 2: Tutorial / Meeting pings (time-based) ────────────────────
       for (const [key, event] of Object.entries(tutorialsRef.current)) {
         if (!key.startsWith(todayStr)) continue;
-        const eventTime = key.substring(todayStr.length + 1); // HH:MM
+        const eventTime = key.substring(todayStr.length + 1);
         const firedKey = `event-${key}`;
         if (zoomFiredPeriodsRef.current.has(firedKey)) continue;
 
@@ -4713,10 +4725,10 @@ const PlanAssist = () => {
         const eventUtcMins = eH * 60 + eM;
         const diff = eventUtcMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
+          zoomFiredPeriodsRef.current.add(firedKey); // mark fired immediately
           const zoomNumber = event.zoom_number || null;
           if (!zoomNumber) continue;
 
-          zoomFiredPeriodsRef.current.add(firedKey);
           startAlarmSound(!!event.isMeeting);
           setZoomBanner({ zoomNumber, isTutorial: !event.isMeeting, isMeeting: !!event.isMeeting, title: event.title, scheduledTime: eventTime });
           launchZoomPing(zoomNumber, !event.isMeeting, colorThemeRef.current);
