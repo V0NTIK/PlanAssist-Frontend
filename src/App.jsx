@@ -9768,82 +9768,112 @@ const PlanAssist = () => {
 
           const rawResult = runSchedulingAlgorithm();
 
-          // ── Apply urgency overrides by rearranging today's block task lists ───────
-          // After the algorithm produces a schedule, any task with a user override gets
-          // moved to the front of its target block. This mutates the task arrays in-place
-          // on a shallow copy so the original slot objects aren't changed.
+          // ── Urgency system ────────────────────────────────────────────────────────
           //
-          // Rules (per spec):
-          //  - 'now'    → front of block 0 (first available study period, or OS if none)
-          //  - 'soon'   → front of block 1
-          //  - 'later'  → front of block 2
-          //  - 'ignore' → remove from today's blocks entirely (task stays in future slots)
+          // Each task has an "urgency" value: now | soon | later | ignore.
+          // The AUTO value is derived from which of today's ordered blocks the task
+          // falls in (block 0 → now, block 1 → soon, block 2 → later, none → ignore).
           //
-          // A move is blocked if it would push a task that currently has an earlier slot
-          // past its own deadline (i.e. the displaced tasks can still meet their deadline
-          // after the move). We use a simple check: if the target block ends before the
-          // moved task's deadline we allow the move; otherwise we skip it silently.
-          (() => {
-            const overrides = urgencyOverridesRef.current;
-            const todayStr = campusTodayStr;
+          // The USER can override any task's value. When they do:
+          //   now    → task moves to FRONT of block 0 (today's first block)
+          //   soon   → task moves to FRONT of block 1
+          //   later  → task moves to FRONT of block 2
+          //   ignore → task is moved out of today's blocks entirely;
+          //            it will be picked up by the algorithm on future days
+          //
+          // A move is BLOCKED if displacing tasks from the target block would cause
+          // any of those displaced tasks to miss their deadline (they'd need the slot
+          // that's now occupied by the moved task). Blocked overrides are silently
+          // discarded (the stored value in urgencyOverridesRef stays but has no effect).
+          //
+          // Overrides are stored in urgencyOverridesRef keyed by String(taskId):
+          //   { value: 'now'|'soon'|'later'|'ignore', day: 'YYYY-MM-DD', isUserSet: true }
+          // Auto values are never stored in the ref — they're computed on-demand from
+          // the rearranged slotMap so getAutoUrgency always reflects the current state.
+          //
+          // Overrides expire at end of day (when ov.day !== campusTodayStr).
 
-            // Build ordered list of today's mutable block task arrays
-            // index 0 = first study period with tasks (or first available), etc.
-            const todayBlockSlots = []; // { tasks: [], label, isOutside }
+          // Step 1: Build today's ordered block list from raw algorithm output.
+          // These are the live mutable slot objects — we mutate their .tasks arrays.
+          const todayOrderedBlocks = (() => {
+            const blocks = [];
             for (const sp of availableStudyPeriods) {
-              const key = `${todayStr}-${sp.period}`;
+              const key = `${campusTodayStr}-${sp.period}`;
               const slot = rawResult.slotMap[key];
-              if (slot) todayBlockSlots.push(slot);
+              if (slot) blocks.push(slot); // only include slots that exist
             }
-            if (rawResult.todayOsSlot) todayBlockSlots.push(rawResult.todayOsSlot);
+            if (rawResult.todayOsSlot) blocks.push(rawResult.todayOsSlot);
+            return blocks;
+          })();
 
-            if (todayBlockSlots.length === 0) return;
-
-            // Collect all tasks with overrides set today
-            const overriddenIds = Object.keys(overrides).filter(id => overrides[id]?.day === todayStr);
-            if (overriddenIds.length === 0) return;
+          // Step 2: Apply user overrides by physically moving task entries.
+          (() => {
+            const todayStr = campusTodayStr;
+            const overriddenIds = Object.keys(urgencyOverridesRef.current)
+              .filter(id => urgencyOverridesRef.current[id]?.day === todayStr && urgencyOverridesRef.current[id]?.isUserSet);
 
             for (const taskId of overriddenIds) {
-              const ov = overrides[taskId];
-              const targetLabel = ov.value; // 'now'|'soon'|'later'|'ignore'
-              const targetBlockIdx = { now: 0, soon: 1, later: 2 }[targetLabel] ?? null;
+              const ov = urgencyOverridesRef.current[taskId];
+              const targetLabel = ov.value;
+              const idNum = parseInt(taskId);
 
-              // Find which block currently contains this task
-              let sourceBlockIdx = -1;
-              let sourceEntryIdx = -1;
-              for (let bi = 0; bi < todayBlockSlots.length; bi++) {
-                const ei = todayBlockSlots[bi].tasks.findIndex(st =>
-                  (st.taskId || st.task?.id) === taskId || (st.taskId || st.task?.id) === parseInt(taskId)
-                );
+              // Find where the task currently lives among today's blocks
+              let sourceBlockIdx = -1, sourceEntryIdx = -1;
+              for (let bi = 0; bi < todayOrderedBlocks.length; bi++) {
+                const ei = todayOrderedBlocks[bi].tasks.findIndex(st => {
+                  const stId = st.taskId ?? st.task?.id;
+                  return stId === idNum || stId === taskId;
+                });
                 if (ei !== -1) { sourceBlockIdx = bi; sourceEntryIdx = ei; break; }
               }
 
               if (targetLabel === 'ignore') {
-                // Remove from today entirely — leave in future slots (handled by algorithm)
+                // Remove from today's blocks — algorithm already placed it in future slots
                 if (sourceBlockIdx !== -1) {
-                  todayBlockSlots[sourceBlockIdx].tasks.splice(sourceEntryIdx, 1);
+                  todayOrderedBlocks[sourceBlockIdx].tasks.splice(sourceEntryIdx, 1);
                 }
                 continue;
               }
 
-              if (targetBlockIdx === null || targetBlockIdx >= todayBlockSlots.length) continue;
-              if (sourceBlockIdx === targetBlockIdx) continue; // already there
+              const targetBlockIdx = { now: 0, soon: 1, later: 2 }[targetLabel];
+              if (targetBlockIdx === undefined || targetBlockIdx >= todayOrderedBlocks.length) continue;
+              if (sourceBlockIdx === targetBlockIdx) continue; // already in the right block
 
-              // Extract the entry
+              // Deadline-violation check: would moving this task to targetBlockIdx
+              // cause any task currently in that block to miss its deadline?
+              // Simple rule: if the target block ends before a displaced task's deadline,
+              // that task can still be completed — so it's safe.
+              // If ANY displaced task's deadline is BEFORE the target block ends, block the move.
+              const targetSlot = todayOrderedBlocks[targetBlockIdx];
+              const targetSlotEndMs = slotEndUTCMs(targetSlot.dateStr, targetSlot.period);
+              let blocked = false;
+              if (targetSlotEndMs !== null) {
+                for (const st of targetSlot.tasks) {
+                  const task = st.task;
+                  const dl = task ? getDeadlineMs(task) : Infinity;
+                  // If the task's deadline is earlier than when this block ends, moving
+                  // another task to the front displaces it — unsafe if it can't make deadline
+                  if (dl !== Infinity && dl < targetSlotEndMs) {
+                    blocked = true;
+                    break;
+                  }
+                }
+              }
+              if (blocked) continue;
+
+              // Extract the entry from its source block (or synthesize if not in any block)
               let entry;
               if (sourceBlockIdx !== -1) {
-                entry = todayBlockSlots[sourceBlockIdx].tasks.splice(sourceEntryIdx, 1)[0];
+                entry = todayOrderedBlocks[sourceBlockIdx].tasks.splice(sourceEntryIdx, 1)[0];
               } else {
-                // Task isn't in today's blocks yet — find it in activeTasks and build a synthetic entry
-                const task = (rawResult.todayAllocation.find(a => String(a.task.id) === String(taskId))?.task)
-                  || tasks.find(t => String(t.id) === String(taskId));
+                const task = tasks.find(t => String(t.id) === taskId);
                 if (!task) continue;
-                const estMins = (task.userEstimate || task.estimatedTime || 20) - (task.accumulatedTime || 0);
-                entry = { taskId: task.id, task, mins: Math.max(5, estMins) };
+                const estMins = Math.max(5, (task.userEstimate || task.estimatedTime || 20) - (task.accumulatedTime || 0));
+                entry = { taskId: idNum, task, mins: estMins };
               }
 
-              // Insert at front of target block
-              todayBlockSlots[targetBlockIdx].tasks.unshift(entry);
+              // Place at front of target block
+              targetSlot.tasks.unshift(entry);
             }
           })();
 
@@ -9932,58 +9962,55 @@ const PlanAssist = () => {
           // Active tasks list (same as tasks page)
           const organizerTaskList = tasks.filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'));
 
-          // Urgency override helpers (frontend-only, expires daily)
+          // ── Urgency helpers ───────────────────────────────────────────────────────
           const todayDateStr = campusTodayStr;
-          const getUrgencyOverride = (taskId) => {
-            const ov = urgencyOverridesRef.current[taskId];
-            if (!ov) return null;
-            if (ov.day !== todayDateStr) { delete urgencyOverridesRef.current[taskId]; return null; }
-            return ov.value;
-          };
 
-          // Ranked blocks for today (study periods in time order, OS last)
-          // Used both by getAutoUrgency and by the override rearrangement.
-          const todayRankedBlocks = (() => {
-            const blocks = [];
-            for (const sp of availableStudyPeriods) {
-              blocks.push({ period: sp.period, isOutside: false, dateStr: campusTodayStr });
-            }
-            blocks.push({ period: 'outside', isOutside: true, dateStr: campusTodayStr });
-            return blocks; // index 0 = Now, 1 = Soon, 2 = Later, 3+ = Later
-          })();
-
-          // Map urgency label → target block index
-          const urgencyToBlockIdx = { now: 0, soon: 1, later: 2, ignore: null };
-
-          // Apply a user urgency override: re-insert task at front of target block.
-          // Validates that moving the task won't cause any OTHER task to miss its deadline.
-          // If the move is safe, commits to urgencyOverridesRef and re-renders.
-          const applyUrgencyOverride = (taskId, newValue) => {
-            // Store the raw preference — the algorithm will apply it on next render
-            urgencyOverridesRef.current[taskId] = { value: newValue, day: todayDateStr };
-            setUrgencyOverridesTick(t => t + 1);
-          };
-
-          // Compute urgency label for a task based on which block it falls in
-          // Block order: [current study, next study/OS, block after, ...rest]
+          // Get the auto-computed urgency for a task based on its position in today's blocks.
+          // Reads from the (possibly rearranged) slotMap and todayOsSlot.
+          // block 0 → 'now', block 1 → 'soon', block 2 → 'later', not found → 'ignore'
           const getAutoUrgency = (taskId) => {
-            // Rank today's available blocks in order
-            const rankedBlocks = [];
-            for (const sp of availableStudyPeriods) {
-              const slot = slotMap[`${campusTodayStr}-${sp.period}`];
-              if (slot?.tasks?.length > 0) rankedBlocks.push({ ...slot, isOutsideBlock: false });
-            }
-            if (todayOsSlot?.tasks?.length > 0) rankedBlocks.push({ ...todayOsSlot, isOutsideBlock: true });
-
+            const idNum = parseInt(taskId) || taskId;
+            const rankedBlocks = [...todayOrderedBlocks]; // already in order
             const myBlockIdx = rankedBlocks.findIndex(b =>
-              b.isOutsideBlock
-                ? b.tasks?.some(st => st.task?.id === taskId)
-                : b.tasks?.some(st => st.taskId === taskId || st.task?.id === taskId)
+              b.tasks?.some(st => {
+                const stId = st.taskId ?? st.task?.id;
+                return stId === idNum || stId === taskId;
+              })
             );
             if (myBlockIdx === 0) return 'now';
             if (myBlockIdx === 1) return 'soon';
             if (myBlockIdx >= 2) return 'later';
-            return 'ignore'; // -1 means not scheduled today
+            return 'ignore';
+          };
+
+          // Get the user-set override for a task (returns null if not user-set or expired).
+          const getUrgencyOverride = (taskId) => {
+            const ov = urgencyOverridesRef.current[String(taskId)];
+            if (!ov) return null;
+            if (ov.day !== todayDateStr) { delete urgencyOverridesRef.current[String(taskId)]; return null; }
+            if (!ov.isUserSet) return null; // auto-stored values don't count as overrides
+            return ov.value;
+          };
+
+          // Combined: user override if present, else auto-computed.
+          const getEffectiveUrgency = (taskId) => getUrgencyOverride(taskId) ?? getAutoUrgency(taskId);
+
+          // Whether this task's urgency was explicitly set by the user today.
+          const isUrgencyUserSet = (taskId) => {
+            const ov = urgencyOverridesRef.current[String(taskId)];
+            return !!(ov?.isUserSet && ov?.day === todayDateStr);
+          };
+
+          // Apply a user urgency override. Stores with isUserSet: true so it's
+          // distinguishable from auto-derived values. Triggers re-render so the
+          // rearrangement post-processing runs again on next paint.
+          const applyUrgencyOverride = (taskId, newValue) => {
+            urgencyOverridesRef.current[String(taskId)] = {
+              value: newValue,
+              day: todayDateStr,
+              isUserSet: true,
+            };
+            setUrgencyOverridesTick(t => t + 1);
           };
 
           // Outside School tasks: tasks actually allocated to today's OS slot by the algorithm,
@@ -10060,8 +10087,8 @@ const PlanAssist = () => {
                       const dueDate = task.dueDate ? new Date(task.dueDate) : null;
                       const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
                       const todayMins = (todayAllocation.find(a => a.task.id === task.id)?.minsToday) || 0;
-                      const autoUrg = getAutoUrgency(task.id);
-                      const urg = getUrgencyOverride(task.id) || autoUrg;
+                      const urg = getEffectiveUrgency(task.id);
+                      const urgUserSet = isUrgencyUserSet(task.id);
                       const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
                       return (
                         <div
@@ -10091,7 +10118,8 @@ const PlanAssist = () => {
                                 value={urg}
                                 onClick={e => e.stopPropagation()}
                                 onChange={e => { e.stopPropagation(); applyUrgencyOverride(task.id, e.target.value); }}
-                                className={`text-xs font-semibold px-1 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]}`}
+                                title={urgUserSet ? 'Manually set · click to change' : 'Auto-scheduled · click to override'}
+                                className={`text-xs font-semibold px-1 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]} ${urgUserSet ? 'ring-1 ring-current ring-opacity-40' : ''}`}
                                 style={{ fontSize: '9px', outline: 'none' }}
                               >
                                 <option value="now">Now</option>
@@ -10130,7 +10158,8 @@ const PlanAssist = () => {
                       const estMin = task.userEstimate || task.estimatedTime || 20;
                       const dueDate = task.dueDate ? new Date(task.dueDate) : null;
                       const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
-                      const urg = getUrgencyOverride(task.id) || getAutoUrgency(task.id);
+                      const urg = getEffectiveUrgency(task.id);
+                      const urgUserSet = isUrgencyUserSet(task.id);
                       const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
                       const warnColor = warning === 'impossible' ? '#fca5a5' : warning === 'tight' ? '#fcd34d' : '#e5e7eb';
                       return (
@@ -10173,7 +10202,8 @@ const PlanAssist = () => {
                               <select
                                 value={urg}
                                 onChange={e => applyUrgencyOverride(task.id, e.target.value)}
-                                className={`flex-shrink-0 font-semibold px-1.5 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]}`}
+                                title={urgUserSet ? 'Manually set · click to change' : 'Auto-scheduled · click to override'}
+                                className={`flex-shrink-0 font-semibold px-1.5 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]} ${urgUserSet ? 'ring-1 ring-current ring-opacity-40' : ''}`}
                                 style={{ fontSize: '9px', outline: 'none' }}
                               >
                                 <option value="now">Now</option>
@@ -10322,14 +10352,15 @@ const PlanAssist = () => {
                                         </span>
                                       )}
                                       {(() => {
-                                        const autoUrg = getAutoUrgency(st.task.id);
-                                        const urg = getUrgencyOverride(st.task.id) || autoUrg;
+                                        const urg = getEffectiveUrgency(st.task.id);
+                                        const urgUserSet = isUrgencyUserSet(st.task.id);
                                         const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
                                         return (
                                           <select
                                             value={urg}
                                             onChange={e => applyUrgencyOverride(st.task.id, e.target.value)}
-                                            className={`text-xs font-semibold px-1.5 py-0.5 rounded border-0 cursor-pointer ml-auto ${urgColors[urg]}`}
+                                            title={urgUserSet ? 'Manually set · click to change' : 'Auto-scheduled · click to override'}
+                                            className={`text-xs font-semibold px-1.5 py-0.5 rounded border-0 cursor-pointer ml-auto ${urgColors[urg]} ${urgUserSet ? 'ring-1 ring-current ring-opacity-40' : ''}`}
                                             style={{ outline: 'none' }}
                                           >
                                             <option value="now">Now</option>
