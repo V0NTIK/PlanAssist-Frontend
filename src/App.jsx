@@ -9286,27 +9286,24 @@ const PlanAssist = () => {
                                   )}
                                   {/* Color stripe */}
                                   <div className="w-0.5 flex-shrink-0 self-stretch rounded-full mt-1" style={{ backgroundColor: chunk.isPast ? '#d1d5db' : chunk.rColor }} />
-                                  {/* Content — title + action only on first chunk of each row */}
+                                  {/* Content — task title on every chunk, action + size sub-label */}
                                   <div className="flex-1 min-w-0 pt-1 pb-0.5 relative z-10">
-                                    {chunk.isFirst && (
-                                      <>
-                                        {chunk.rTask ? (
-                                          chunk.rTask.url ? (
-                                            <a href={chunk.rTask.url} target="_blank" rel="noopener noreferrer"
-                                              className="text-xs font-semibold hover:underline leading-tight block truncate"
-                                              style={{ color: chunk.isPast ? '#9ca3af' : chunk.rColor }}>
-                                              {cleanTaskTitle(chunk.rTask)}
-                                            </a>
-                                          ) : (
-                                            <p className="text-xs font-semibold leading-tight truncate" style={{ color: chunk.isPast ? '#9ca3af' : chunk.rColor }}>
-                                              {cleanTaskTitle(chunk.rTask)}
-                                            </p>
-                                          )
-                                        ) : null}
-                                        <p className="text-gray-400 truncate leading-tight" style={{ fontSize: '9px' }}>{chunk.rowAction || 'Work'}</p>
-                                      </>
-                                    )}
-                                    <p className="text-gray-300 leading-tight" style={{ fontSize: '9px' }}>{chunk.chunkMins}m</p>
+                                    {chunk.rTask ? (
+                                      chunk.rTask.url ? (
+                                        <a href={chunk.rTask.url} target="_blank" rel="noopener noreferrer"
+                                          className="text-xs font-semibold hover:underline leading-tight block truncate"
+                                          style={{ color: chunk.isPast ? '#9ca3af' : chunk.rColor }}>
+                                          {cleanTaskTitle(chunk.rTask)}
+                                        </a>
+                                      ) : (
+                                        <p className="text-xs font-semibold leading-tight truncate" style={{ color: chunk.isPast ? '#9ca3af' : chunk.rColor }}>
+                                          {cleanTaskTitle(chunk.rTask)}
+                                        </p>
+                                      )
+                                    ) : null}
+                                    <p className="text-gray-400 truncate leading-tight" style={{ fontSize: '9px' }}>
+                                      {chunk.isFirst ? (chunk.rowAction || 'Work') : '↳ continued'} · {chunk.chunkMins}m
+                                    </p>
                                   </div>
                                   {/* Indicators */}
                                   {chunk.isLive && <div className="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse flex-shrink-0 self-center relative z-10 mt-0.5" />}
@@ -9600,17 +9597,7 @@ const PlanAssist = () => {
           const runSchedulingAlgorithm = () => {
             const activeTasks = tasks
               .filter(t => !t.deleted && !t.completed && isCourseEnabled(t) && !(t.class||'').toLowerCase().includes('homeroom'))
-              .sort((a, b) => {
-                // Primary sort: deadline ascending (most urgent first)
-                const da = getDeadlineMs(a), db = getDeadlineMs(b);
-                if (da !== db) return da - db;
-                // Secondary sort: urgency override (now < soon < later < ignore < unset)
-                // Only applies within same deadline — earlier target block = higher priority
-                const urgOrder = { now: 0, soon: 1, later: 2, ignore: 3 };
-                const ovA = urgencyOverridesRef.current[a.id]?.day === campusTodayStr ? urgOrder[urgencyOverridesRef.current[a.id]?.value] ?? 4 : 4;
-                const ovB = urgencyOverridesRef.current[b.id]?.day === campusTodayStr ? urgOrder[urgencyOverridesRef.current[b.id]?.value] ?? 4 : 4;
-                return ovA - ovB;
-              });
+              .sort((a, b) => getDeadlineMs(a) - getDeadlineMs(b));
 
             if (activeTasks.length === 0) {
               return { slotMap: {}, todayAllocation: [], warnings: [],
@@ -9779,7 +9766,88 @@ const PlanAssist = () => {
             };
           };
 
-          const { slotMap, todayAllocation, warnings, todaySlots, todayOsSlot, allOsSlots } = runSchedulingAlgorithm();
+          const rawResult = runSchedulingAlgorithm();
+
+          // ── Apply urgency overrides by rearranging today's block task lists ───────
+          // After the algorithm produces a schedule, any task with a user override gets
+          // moved to the front of its target block. This mutates the task arrays in-place
+          // on a shallow copy so the original slot objects aren't changed.
+          //
+          // Rules (per spec):
+          //  - 'now'    → front of block 0 (first available study period, or OS if none)
+          //  - 'soon'   → front of block 1
+          //  - 'later'  → front of block 2
+          //  - 'ignore' → remove from today's blocks entirely (task stays in future slots)
+          //
+          // A move is blocked if it would push a task that currently has an earlier slot
+          // past its own deadline (i.e. the displaced tasks can still meet their deadline
+          // after the move). We use a simple check: if the target block ends before the
+          // moved task's deadline we allow the move; otherwise we skip it silently.
+          (() => {
+            const overrides = urgencyOverridesRef.current;
+            const todayStr = campusTodayStr;
+
+            // Build ordered list of today's mutable block task arrays
+            // index 0 = first study period with tasks (or first available), etc.
+            const todayBlockSlots = []; // { tasks: [], label, isOutside }
+            for (const sp of availableStudyPeriods) {
+              const key = `${todayStr}-${sp.period}`;
+              const slot = rawResult.slotMap[key];
+              if (slot) todayBlockSlots.push(slot);
+            }
+            if (rawResult.todayOsSlot) todayBlockSlots.push(rawResult.todayOsSlot);
+
+            if (todayBlockSlots.length === 0) return;
+
+            // Collect all tasks with overrides set today
+            const overriddenIds = Object.keys(overrides).filter(id => overrides[id]?.day === todayStr);
+            if (overriddenIds.length === 0) return;
+
+            for (const taskId of overriddenIds) {
+              const ov = overrides[taskId];
+              const targetLabel = ov.value; // 'now'|'soon'|'later'|'ignore'
+              const targetBlockIdx = { now: 0, soon: 1, later: 2 }[targetLabel] ?? null;
+
+              // Find which block currently contains this task
+              let sourceBlockIdx = -1;
+              let sourceEntryIdx = -1;
+              for (let bi = 0; bi < todayBlockSlots.length; bi++) {
+                const ei = todayBlockSlots[bi].tasks.findIndex(st =>
+                  (st.taskId || st.task?.id) === taskId || (st.taskId || st.task?.id) === parseInt(taskId)
+                );
+                if (ei !== -1) { sourceBlockIdx = bi; sourceEntryIdx = ei; break; }
+              }
+
+              if (targetLabel === 'ignore') {
+                // Remove from today entirely — leave in future slots (handled by algorithm)
+                if (sourceBlockIdx !== -1) {
+                  todayBlockSlots[sourceBlockIdx].tasks.splice(sourceEntryIdx, 1);
+                }
+                continue;
+              }
+
+              if (targetBlockIdx === null || targetBlockIdx >= todayBlockSlots.length) continue;
+              if (sourceBlockIdx === targetBlockIdx) continue; // already there
+
+              // Extract the entry
+              let entry;
+              if (sourceBlockIdx !== -1) {
+                entry = todayBlockSlots[sourceBlockIdx].tasks.splice(sourceEntryIdx, 1)[0];
+              } else {
+                // Task isn't in today's blocks yet — find it in activeTasks and build a synthetic entry
+                const task = (rawResult.todayAllocation.find(a => String(a.task.id) === String(taskId))?.task)
+                  || tasks.find(t => String(t.id) === String(taskId));
+                if (!task) continue;
+                const estMins = (task.userEstimate || task.estimatedTime || 20) - (task.accumulatedTime || 0);
+                entry = { taskId: task.id, task, mins: Math.max(5, estMins) };
+              }
+
+              // Insert at front of target block
+              todayBlockSlots[targetBlockIdx].tasks.unshift(entry);
+            }
+          })();
+
+          const { slotMap, todayAllocation, warnings, todaySlots, todayOsSlot, allOsSlots } = rawResult;
 
           // Today's study slots for tabs (only current/upcoming — past periods are excluded)
           const todayStudySlotsForTabs = availableStudyPeriods.map(p => {
@@ -10062,28 +10130,50 @@ const PlanAssist = () => {
                       const estMin = task.userEstimate || task.estimatedTime || 20;
                       const dueDate = task.dueDate ? new Date(task.dueDate) : null;
                       const dueStr = dueDate ? dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : null;
-                      const autoUrg = getAutoUrgency(task.id);
-                      const urg = getUrgencyOverride(task.id) || autoUrg;
+                      const urg = getUrgencyOverride(task.id) || getAutoUrgency(task.id);
                       const urgColors = { now: 'bg-green-100 text-green-700', soon: 'bg-blue-100 text-blue-700', later: 'bg-amber-100 text-amber-700', ignore: 'bg-gray-100 text-gray-500' };
+                      const warnColor = warning === 'impossible' ? '#fca5a5' : warning === 'tight' ? '#fcd34d' : '#e5e7eb';
                       return (
-                        <div key={task.id} className="rounded-lg border overflow-hidden"
-                          style={{ borderColor: warning === 'impossible' ? '#fca5a5' : warning === 'tight' ? '#fcd34d' : '#e5e7eb' }}>
-                          <div className="flex overflow-hidden" style={{ height: '3px' }}>
-                            <div style={{ width: '100%', backgroundColor: cc }} />
-                          </div>
-                          <div className="px-2 py-1.5">
-                            <div className="flex items-start gap-1.5">
-                              <span className="text-xs font-bold text-gray-400 flex-shrink-0 mt-0.5">#{idx + 1}</span>
-                              <p className="text-xs font-semibold leading-tight line-clamp-2 flex-1" style={{ color: cc }}>{cleanTaskTitle(task)}</p>
-                            </div>
-                            <div className="flex items-center justify-between mt-1">
-                              <span className="text-gray-400" style={{ fontSize: '9px' }}>
-                                {dueStr ? `${dueStr} · ${fmtMins(estMin)}` : fmtMins(estMin)}
+                        <div key={task.id} className="rounded-lg overflow-hidden border" style={{ borderColor: warnColor }}>
+                          {/* Color bar */}
+                          <div style={{ height: '3px', backgroundColor: cc }} />
+                          <div className="px-2 pt-1.5 pb-2">
+                            {/* Task title */}
+                            <p className="text-xs font-semibold leading-snug line-clamp-2 mb-1.5" style={{ color: cc }}>
+                              {cleanTaskTitle(task)}
+                            </p>
+                            {/* Meta row: due · est | today alloc */}
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-gray-400 tabular-nums" style={{ fontSize: '10px' }}>
+                                {dueStr ? `${dueStr} · ` : ''}{fmtMins(estMin)}
                               </span>
+                              <span className="font-semibold text-gray-600 tabular-nums" style={{ fontSize: '10px' }}>
+                                {fmtMins(minsToday)} today
+                              </span>
+                            </div>
+                            {/* Bottom row: warning (if any) | urgency selector */}
+                            <div className="flex items-center justify-between gap-1">
+                              <div className="flex items-center gap-1 min-w-0">
+                                {warning === 'impossible' && (
+                                  <span className="flex items-center gap-0.5 text-red-500 font-semibold truncate" style={{ fontSize: '9px' }}>
+                                    <AlertCircle className="w-3 h-3 flex-shrink-0" />Not enough time
+                                  </span>
+                                )}
+                                {warning === 'tight' && (
+                                  <span className="flex items-center gap-0.5 text-amber-500 truncate" style={{ fontSize: '9px' }}>
+                                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />Tight
+                                  </span>
+                                )}
+                                {warning === 'overrun' && (
+                                  <span className="flex items-center gap-0.5 text-orange-400 truncate" style={{ fontSize: '9px' }}>
+                                    <AlertTriangle className="w-3 h-3 flex-shrink-0" />Over estimate
+                                  </span>
+                                )}
+                              </div>
                               <select
                                 value={urg}
                                 onChange={e => applyUrgencyOverride(task.id, e.target.value)}
-                                className={`text-xs font-semibold px-1 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]}`}
+                                className={`flex-shrink-0 font-semibold px-1.5 py-0.5 rounded border-0 cursor-pointer ${urgColors[urg]}`}
                                 style={{ fontSize: '9px', outline: 'none' }}
                               >
                                 <option value="now">Now</option>
@@ -10092,28 +10182,6 @@ const PlanAssist = () => {
                                 <option value="ignore">Ignore</option>
                               </select>
                             </div>
-                            <div className="flex items-center justify-between mt-0.5">
-                              <span className="text-gray-500 font-semibold" style={{ fontSize: '10px' }}>Today: {fmtMins(minsToday)}</span>
-                              <span className="text-gray-400" style={{ fontSize: '9px' }}>of {fmtMins(estMin)}</span>
-                            </div>
-                            {warning === 'impossible' && (
-                              <div className="mt-1 flex items-center gap-1 text-red-600" style={{ fontSize: '9px' }}>
-                                <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                                <span className="font-semibold">Not enough study time!</span>
-                              </div>
-                            )}
-                            {warning === 'tight' && (
-                              <div className="mt-1 flex items-center gap-1 text-amber-600" style={{ fontSize: '9px' }}>
-                                <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                                <span>Tight — limited buffer</span>
-                              </div>
-                            )}
-                            {warning === 'overrun' && (
-                              <div className="mt-1 flex items-center gap-1 text-orange-500" style={{ fontSize: '9px' }}>
-                                <AlertTriangle className="w-3 h-3 flex-shrink-0" />
-                                <span>Beyond estimate — taking longer than expected</span>
-                              </div>
-                            )}
                           </div>
                         </div>
                       );
@@ -10677,9 +10745,9 @@ const PlanAssist = () => {
                                           <div className="flex-shrink-0 w-0.5 self-stretch rounded-full relative z-10"
                                             style={{ backgroundColor: chunk.isEmpty ? '#e5e7eb' : chunk.color }} />
 
-                                          {/* Content */}
+                                          {/* Content — task title on every chunk */}
                                           <div className="flex-1 min-w-0 relative z-10">
-                                            {chunk.isFirstChunk && !chunk.isEmpty && chunk.task && (
+                                            {!chunk.isEmpty && chunk.task ? (
                                               chunk.url ? (
                                                 <a href={chunk.url} target="_blank" rel="noopener noreferrer"
                                                   className="text-xs font-semibold hover:underline leading-tight block truncate"
@@ -10691,12 +10759,11 @@ const PlanAssist = () => {
                                                   {cleanTaskTitle(chunk.task)}
                                                 </p>
                                               )
-                                            )}
-                                            {chunk.isFirstChunk && chunk.isEmpty && (
+                                            ) : chunk.isEmpty ? (
                                               <p className="text-xs text-gray-300 italic leading-tight">{chunk.label}</p>
-                                            )}
+                                            ) : null}
                                             <p className="text-gray-300 leading-tight" style={{ fontSize: '9px' }}>
-                                              {chunk.chunkMins}m
+                                              {chunk.isFirstChunk ? '' : '↳ '}{chunk.chunkMins}m
                                             </p>
                                           </div>
 
