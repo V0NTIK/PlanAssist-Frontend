@@ -1272,8 +1272,8 @@ function ExpandedStudentRow({ student, accum, est, progress, formatMins, timeSin
   return (
     <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-4">
 
-      {/* Top row: session + priorities + urgent */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* Top row: session + urgent */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
         {/* Active session */}
         <div>
@@ -1326,30 +1326,6 @@ function ExpandedStudentRow({ student, accum, est, progress, formatMins, timeSin
                   Synced {new Date(student.user.lastSync).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
                 </p>
               )}
-            </div>
-          )}
-        </div>
-
-        {/* Focus list */}
-        <div>
-          <p className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">
-            Focus List ({student.priorities.length})
-          </p>
-          {student.priorities.length === 0 ? (
-            <div className="bg-gray-50 rounded-xl p-3 border border-gray-200 text-center">
-              <p className="text-sm text-gray-400">No focus list set today</p>
-            </div>
-          ) : (
-            <div className="space-y-1 max-h-44 overflow-y-auto">
-              {student.priorities.map((t, i) => (
-                <div key={t.id} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs ${t.completed ? 'bg-gray-50 opacity-60' : 'bg-white border border-gray-100'}`}>
-                  <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold flex-shrink-0 ${t.completed ? 'bg-green-100 text-green-600' : 'bg-purple-100 text-purple-600'}`}>
-                    {t.completed ? '✓' : i + 1}
-                  </span>
-                  <p className={`flex-1 truncate font-medium ${t.completed ? 'line-through text-gray-400' : 'text-gray-800'}`}>{t.title}</p>
-                  <span className="text-gray-400 flex-shrink-0">{formatMins(t.user_estimated_time || t.estimated_time)}</span>
-                </div>
-              ))}
             </div>
           )}
         </div>
@@ -1642,7 +1618,7 @@ function MonitorPage({ token, studios }) {
                       <p className="text-xs text-gray-400">Grade {student.user.grade || '—'}</p>
                     </div>
 
-                    {/* Status pill + priorities badge */}
+                    {/* Status pill */}
                     <div className="flex flex-col gap-1 w-28 flex-shrink-0">
                       {student.isActive ? (
                         <span className="inline-flex items-center gap-1 bg-green-50 text-green-700 text-xs font-semibold px-2.5 py-1 rounded-full border border-green-200">
@@ -1653,15 +1629,7 @@ function MonitorPage({ token, studios }) {
                           Idle
                         </span>
                       )}
-                      {student.priorities.length > 0 ? (
-                        <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-600 text-[10px] font-semibold px-2 py-0.5 rounded-full border border-purple-200">
-                          <Zap className="w-2.5 h-2.5" /> {student.priorities.length} focus
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 bg-gray-50 text-gray-300 text-[10px] font-medium px-2 py-0.5 rounded-full border border-gray-100">
-                          no focus set
-                        </span>
-                      )}
+
                     </div>
 
                     {/* Current task */}
@@ -2054,6 +2022,7 @@ function MarksPage({ token, studios }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function HPTLoginPage({ onLogin, onBack }) {
+  const [name, setName] = useState('');
   const [passcode, setPasscode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -2063,10 +2032,12 @@ function HPTLoginPage({ onLogin, onBack }) {
     setLoading(true);
     setError('');
     try {
-      const data = await apiCall('/hpt/auth/login', 'POST', { passcode });
+      // Send name alongside passcode so the server can do a targeted lookup
+      // instead of bcrypt-comparing every teacher account
+      const data = await apiCall('/hpt/auth/login', 'POST', { passcode, name: name.trim() });
       onLogin(data);
     } catch (e) {
-      setError('Invalid passcode. Please check with your administrator.');
+      setError('Invalid name or passcode. Please check with your administrator.');
     } finally { setLoading(false); }
   };
 
@@ -2101,6 +2072,18 @@ function HPTLoginPage({ onLogin, onBack }) {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Your Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+              placeholder="Enter your name"
+              autoFocus
+              required
+            />
+          </div>
+          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Teacher Passcode</label>
             <input
               type="password"
@@ -2108,7 +2091,6 @@ function HPTLoginPage({ onLogin, onBack }) {
               onChange={e => setPasscode(e.target.value)}
               className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
               placeholder="Enter your passcode"
-              autoFocus
               required
             />
           </div>
