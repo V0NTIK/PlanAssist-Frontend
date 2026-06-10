@@ -1168,6 +1168,17 @@ const PlanAssist = () => {
     return task.segment ? `${baseTitle} - ${task.segment}` : baseTitle;
   };
 
+  // HTML-escape a string for safe insertion into innerHTML (PiP window, etc.)
+  const escHtml = (str) => {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  };
+
   // Get color for a class
   const getClassColor = (taskOrClassName) => {
     // Handle if passed a string directly (className)
@@ -1225,7 +1236,10 @@ const PlanAssist = () => {
   };
 
   // API helper
-  const apiCall = async (endpoint, method = 'GET', body = null) => {
+  // silent: true — suppresses setSessionExpired on 401/403. Use for background/parallel
+  // calls that fire during cold-start so a transient 401 from one call can't poison the
+  // session state for the whole app while loadUserData is still warming up.
+  const apiCall = async (endpoint, method = 'GET', body = null, { silent = false } = {}) => {
     if (!navigator.onLine) throw new Error('You are offline. Please reconnect and try again.');
     const headers = { 'Content-Type': 'application/json' };
     // Use tokenRef.current (always up-to-date) instead of token state (stale closure risk in intervals)
@@ -1242,12 +1256,13 @@ const PlanAssist = () => {
       if (response.status === 403) {
         const errBody = await response.json().catch(() => ({}));
         if (errBody.error === 'ACCOUNT_BLOCKED') {
-          setSessionExpired(true);
+          if (!silent) setSessionExpired(true);
           throw new Error('ACCOUNT_BLOCKED');
         }
       }
       // JWT expired or invalid — session is dead. Show re-auth prompt.
-      setSessionExpired(true);
+      // Only trigger the modal if this is not a silent background call.
+      if (!silent) setSessionExpired(true);
       throw new Error('Session expired');
     }
     if (!response.ok) {
@@ -2793,7 +2808,7 @@ const PlanAssist = () => {
         pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
           <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;overflow:hidden;">
-            <div style="font-size:10px;font-weight:500;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${titleText}</div>
+            <div style="font-size:10px;font-weight:500;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${escHtml(titleText)}</div>
             <div id="pip-elapsed" style="font-size:46px;font-weight:700;color:white;font-variant-numeric:tabular-nums;letter-spacing:0;line-height:1;">${initStr}</div>
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
@@ -2811,9 +2826,9 @@ const PlanAssist = () => {
             <div class="pip-top">
               <div class="pip-class">
                 <span class="pip-class-dot" style="background:${classColor}"></span>
-                <span>${classLabel}</span>
+                <span>${escHtml(classLabel)}</span>
               </div>
-              <div class="pip-title">${titleText}</div>
+              <div class="pip-title">${escHtml(titleText)}</div>
               <div>
                 <div class="pip-timer" id="pip-elapsed">${initStr}</div>
                 <div class="pip-timer-label">Time on this task</div>
@@ -2886,7 +2901,7 @@ const PlanAssist = () => {
         pipWin.document.head.insertAdjacentHTML('beforeend', '<style>html,body{margin:0;padding:0;overflow:hidden;height:100%;}</style>');
         pipWin.document.body.innerHTML = `
           <div style="background:linear-gradient(135deg,${t.grad1},${t.grad2});height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:10px 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;box-sizing:border-box;overflow:hidden;">
-            <div style="font-size:10px;font-weight:500;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${titleText}</div>
+            <div style="font-size:10px;font-weight:500;color:${t.topSubtext};margin-bottom:3px;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:196px;width:100%;">${escHtml(titleText)}</div>
             <div id="pip-agenda-elapsed" style="font-size:46px;font-weight:700;color:white;font-variant-numeric:tabular-nums;letter-spacing:0;line-height:1;">${elStr}</div>
             <div style="font-size:9px;color:${t.topSubtext};margin-top:2px;">Time on task</div>
           </div>`;
@@ -2908,7 +2923,7 @@ const PlanAssist = () => {
           <div class="pip-alt-wrap">
             <div class="pip-alt-class">
               <span class="pip-alt-class-dot" style="background:${classColor}"></span>
-              <span>${classLabel}</span>
+              <span>${escHtml(classLabel)}</span>
             </div>
             <div class="pip-alt-title">${actionTitle}</div>
             <div>
@@ -2945,7 +2960,7 @@ const PlanAssist = () => {
             <div class="pip-top">
               <div class="pip-class">
                 <span class="pip-class-dot" style="background:${classColor}"></span>
-                <span>${classLabel}</span>
+                <span>${escHtml(classLabel)}</span>
               </div>
               <div class="pip-action-title">${actionTitle}</div>
               <div class="pip-timer-row">
@@ -4784,7 +4799,7 @@ const PlanAssist = () => {
     const loadTasksWithNotes = async () => {
       if (!isAuthenticated || tasks.length === 0) return;
       try {
-        const data = await apiCall('/tasks/notes-index', 'GET');
+        const data = await apiCall('/tasks/notes-index', 'GET', null, { silent: true });
         setTasksWithNotes(new Set(data.taskIds || []));
       } catch (error) {
         console.error('Failed to load tasks with notes:', error);
@@ -4800,7 +4815,7 @@ const PlanAssist = () => {
 
   const loadCourses = async () => {
     try {
-      const data = await apiCall('/courses', 'GET');
+      const data = await apiCall('/courses', 'GET', null, { silent: true });
       const courseList = data || [];
       setCourses(courseList);
       // Fetch class averages for each course in parallel
@@ -4821,14 +4836,14 @@ const PlanAssist = () => {
 
   const loadGradeImpact = async () => {
     try {
-      const data = await apiCall('/tasks/grade-impact', 'GET');
+      const data = await apiCall('/tasks/grade-impact', 'GET', null, { silent: true });
       setGradeImpact(data || {});
     } catch (e) { console.error('Failed to load grade impact:', e); }
   };
 
   const loadGoals = async () => {
     try {
-      const data = await apiCall('/goals', 'GET');
+      const data = await apiCall('/goals', 'GET', null, { silent: true });
       setUserGoals(data || {});
       setGoalsLoaded(true);
     } catch (e) {
@@ -6185,7 +6200,7 @@ const PlanAssist = () => {
   const loadInsignia = async () => {
     setInsigniaLoading(true);
     try {
-      const data = await apiCall('/insignia', 'GET');
+      const data = await apiCall('/insignia', 'GET', null, { silent: true });
       setInsigniaDays(data.days ?? 0);
       setInsigniaSelected(data.selected ?? 'Default');
       setInsigniaUnlocked(data.unlocked ?? []);
@@ -6195,7 +6210,7 @@ const PlanAssist = () => {
   const loadBadges = async () => {
     setGalleryLoading(true);
     try {
-      const data = await apiCall('/badges', 'GET');
+      const data = await apiCall('/badges', 'GET', null, { silent: true });
       setUserBadges(data.badges ?? []);
     } catch (err) { console.error('loadBadges error:', err.message); } finally { setGalleryLoading(false); }
   };
@@ -6246,7 +6261,7 @@ const PlanAssist = () => {
 
   const loadCompletionFeed = async () => {
     try {
-      const data = await apiCall('/completion-feed', 'GET');
+      const data = await apiCall('/completion-feed', 'GET', null, { silent: true });
       setCompletionFeed(data || []);
     } catch (error) {
       // Silently ignore - backend may be cold-starting on Render free tier
@@ -6271,11 +6286,11 @@ const PlanAssist = () => {
     if (!user || !user.grade) return;
     
     try {
-      const data = await apiCall(`/leaderboard/${user.grade}`, 'GET');
+      const data = await apiCall(`/leaderboard/${user.grade}`, 'GET', null, { silent: true });
       setLeaderboard(data || []);
       
       // Also get user's position
-      const position = await apiCall(`/leaderboard/position/${user.grade}`, 'GET');
+      const position = await apiCall(`/leaderboard/position/${user.grade}`, 'GET', null, { silent: true });
       setUserLeaderboardPosition(position);
     } catch (error) {
       // Silently ignore - backend may be cold-starting on Render free tier
@@ -6284,14 +6299,14 @@ const PlanAssist = () => {
 
   const loadStudioBanners = async () => {
     try {
-      const data = await apiCall('/studios/hub-banners', 'GET');
+      const data = await apiCall('/studios/hub-banners', 'GET', null, { silent: true });
       setStudioBanners(Array.isArray(data) ? data : []);
     } catch (e) { /* silently ignore */ }
   };
 
   const loadMyStudios = async () => {
     try {
-      const data = await apiCall('/studios/mine', 'GET');
+      const data = await apiCall('/studios/mine', 'GET', null, { silent: true });
       setMyStudios(Array.isArray(data) ? data : []);
     } catch (e) { /* silently ignore */ }
   };
@@ -6306,7 +6321,7 @@ const PlanAssist = () => {
   const loadNotifications = async () => {
     setNotifLoading(true);
     try {
-      const data = await apiCall('/notifications', 'GET');
+      const data = await apiCall('/notifications', 'GET', null, { silent: true });
       const arr = Array.isArray(data) ? data : [];
       setNotifications(arr);
       // Total unread = all types (alerts + updates) so the bell badge reflects both
@@ -6317,7 +6332,7 @@ const PlanAssist = () => {
 
   const loadNotifPrefs = async () => {
     try {
-      const data = await apiCall('/user/notification-prefs', 'GET');
+      const data = await apiCall('/user/notification-prefs', 'GET', null, { silent: true });
       if (data) setNotifPrefs(prev => ({ ...prev, ...data }));
     } catch (e) { /* silently ignore */ }
   };
@@ -6371,7 +6386,7 @@ const PlanAssist = () => {
 
   const loadHubInsights = async () => {
     try {
-      const data = await apiCall('/hub/insights', 'GET');
+      const data = await apiCall('/hub/insights', 'GET', null, { silent: true });
       setHubInsights(data);
     } catch (e) { /* non-fatal */ }
   };
