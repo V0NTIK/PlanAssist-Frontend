@@ -11477,30 +11477,33 @@ const PlanAssist = () => {
 
           // Outside School tasks for viewed date — find an exported Outside School agenda for this date
           const getOrgOutsideSchoolTasks = () => {
-            // The Organizer exports agendas named like: "Outside School - 3 Tasks - 6/7/2026"
-            // Also check for agendas appointed with agenda_period='outside' for this date (via agendas state)
             const [y, mo, d] = viewDateStr.split('-').map(Number);
             const dateLabel = `${mo}/${d}/${y}`;
-            // Check itineraryAgendas (fetched from /api/itinerary for this date) — title match
-            const osFromItinerary = itineraryAgendas.find(ag =>
-              ag.name && ag.name.startsWith('Outside School') && ag.name.endsWith(` - ${dateLabel}`)
-            );
-            if (osFromItinerary) {
-              return (osFromItinerary.rows || []).map(row => {
+
+            // Helper to extract rows from a matched agenda
+            const rowsFromAgenda = (ag) =>
+              (ag.rows || []).map(row => {
                 const t = tasks.find(tk => tk.id === row.taskId);
                 return t ? { task: t, mins: row.timeMins, action: row.action } : null;
               }).filter(Boolean);
-            }
-            // Check agendas state (appointed agendas with period='outside' for this date)
+
+            // 1. Prefer agenda_period column match from itineraryAgendas
+            //    (server now returns agenda_period so this is the most reliable path)
+            const osFromPeriod = itineraryAgendas.find(ag => ag.agenda_period === 'outside');
+            if (osFromPeriod) return rowsFromAgenda(osFromPeriod);
+
+            // 2. Title match in itineraryAgendas (legacy fallback for agendas without agenda_period set)
+            const osFromTitle = itineraryAgendas.find(ag =>
+              ag.name && ag.name.startsWith('Outside School') && ag.name.endsWith(` - ${dateLabel}`)
+            );
+            if (osFromTitle) return rowsFromAgenda(osFromTitle);
+
+            // 3. Check agendas state directly (covers case where itinerary hasn't reloaded yet)
             const osFromAgendas = agendas.find(ag =>
               ag.agenda_period === 'outside' && ag.agenda_date === viewDateStr
             );
-            if (osFromAgendas) {
-              return (osFromAgendas.rows || []).map(row => {
-                const t = tasks.find(tk => tk.id === row.taskId);
-                return t ? { task: t, mins: row.timeMins, action: row.action } : null;
-              }).filter(Boolean);
-            }
+            if (osFromAgendas) return rowsFromAgenda(osFromAgendas);
+
             return [];
           };
 
