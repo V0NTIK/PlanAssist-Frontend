@@ -3787,7 +3787,15 @@ const PlanAssist = () => {
       const response = await fetch(`${API_URL}/announcements`, { headers });
       if (!response.ok) return;
       const data = await response.json();
-      setAnnouncements(data || []);
+      // Merge server dismissed state with any local dismissals made this session
+      // so the 60s poll never resurfaces a banner the user already dismissed
+      setAnnouncements(prev => {
+        const localDismissed = new Set(prev.filter(a => a.dismissed).map(a => a.id));
+        return (data || []).map(a => ({
+          ...a,
+          dismissed: a.dismissed || localDismissed.has(a.id),
+        }));
+      });
     } catch (err) { /* silent */ }
   };
 
@@ -3808,10 +3816,12 @@ const PlanAssist = () => {
   };
 
   const dismissAnnouncement = async (id) => {
+    // Optimistically hide immediately regardless of type
+    setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
     try {
-      await apiCall(`/announcements/${id}/dismiss`, 'POST');
-      setAnnouncements(prev => prev.map(a => a.id === id ? { ...a, dismissed: true } : a));
-    } catch (err) { /* silent */ }
+      // Write dismissal to DB so it persists across reloads (both types)
+      await apiCall(`/announcements/${id}/dismiss`, 'POST', null, { silent: true });
+    } catch (err) { /* silent — client-side hide already applied */ }
   };
 
   // ── Admin functions ────────────────────────────────────────────────────────
@@ -4733,9 +4743,11 @@ const PlanAssist = () => {
           const lesson = scheduleLessonsRef.current.find(sl => sl.day === todayName && sl.period === period);
           const zoomNumber = lesson?.zoom_number || null;
 
+          // Always fire the banner and sound — zoom number is optional.
+          // If no zoom number, the banner shows the period starting without a join link.
+          startAlarmSound(false);
+          setZoomBanner({ period, zoomNumber, isTutorial: false, isMeeting: false, title: null });
           if (zoomNumber) {
-            startAlarmSound(false);
-            setZoomBanner({ period, zoomNumber, isTutorial: false, isMeeting: false, title: null });
             launchZoomPing(zoomNumber, false, colorThemeRef.current);
           }
           break; // only one period can be in-window at a time
@@ -7169,12 +7181,14 @@ const PlanAssist = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <a href={`https://oneschoolglobal.zoom.us/j/${zoomBanner.zoomNumber.replace(/[\s\-]/g, '')}`}
-              target="_blank" rel="noopener noreferrer"
-              onClick={() => { if (zoomAlarmStopRef.current) zoomAlarmStopRef.current(); }}
-              className="bg-white text-gray-800 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">
-              Join Zoom
-            </a>
+            {zoomBanner.zoomNumber && (
+              <a href={`https://oneschoolglobal.zoom.us/j/${zoomBanner.zoomNumber.replace(/[\s\-]/g, '')}`}
+                target="_blank" rel="noopener noreferrer"
+                onClick={() => { if (zoomAlarmStopRef.current) zoomAlarmStopRef.current(); }}
+                className="bg-white text-gray-800 font-semibold text-sm px-4 py-1.5 rounded-lg hover:bg-gray-50 transition-colors">
+                Join Zoom
+              </a>
+            )}
             <button onClick={() => { if (zoomAlarmStopRef.current) zoomAlarmStopRef.current(); else setZoomBanner(null); }} className="opacity-60 hover:opacity-100"><X className="w-5 h-5" /></button>
           </div>
         </div>
@@ -7401,14 +7415,13 @@ const PlanAssist = () => {
               : <Bell className="w-4 h-4 flex-shrink-0" />}
             <span>{a.message}</span>
           </div>
-          {a.type === 'info' && (
-            <button
-              onClick={() => dismissAnnouncement(a.id)}
-              className="ml-4 flex-shrink-0 opacity-80 hover:opacity-100"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            onClick={() => dismissAnnouncement(a.id)}
+            className="ml-4 flex-shrink-0 opacity-80 hover:opacity-100"
+            aria-label="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       ))}
 
