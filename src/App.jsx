@@ -1,7 +1,3 @@
-// Copyright © 2026 Orlando Wyman. All rights reserved.
-// This source code is proprietary and confidential.
-// Unauthorized copying, distribution, or use of this file, via any medium, is strictly prohibited.
-
 // PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
 // App.jsx - PART 1: Imports and State
 
@@ -49,6 +45,38 @@ const CAMPUS_PERIODS = {
   'Stonewall':      '3-7',
   'Trinidad':       '1-5',
   'Vancouver':      '4-8',
+  // ── Australian campuses — always 1-6
+  'Adelaide':       '1-6',
+  'Albany':         '1-6',
+  'Albury':         '1-6',
+  'Armidale':       '1-6',
+  'Bairnsdale':     '1-6',
+  'Bendigo':        '1-6',
+  'Berwick':        '1-6',
+  'Brisbane':       '1-6',
+  'Condobolin':     '1-6',
+  'Cowra':          '1-6',
+  'Dalwallinu':     '1-6',
+  'Gnowangerup':    '1-6',
+  'Goulburn':       '1-6',
+  'Hamilton':       '1-6',
+  'Hobart':         '1-6',
+  'Illawara':       '1-6',
+  'Launceston':     '1-6',
+  'Leeton':         '1-6',
+  'Maitland':       '1-6',
+  'Maryborough':    '1-6',
+  'Melton':         '1-6',
+  'Mt Victoria':    '1-6',
+  'Nambour':        '1-6',
+  'Nathalia':       '1-6',
+  'Northam':        '1-6',
+  'Orange':         '1-6',
+  'Perth':          '1-6',
+  'Swan Hill':      '1-6',
+  'Sydney':         '1-6',
+  'Toowoomba':      '1-6',
+  'Wagga Wagga':    '1-6',
 };
 // DST (daylight saving time) period ranges — differ for campuses whose local
 // clocks shift but the OSG broadcast time (UTC) stays fixed.
@@ -89,7 +117,63 @@ const CAMPUS_PERIODS_DST = {
   'Stonewall':      '3-7',
   'Trinidad':       '2-6',
   'Vancouver':      '4-8',
+  // ── Australian campuses — always 1-6 regardless of DST
+  'Adelaide':       '1-6',
+  'Albany':         '1-6',
+  'Albury':         '1-6',
+  'Armidale':       '1-6',
+  'Bairnsdale':     '1-6',
+  'Bendigo':        '1-6',
+  'Berwick':        '1-6',
+  'Brisbane':       '1-6',
+  'Condobolin':     '1-6',
+  'Cowra':          '1-6',
+  'Dalwallinu':     '1-6',
+  'Gnowangerup':    '1-6',
+  'Goulburn':       '1-6',
+  'Hamilton':       '1-6',
+  'Hobart':         '1-6',
+  'Illawara':       '1-6',
+  'Launceston':     '1-6',
+  'Leeton':         '1-6',
+  'Maitland':       '1-6',
+  'Maryborough':    '1-6',
+  'Melton':         '1-6',
+  'Mt Victoria':    '1-6',
+  'Nambour':        '1-6',
+  'Nathalia':       '1-6',
+  'Northam':        '1-6',
+  'Orange':         '1-6',
+  'Perth':          '1-6',
+  'Swan Hill':      '1-6',
+  'Sydney':         '1-6',
+  'Toowoomba':      '1-6',
+  'Wagga Wagga':    '1-6',
 };
+
+// Australian campuses set — used for region-aware logic throughout the app
+const AUSTRALIAN_CAMPUSES = new Set([
+  'Adelaide','Albany','Albury','Armidale','Bairnsdale','Bendigo','Berwick',
+  'Brisbane','Condobolin','Cowra','Dalwallinu','Gnowangerup','Goulburn','Hamilton',
+  'Hobart','Illawara','Launceston','Leeton','Maitland','Maryborough','Melton',
+  'Mt Victoria','Nambour','Nathalia','Northam','Orange','Perth','Swan Hill',
+  'Sydney','Toowoomba','Wagga Wagga',
+]);
+
+// Australian campus list sorted alphabetically for dropdowns
+const AU_CAMPUSES_SORTED = [
+  'Adelaide','Albany','Albury','Armidale','Bairnsdale','Bendigo','Berwick',
+  'Brisbane','Condobolin','Cowra','Dalwallinu','Gnowangerup','Goulburn','Hamilton',
+  'Hobart','Illawara','Launceston','Leeton','Maitland','Maryborough','Melton',
+  'Mt Victoria','Nambour','Nathalia','Northam','Orange','Perth','Swan Hill',
+  'Sydney','Toowoomba','Wagga Wagga',
+];
+
+// Period duration: 60 min for NA, 50 min for Australia
+const PERIOD_DURATION_BY_REGION = { 'Australia': 50, 'North America': 60 };
+function getPeriodDuration(region) {
+  return PERIOD_DURATION_BY_REGION[region] || 60;
+}
 const VALID_CAMPUSES = Object.keys(CAMPUS_PERIODS);
 
 // Returns the standard-time period range string for a campus.
@@ -698,6 +782,7 @@ const PlanAssist = () => {
     grade: '',
     canvasApiToken: '',
     campus: '',
+    region: 'North America',
     tzPeriods: null,  // populated from server; null means fall back to getEffectivePeriods(campus)
     schedule: {},
     classColors: {},
@@ -1454,6 +1539,7 @@ const PlanAssist = () => {
           grade: setupData.grade || '',
           canvasApiToken: setupData.canvasApiToken || '',
           campus: setupData.campus || 'Ashland',
+          region: setupData.region || 'North America',
           // tzPeriods is computed server-side at request time using UTC-based NA DST detection,
           // so it's always correct regardless of the user's browser timezone.
           tzPeriods: setupData.tzPeriods || getEffectivePeriods(setupData.campus || 'Ashland'),
@@ -1474,7 +1560,9 @@ const PlanAssist = () => {
         localStorage.setItem('tzPeriods', setupData.tzPeriods || getEffectivePeriods(setupData.campus || 'Ashland'));
         setScheduleEnhanced(setupData.schedule_enhanced || false);
         // Load itinerary panel toggle prefs
-        setItineraryShowEvents(setupData.itinerary_show_events !== false);
+        // Australian users: Events panel is always hidden (no bookings system)
+        const isAustralian = AUSTRALIAN_CAMPUSES.has(setupData.campus || '');
+        setItineraryShowEvents(isAustralian ? false : (setupData.itinerary_show_events !== false));
         setItineraryShowOrganizer(setupData.itinerary_show_organizer !== false);
         setItineraryShowAgenda(setupData.itinerary_show_agenda !== false);
         // Sync name + isAdmin from DB (in case admin changed it)
@@ -1780,6 +1868,7 @@ const PlanAssist = () => {
         grade: accountSetup.grade,
         canvasApiToken: accountSetup.canvasApiToken,
         campus: accountSetup.campus,
+        region: accountSetup.region || 'North America',
         schedule: accountSetup.schedule,
         calendarShowHomeroom: accountSetup.calendarShowHomeroom,
         calendarShowCompleted: accountSetup.calendarShowCompleted,
@@ -1833,6 +1922,7 @@ const PlanAssist = () => {
       await apiCall('/account/setup', 'POST', {
         grade: merged.grade,
         campus: merged.campus,
+        region: merged.region || 'North America',
         schedule: merged.schedule,
         calendarShowHomeroom: merged.calendarShowHomeroom,
         calendarShowCompleted: merged.calendarShowCompleted,
@@ -8002,7 +8092,7 @@ const PlanAssist = () => {
                     <h3 className="text-lg font-bold text-gray-900 mb-1">Manage Tasks</h3>
                     <p className="text-sm text-gray-600">View your task list</p>
                   </button>
-                  {user?.grade && parseInt(user.grade) >= 7 && parseInt(user.grade) <= 12 && scheduleEnhanced && (
+                  {user?.grade && parseInt(user.grade) >= 7 && parseInt(user.grade) <= 12 && scheduleEnhanced && accountSetup.region !== 'Australia' && (
                     <button onClick={() => { setBookingTab('tutorial'); setBookingDate(''); setBookingTime(''); setBookingCourse(''); setBookingMeetingTitle(''); setBookingZoom(''); setShowBookingModal('itinerary'); }}
                       className="bg-white rounded-xl shadow-md p-6 hover:shadow-lg transition-all text-left border-2 border-transparent hover:border-orange-200">
                       <BookOpen className="w-10 h-10 text-orange-500 mb-3" />
@@ -9494,7 +9584,7 @@ const PlanAssist = () => {
             4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
             7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
           };
-          const PERIOD_DURATION_MINS = 60;
+          const PERIOD_DURATION_MINS = getPeriodDuration(accountSetup.region);
 
           const now = new Date();
           const campusOffsetHours = getCampusOffsetHours(accountSetup.campus || 'Ashland');
@@ -11263,7 +11353,8 @@ const PlanAssist = () => {
             4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
             7: { h: 19, m: 7  }, 8: { h: 20, m: 37 }
           };
-          const PERIOD_DURATION_MINS = 60;
+          const PERIOD_DURATION_MINS = getPeriodDuration(accountSetup.region);
+          const isAustralianUser = accountSetup.region === 'Australia';
           const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
           const today = new Date();
           const viewDate = itineraryDate || today;
@@ -11564,11 +11655,13 @@ const PlanAssist = () => {
                   <button onClick={() => navigateItinerary(1)} className="p-2 rounded-lg hover:bg-gray-100 text-gray-600">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
                   </button>
+                  {!isAustralianUser && (
                   <button
                     onClick={() => { setBookingTab('tutorial'); setBookingDate(viewDateStr); setBookingPeriod(''); setBookingCourse(''); setBookingMeetingTitle(''); setBookingZoom(''); setShowBookingModal('itinerary'); }}
                     className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg font-semibold hover:bg-orange-600 text-sm transition-colors">
                     <BookOpen className="w-4 h-4" /> Make a Booking
                   </button>
+                  )}
                 </div>
               </div>
 
@@ -11717,15 +11810,15 @@ const PlanAssist = () => {
                     return (
                       <div key={period}
                         className={`rounded-2xl border-2 overflow-hidden transition-all ${
-                          isCurrentPeriod ? 'border-purple-400 shadow-md' : isPastPeriod ? 'border-gray-100 opacity-70' : 'border-gray-200'
+                          !isAustralianUser && isCurrentPeriod ? 'border-purple-400 shadow-md' : isPastPeriod ? 'border-gray-100 opacity-70' : 'border-gray-200'
                         }`}>
                         {/* Period header with time bar */}
-                        <div className={`flex items-center gap-3 px-4 py-2 ${isLesson ? 'bg-blue-50 border-b border-blue-100' : isCurrentPeriod ? 'bg-purple-50 border-b border-purple-100' : 'bg-gray-50 border-b border-gray-100'}`}>
+                        <div className={`flex items-center gap-3 px-4 py-2 ${isLesson ? 'bg-blue-50 border-b border-blue-100' : (!isAustralianUser && isCurrentPeriod) ? 'bg-purple-50 border-b border-purple-100' : 'bg-gray-50 border-b border-gray-100'}`}>
                           {/* Time column */}
                           <div className="flex-shrink-0 text-center" style={{ minWidth: '80px' }}>
                             <p className="text-xs font-bold text-gray-700">Period {period}</p>
-                            <p className="text-xs text-gray-500">{startLabel}</p>
-                            {isCurrentPeriod && (
+                            {!isAustralianUser && <p className="text-xs text-gray-500">{startLabel}</p>}
+                            {!isAustralianUser && isCurrentPeriod && (
                               <div className="mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden w-full">
                                 <div className="h-full bg-purple-500 rounded-full transition-all" style={{ width: `${progressPct}%` }} />
                               </div>
@@ -11746,8 +11839,8 @@ const PlanAssist = () => {
                               </a>
                             )}
                           </div>
-                          <p className="text-xs text-gray-400 flex-shrink-0">{startLabel}{endLabel ? ` – ${endLabel}` : ''}</p>
-                          {isCurrentPeriod && <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full font-semibold flex-shrink-0">Now</span>}
+                          {!isAustralianUser && <p className="text-xs text-gray-400 flex-shrink-0">{startLabel}{endLabel ? ` – ${endLabel}` : ''}</p>}
+                          {!isAustralianUser && isCurrentPeriod && <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded-full font-semibold flex-shrink-0">Now</span>}
                         </div>
 
                         {/* Period body — multi-column layout */}
@@ -12381,30 +12474,50 @@ const PlanAssist = () => {
                       </div>
                     </div>
 
+                    {/* Region */}
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">Region <span className="text-red-500">*</span></label>
+                      <select value={accountSetup.region || 'North America'}
+                        onChange={(e) => {
+                          const newRegion = e.target.value;
+                          // Reset campus when region changes to avoid invalid campus for region
+                          setAccountSetup(prev => ({ ...prev, region: newRegion, campus: '', schedule: {} }));
+                        }}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                        <option value="North America">North America</option>
+                        <option value="Australia">Australia</option>
+                      </select>
+                    </div>
+
                     {/* Campus */}
                     <div className="relative">
                       <label className="block text-sm font-medium text-gray-700 mb-2">Campus <span className="text-red-500">*</span></label>
-                      <input
-                        value={accountSetup.campus || ''}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setAccountSetup(prev => ({ ...prev, campus: val }));
-                        }}
-                        onFocus={(e) => {
-                          const val = e.target.value;
-                          const q = val.toLowerCase();
-                          const matches = q ? VALID_CAMPUSES.filter(c => c.toLowerCase().includes(q)) : VALID_CAMPUSES;
-                          e.target.setAttribute('data-show-list', 'true');
-                          // Use a sibling state via a tiny inline trick — we'll rely on a wrapper state
-                        }}
-                        list="campus-list-signup"
-                        placeholder="Type or select your campus..."
-                        className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500" />
-                      <datalist id="campus-list-signup">
-                        {VALID_CAMPUSES.map(c => <option key={c} value={c} />)}
-                      </datalist>
-                      {accountSetup.campus && !VALID_CAMPUSES.includes(accountSetup.campus) && (
-                        <p className="text-xs text-red-500 mt-1">Please select a valid campus from the list.</p>
+                      {accountSetup.region === 'Australia' ? (
+                        <select
+                          value={accountSetup.campus || ''}
+                          onChange={(e) => setAccountSetup(prev => ({ ...prev, campus: e.target.value }))}
+                          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500">
+                          <option value="">Select your campus...</option>
+                          {AU_CAMPUSES_SORTED.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      ) : (
+                        <>
+                        <input
+                          value={accountSetup.campus || ''}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setAccountSetup(prev => ({ ...prev, campus: val }));
+                          }}
+                          list="campus-list-signup"
+                          placeholder="Type or select your campus..."
+                          className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500" />
+                        <datalist id="campus-list-signup">
+                          {VALID_CAMPUSES.filter(c => !AUSTRALIAN_CAMPUSES.has(c)).map(c => <option key={c} value={c} />)}
+                        </datalist>
+                        {accountSetup.campus && !VALID_CAMPUSES.includes(accountSetup.campus) && (
+                          <p className="text-xs text-red-500 mt-1">Please select a valid campus from the list.</p>
+                        )}
+                        </>
                       )}
                     </div>
 
@@ -12412,7 +12525,7 @@ const PlanAssist = () => {
                     {accountSetup.campus && VALID_CAMPUSES.includes(accountSetup.campus) && (
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">Weekly Schedule <span className="text-red-500">*</span></label>
-                        <p className="text-xs text-gray-500 mb-3">Showing periods for <span className="font-semibold text-purple-700">{accountSetup.campus}</span>. Set each period to Study or Lesson.</p>
+                        <p className="text-xs text-gray-500 mb-3">Showing {accountSetup.region === 'Australia' ? '6 periods (50 min each)' : 'periods'} for <span className="font-semibold text-purple-700">{accountSetup.campus}</span>. Set each period to Study or Lesson.</p>
                         <div className="border border-gray-200 rounded-xl overflow-hidden">
                           <table className="w-full">
                             <thead className="bg-gray-50">
@@ -12844,6 +12957,7 @@ const PlanAssist = () => {
                           <div>
                             <h3 className="text-sm font-semibold text-gray-700 mb-3">Itinerary</h3>
                             <div className="border border-gray-200 rounded-xl p-4 space-y-4">
+                              {accountSetup.region !== 'Australia' && (
                               <div className="flex items-center justify-between gap-3">
                                 <div>
                                   <p className="font-medium text-gray-900 text-sm">Show Events panel</p>
@@ -12861,6 +12975,7 @@ const PlanAssist = () => {
                                   <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ${itineraryShowEvents ? 'translate-x-5' : 'translate-x-0'}`} />
                                 </button>
                               </div>
+                              )}
                               <div className="border-t border-gray-100 pt-4 flex items-center justify-between gap-3">
                                 <div>
                                   <p className="font-medium text-gray-900 text-sm">Show Study Plan panel</p>
