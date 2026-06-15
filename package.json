@@ -2,6 +2,8 @@
   "name": "planassist-frontend",
   "version": "1.0.0",
   "private": true,
+  "author": "Orlando Wyman",
+  "license": "UNLICENSED",
   "description": "PlanAssist - OneSchool Global Study Planner Frontend",
   "type": "module",
   "scripts": {
