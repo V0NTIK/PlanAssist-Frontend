@@ -7722,12 +7722,12 @@ const PlanAssist = () => {
                   // ── Local data insights ──────────────────────────────────
                   // 1. Estimate accuracy over last 5 completions
                   if (completionHistory && completionHistory.length >= 5) {
-                    const last5 = completionHistory.slice(0, 5).filter(t => t.estimated_time > 0 && t.actual_time > 0);
+                    const last5 = completionHistory.slice(0, 5).filter(t => t.estimatedTime > 0 && t.actualTime > 0);
                     if (last5.length >= 3) {
-                      const overBy = last5.filter(t => t.actual_time > t.estimated_time * 1.4);
-                      const underBy = last5.filter(t => t.actual_time < t.estimated_time * 0.6);
+                      const overBy = last5.filter(t => t.actualTime > t.estimatedTime * 1.4);
+                      const underBy = last5.filter(t => t.actualTime < t.estimatedTime * 0.6);
                       if (overBy.length >= 3) {
-                        const avgPct = Math.round(last5.reduce((s, t) => s + ((t.actual_time - t.estimated_time) / t.estimated_time * 100), 0) / last5.length);
+                        const avgPct = Math.round(last5.reduce((s, t) => s + ((t.actualTime - t.estimatedTime) / t.estimatedTime * 100), 0) / last5.length);
                         insights.push(`⏱ Your last ${last5.length} tasks took ${avgPct}% longer than estimated on average. Try adding a buffer when planning.`);
                       } else if (underBy.length >= 3) {
                         insights.push(`🎯 Your last ${last5.length} tasks finished well under estimate. Your instincts are sharper than you think!`);
@@ -10003,7 +10003,9 @@ const PlanAssist = () => {
               } else {
                 const task = tasks.find(t => String(t.id) === taskId);
                 if (!task) continue;
-                const estMins = Math.max(5, (task.userEstimate || task.estimatedTime || 20) - (task.accumulatedTime || 0));
+                const rawEstMins = Math.max(5, (task.userEstimate || task.estimatedTime || 20) - (task.accumulatedTime || 0));
+                // Cap at the period duration so a single slot never gets more than one period's worth
+                const estMins = Math.min(rawEstMins, PERIOD_DURATION_MINS);
                 entry = { taskId: idNum, task, mins: estMins };
               }
 
