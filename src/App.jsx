@@ -1,3 +1,7 @@
+// Copyright © 2026 Orlando Wyman. All rights reserved.
+// This source code is proprietary and confidential.
+// Unauthorized copying, distribution, or use of this file, via any medium, is strictly prohibited.
+
 // PlanAssist - OneSchool Global Study Planner Frontend (ENHANCED)
 // App.jsx - PART 1: Imports and State
 
