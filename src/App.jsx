@@ -1526,7 +1526,16 @@ const PlanAssist = () => {
       if (key === 'r') { e.preventDefault(); if (!isLoadingTasks) fetchCanvasTasks(); return; }
       if (key === 'h') { e.preventDefault(); if (!isLoadingTasks) setCurrentPage('hub'); return; }
       if (key === 'g') { e.preventDefault(); setCurrentPage('account'); setAccountTab('goals'); return; }
-      if (key === 'u' && user?.isAdmin) { e.preventDefault(); setCurrentPage('admin'); setAdminTab('users'); return; }
+      if (key === 'u' && user?.isAdmin) {
+        e.preventDefault();
+        const pos = user?.position || 'user';
+        const defaultTab = isStaffPosition(pos) ? (getAdminTabsForPosition(pos)[0] || 'directory') : 'directory';
+        setAdminSection(defaultTab);
+        setCurrentPage('admin');
+        if (defaultTab === 'staff') loadAdminStaff();
+        else if (defaultTab === 'directory' || defaultTab === 'index') loadAdminUsers();
+        return;
+      }
       if (key === 'l') { e.preventDefault(); handleLogout(); return; }
     };
     window.addEventListener('keydown', handler);
@@ -7163,21 +7172,6 @@ const PlanAssist = () => {
                 )}
               </span>
             </button>
-            {user?.isAdmin && (
-              <button
-                onClick={() => {
-                  const pos = user?.position || 'user';
-                  const defaultTab = isStaffPosition(pos) ? (getAdminTabsForPosition(pos)[0] || 'directory') : 'directory';
-                  setAdminSection(defaultTab);
-                  setCurrentPage('admin');
-                  if (defaultTab === 'staff') loadAdminStaff();
-                  else if (defaultTab === 'directory' || defaultTab === 'index') loadAdminUsers();
-                }}
-                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${currentPage === 'admin' ? 'bg-red-100 text-red-700' : 'text-red-600 hover:bg-red-50'}`}
-              >
-                <Shield className="w-5 h-5" />
-              </button>
-            )}
             {isLoadingTasks && currentPage !== 'tasks' && (
               <div className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium">
                 <div className="w-3.5 h-3.5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
@@ -12635,7 +12629,7 @@ const PlanAssist = () => {
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left text-red-600 hover:bg-red-50 mt-2 border-t border-gray-100 pt-3"
                     >
                       <Shield className="w-4 h-4 flex-shrink-0" />
-                      Admin Pane
+                      Admin
                     </button>
                   )}
                 </nav>
@@ -15075,12 +15069,16 @@ const PlanAssist = () => {
                               <span className="text-blue-600">{fmtTimeAgo(u.created_at)}</span>
                             </div>
                           ))}
+                          {(adminDiagnostics.newUsers||[]).length===0&&<p className="text-xs text-gray-400 italic">No signups in the last 3 days.</p>}
                         </div>
                       </div>
                       {/* Grade stats — hidden for Moderator and below */}
                       {canEdit('Manager') && (
                         <div className="bg-white rounded-xl border border-gray-200 p-5 md:col-span-2">
-                          <h3 className="font-bold text-gray-900 mb-3">Completions by Grade</h3>
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-purple-400 rounded-full" />
+                            Completions by Grade <span className="text-xs text-gray-400 font-normal">({adminDiagnostics.gradeStats?.length||0})</span>
+                          </h3>
                           <div className="overflow-x-auto">
                             <table className="w-full text-xs">
                               <thead><tr className="text-gray-400 border-b border-gray-100">
@@ -15088,8 +15086,11 @@ const PlanAssist = () => {
                               </tr></thead>
                               <tbody className="divide-y divide-gray-50">
                                 {(adminDiagnostics.gradeStats||[]).map(r=>(
-                                  <tr key={r.grade}><td className="py-1.5 font-medium text-gray-900">Grade {r.grade}</td><td className="text-right text-gray-600">{r.user_count}</td><td className="text-right text-gray-600">{r.total_completions}</td><td className="text-right text-gray-600">{r.avg_actual_min}m</td><td className="text-right text-gray-600">{r.avg_estimated_min}m</td></tr>
+                                  <tr key={r.grade}><td className="py-1.5 font-medium text-gray-900">Grade {r.grade}</td><td className="text-right text-gray-600">{r.user_count}</td><td className="text-right text-gray-600">{r.total_completions}</td><td className="text-right text-gray-600">{r.avg_actual_min ?? '—'}m</td><td className="text-right text-gray-600">{r.avg_estimated_min ?? '—'}m</td></tr>
                                 ))}
+                                {(adminDiagnostics.gradeStats||[]).length===0 && (
+                                  <tr><td colSpan={5} className="text-center text-gray-400 italic py-3">No grade data available.</td></tr>
+                                )}
                               </tbody>
                             </table>
                           </div>
@@ -15097,19 +15098,28 @@ const PlanAssist = () => {
                       )}
                       {/* Activity heatmap */}
                       <div className="bg-white rounded-xl border border-gray-200 p-5">
-                        <h3 className="font-bold text-gray-900 mb-3">Activity Heatmap (UTC)</h3>
-                        <div className="flex items-end gap-0.5 h-16">
-                          {(adminDiagnostics.activityHeatmap||[]).map(({hour,count})=>{
-                            const max = Math.max(...(adminDiagnostics.activityHeatmap||[]).map(h=>h.count),1);
-                            const pct = Math.round((count/max)*100);
-                            return (
-                              <div key={hour} className="flex-1 flex flex-col items-center gap-0.5" title={`${hour}:00 — ${count} completions`}>
-                                <div className="w-full bg-red-500 rounded-sm" style={{height:`${Math.max(pct,2)}%`,opacity:0.2+pct/100*0.8}} />
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <div className="flex justify-between text-xs text-gray-400 mt-1"><span>0h</span><span>12h</span><span>23h</span></div>
+                        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-red-400 rounded-full" />
+                          Activity Heatmap <span className="text-xs text-gray-400 font-normal">(your local time)</span>
+                        </h3>
+                        {(adminDiagnostics.activityHeatmap||[]).every(h=>h.count===0) ? (
+                          <p className="text-xs text-gray-400 italic py-6 text-center">No completion activity recorded yet.</p>
+                        ) : (
+                          <>
+                            <div className="flex items-end gap-0.5" style={{height: '64px'}}>
+                              {(adminDiagnostics.activityHeatmap||[]).map(({hour,count})=>{
+                                const max = Math.max(...(adminDiagnostics.activityHeatmap||[]).map(h=>h.count),1);
+                                const pct = Math.max(Math.round((count/max)*100), count>0?4:0);
+                                return (
+                                  <div key={hour} className="flex-1 h-full flex flex-col justify-end items-center" title={`${hour}:00 — ${count} completion${count!==1?'s':''}`}>
+                                    <div className="w-full bg-red-500 rounded-sm" style={{height:`${pct}%`, minHeight: count>0?'2px':'0', opacity: 0.25+(pct/100)*0.75}} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="flex justify-between text-xs text-gray-400 mt-1.5"><span>12am</span><span>12pm</span><span>11pm</span></div>
+                          </>
+                        )}
                       </div>
                       {/* Duplicate tasks */}
                       {(adminDiagnostics.duplicates||[]).length>0 && (
@@ -15127,7 +15137,10 @@ const PlanAssist = () => {
                       {/* IP Blacklist */}
                       {canEdit('Manager') && (
                         <div className="bg-white rounded-xl border border-gray-200 p-5">
-                          <h3 className="font-bold text-gray-900 mb-3">IP Blacklist ({adminIpBlacklist.length})</h3>
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-gray-400 rounded-full" />
+                            IP Blacklist <span className="text-xs text-gray-400 font-normal">({adminIpBlacklist.length})</span>
+                          </h3>
                           <div className="space-y-1 max-h-32 overflow-y-auto mb-3">
                             {adminIpBlacklist.map(b=>(
                               <div key={b.id} className="flex items-center justify-between text-xs">
@@ -15526,6 +15539,38 @@ const PlanAssist = () => {
           </div>
         )}
 
+        {/* ── Add HPT User Modal ── */}
+        {showAddHptUser && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={()=>{setShowAddHptUser(false);setHptNewName('');setHptNewPasscode('');}}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm" onClick={e=>e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
+                <h3 className="text-lg font-bold text-gray-900">Add HPT User</h3>
+                <button onClick={()=>{setShowAddHptUser(false);setHptNewName('');setHptNewPasscode('');}} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="w-5 h-5"/></button>
+              </div>
+              <div className="px-6 py-4 space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                  <input value={hptNewName} onChange={e=>setHptNewName(e.target.value)} placeholder="e.g. Mrs. Anderson" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Teacher Passcode</label>
+                  <div className="flex gap-2">
+                    <input value={hptNewPasscode} onChange={e=>setHptNewPasscode(e.target.value)} placeholder="Passcode" className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-red-300" />
+                    <button onClick={()=>setHptNewPasscode(Math.random().toString(36).slice(2,10).toUpperCase())} className="px-3 py-2 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-200 flex-shrink-0">Generate</button>
+                  </div>
+                </div>
+                <button
+                  onClick={handleAddHptUser}
+                  disabled={hptAddLoading || !hptNewName.trim() || !hptNewPasscode.trim()}
+                  className="w-full py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
+                >
+                  {hptAddLoading ? 'Creating…' : 'Create HPT User'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ── Directory Advanced Modal ── */}
         {adminDirectoryAdvModal && (
           <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={()=>{setAdminDirectoryAdvModal(null);setAdminCanvasTokenVal('');}}>
@@ -15588,12 +15633,37 @@ const PlanAssist = () => {
                   }} className="w-full py-2.5 bg-yellow-50 text-yellow-700 rounded-xl text-sm font-semibold hover:bg-yellow-100 border border-yellow-200">Replace Password</button>
                 )}
                 {/* Credits */}
-                {hasRank(user?.position,'Manager') && (
-                  <div className="flex gap-2">
-                    <button onClick={()=>adminAdjustCredits(adminDirectoryAdvModal.id,50)} className="flex-1 py-2.5 bg-purple-50 text-purple-700 rounded-xl text-sm font-semibold hover:bg-purple-100 border border-purple-200">+50 Credits</button>
-                    <button onClick={()=>adminAdjustCredits(adminDirectoryAdvModal.id,-50)} className="flex-1 py-2.5 bg-gray-50 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-100 border border-gray-200">−50 Credits</button>
-                  </div>
-                )}
+                {hasRank(user?.position,'Manager') && (() => {
+                  const creditInputId = `credit-amount-${adminDirectoryAdvModal.id}`;
+                  return (
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-gray-600">Adjust Credits</label>
+                      <div className="flex gap-2">
+                        <input
+                          id={creditInputId}
+                          type="number"
+                          min="1"
+                          step="1"
+                          placeholder="Amount"
+                          defaultValue="50"
+                          className="flex-1 px-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-purple-300"
+                        />
+                        <button onClick={()=>{
+                          const el = document.getElementById(creditInputId);
+                          const amt = Math.floor(Math.abs(parseInt(el?.value)));
+                          if (!amt || amt < 1) { alert('Enter a positive whole number.'); return; }
+                          adminAdjustCredits(adminDirectoryAdvModal.id, amt);
+                        }} className="px-4 py-2.5 bg-purple-50 text-purple-700 rounded-xl text-sm font-semibold hover:bg-purple-100 border border-purple-200">+ Add</button>
+                        <button onClick={()=>{
+                          const el = document.getElementById(creditInputId);
+                          const amt = Math.floor(Math.abs(parseInt(el?.value)));
+                          if (!amt || amt < 1) { alert('Enter a positive whole number.'); return; }
+                          adminAdjustCredits(adminDirectoryAdvModal.id, -amt);
+                        }} className="px-4 py-2.5 bg-gray-50 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-100 border border-gray-200">− Remove</button>
+                      </div>
+                    </div>
+                  );
+                })()}
                 {/* Hacked insignia — Manager+ */}
                 {hasRank(user?.position,'Manager') && (
                   <button onClick={async()=>{
