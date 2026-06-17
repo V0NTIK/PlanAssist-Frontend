@@ -1063,7 +1063,7 @@ const PlanAssist = () => {
   const [showCustomScrollbar, setShowCustomScrollbar] = useState(() => localStorage.getItem('pa-custom-scrollbar') !== 'off');
   const [adminAuditLog, setAdminAuditLog] = useState([]);
   const [adminFeedback, setAdminFeedback] = useState([]);
-  const [adminSection, setAdminSection] = useState('users');
+  const [adminSection, setAdminSection] = useState('bulletin');
   const [adminSearch, setAdminSearch] = useState('');
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminAnnouncements, setAdminAnnouncements] = useState([]);
@@ -1663,14 +1663,11 @@ const PlanAssist = () => {
       if (key === 'r') { e.preventDefault(); if (!isLoadingTasks) fetchCanvasTasks(); return; }
       if (key === 'h') { e.preventDefault(); if (!isLoadingTasks) setCurrentPage('hub'); return; }
       if (key === 'g') { e.preventDefault(); setCurrentPage('account'); setAccountTab('goals'); return; }
-      if (key === 'u' && user?.isAdmin) {
+      if (key === 'b' && user?.isAdmin) {
         e.preventDefault();
-        const pos = user?.position || 'user';
-        const defaultTab = isStaffPosition(pos) ? (getAdminTabsForPosition(pos)[0] || 'directory') : 'directory';
-        setAdminSection(defaultTab);
+        setAdminSection('bulletin');
         setCurrentPage('admin');
-        if (defaultTab === 'staff') loadAdminStaff();
-        else if (defaultTab === 'directory' || defaultTab === 'index') loadAdminUsers();
+        loadAdminBulletin();
         return;
       }
       if (key === 'l') { e.preventDefault(); handleLogout(); return; }
@@ -7318,10 +7315,13 @@ const PlanAssist = () => {
           </div>
           <div className="flex items-center gap-2">
             {(() => {
-              // Nav buttons are locked only when a session/agenda is active AND PiP is NOT
+              // Nav buttons are locked when a session/agenda is active AND PiP is NOT
               // available (fallback in-page render). With PiP active the user can navigate freely.
+              // Also locked for the entire duration of initial account setup — a brand new
+              // user must finish setup before they're allowed to wander off to other pages.
               const pipSupported = typeof window.documentPictureInPicture !== 'undefined';
-              const navLocked = ['session-active','agenda-active'].includes(currentPage) && !pipSupported;
+              const sessionAgendaLocked = ['session-active','agenda-active'].includes(currentPage) && !pipSupported;
+              const navLocked = sessionAgendaLocked || accountTab === 'initial-setup';
               return (<>
             <button onClick={() => !isLoadingTasks && !navLocked && setCurrentPage('hub')} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${currentPage === 'hub' ? 'bg-purple-100 text-purple-700' : navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-gray-600 hover:bg-gray-100'}`}>
               <Home className="w-5 h-5" />
@@ -7381,7 +7381,7 @@ const PlanAssist = () => {
                 Syncing
               </div>
             )}
-            <button onClick={handleLogout} disabled={navLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${navLocked ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
+            <button onClick={handleLogout} disabled={sessionAgendaLocked || isLoadingTasks} className={`px-4 py-2 rounded-lg flex items-center gap-2 ${sessionAgendaLocked ? 'text-gray-400 cursor-not-allowed' : 'text-red-600 hover:bg-red-50'}`}>
               <LogOut className="w-5 h-5" />
             </button>
               </>);
@@ -12822,12 +12822,9 @@ const PlanAssist = () => {
                   {isStaffPosition(user?.position) && (
                     <button
                       onClick={() => {
-                        const pos = user?.position || 'user';
-                        const defaultTab = getAdminTabsForPosition(pos)[0] || 'directory';
-                        setAdminSection(defaultTab);
+                        setAdminSection('bulletin');
                         setCurrentPage('admin');
-                        if (defaultTab === 'staff') loadAdminStaff();
-                        else if (defaultTab === 'directory' || defaultTab === 'index') { if (adminUsers.length === 0) loadAdminUsers(); }
+                        loadAdminBulletin();
                       }}
                       className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left text-red-600 hover:bg-red-50 mt-2 border-t border-gray-100 pt-3"
                     >
