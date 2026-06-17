@@ -175,6 +175,17 @@ const CAMPUS_PERIODS_DST = {
 };
 
 // Australian campuses set — used for region-aware logic throughout the app
+// ── OneSchool Global email format ─────────────────────────────────────────
+// Required shape: first.last##@xx.oneschoolglobal.com
+//   - local part: letters, a literal dot, then letters immediately followed
+//     by exactly two digits (e.g. "jane.doe12")
+//   - domain: exactly two letters (region code) + ".oneschoolglobal.com"
+// Enforced strictly on Sign Up only. Login keeps a looser domain-suffix check
+// so existing real accounts that predate this stricter format can't be
+// locked out — only NEW signups are required to match it exactly.
+const ONESCHOOL_EMAIL_REGEX = /^[a-z]+\.[a-z]+\d{2}@[a-z]{2}\.oneschoolglobal\.com$/;
+const ONESCHOOL_EMAIL_FORMAT_HINT = 'first.last##@xx.oneschoolglobal.com';
+
 const AUSTRALIAN_CAMPUSES = new Set([
   'Adelaide','Albany','Albury','Armidale','Bairnsdale','Bendigo','Berwick',
   'Brisbane','Condobolin','Cowra','Dalwallinu','Gnowangerup','Goulburn','Hamilton',
@@ -1960,8 +1971,8 @@ const PlanAssist = () => {
     setAuthLoading(true);
     const trimmedEmail = email.trim().toLowerCase();
     const trimmedPassword = password; // passwords are not trimmed (spaces can be intentional)
-    if (!trimmedEmail.endsWith('@na.oneschoolglobal.com')) {
-      setAuthError('Email must be in format: first.last##@na.oneschoolglobal.com');
+    if (!trimmedEmail.endsWith('@na.oneschoolglobal.com') && !trimmedEmail.endsWith('@au.oneschoolglobal.com')) {
+      setAuthError('Email must be a valid OneSchool Global email address.');
       setAuthLoading(false);
       return;
     }
@@ -2059,8 +2070,8 @@ const PlanAssist = () => {
     setSessionExpired(false);
     setAuthLoading(true);
     const trimmedEmail = email.trim().toLowerCase();
-    if (!trimmedEmail.endsWith('@na.oneschoolglobal.com')) {
-      setAuthError('Email must be in format: first.last##@na.oneschoolglobal.com');
+    if (!ONESCHOOL_EMAIL_REGEX.test(trimmedEmail)) {
+      setAuthError(`Email must be in this exact format: ${ONESCHOOL_EMAIL_FORMAT_HINT} (e.g. jane.doe12@na.oneschoolglobal.com)`);
       setAuthLoading(false);
       return;
     }
@@ -7111,11 +7122,16 @@ const PlanAssist = () => {
             <button onClick={() => setAuthMode('login')} className={`flex-1 py-2 rounded-md font-medium transition-colors ${authMode === 'login' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>Login</button>
             <button onClick={() => setAuthMode('register')} className={`flex-1 py-2 rounded-md font-medium transition-colors ${authMode === 'register' ? 'bg-white text-purple-600 shadow' : 'text-gray-600'}`}>Sign Up</button>
           </div>
-          {authError && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">{authError}</div>}
+          {authError && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2.5">
+              <AlertTriangle className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" />
+              <p className="text-red-700 text-sm leading-snug">{authError}</p>
+            </div>
+          )}
           <form onSubmit={authMode === 'login' ? handleLogin : handleRegister} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">OneSchool Email</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="first.last##@na.oneschoolglobal.com" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" required />
+              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="first.last##@xx.oneschoolglobal.com" className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent" required />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
