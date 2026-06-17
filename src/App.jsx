@@ -4031,6 +4031,47 @@ const PlanAssist = () => {
     }
   };
 
+  const submitEnhanceSchedule = async () => {
+    setIsSavingEnhance(true);
+    try {
+      const lessons = Object.entries(enhanceLessons)
+        .filter(([, v]) => v?.courseId)
+        .map(([key, v]) => {
+          const [day, period] = key.split('-');
+          return { day, period: parseInt(period), courseId: v.courseId, courseName: v.courseName };
+        });
+      const zoomNumbers = Object.entries(enhanceZoom)
+        .filter(([, zoomNumber]) => zoomNumber && zoomNumber.trim())
+        .map(([courseId, zoomNumber]) => ({ courseId: parseInt(courseId), zoomNumber: zoomNumber.trim() }));
+
+      await apiCall('/schedule/enhance', 'POST', { lessons, zoomNumbers });
+
+      // Reflect the save locally so the UI doesn't need a full refetch
+      setScheduleEnhanced(true);
+      setScheduleLessons(prev => {
+        const updated = [...prev];
+        lessons.forEach(l => {
+          const idx = updated.findIndex(sl => sl.day === l.day && sl.period === l.period);
+          if (idx >= 0) updated[idx] = { ...updated[idx], course_id: l.courseId, course_name: l.courseName };
+          else updated.push({ day: l.day, period: l.period, course_id: l.courseId, course_name: l.courseName });
+        });
+        return updated;
+      });
+      setCourses(prev => prev.map(c => {
+        const match = zoomNumbers.find(z => z.courseId === c.id);
+        return match ? { ...c, zoom_number: match.zoomNumber } : c;
+      }));
+
+      setShowEnhanceDialog(false);
+      setEnhanceStep(1);
+    } catch (err) {
+      console.error('Failed to enhance schedule:', err);
+      alert('Failed to save your enhanced schedule: ' + err.message);
+    } finally {
+      setIsSavingEnhance(false);
+    }
+  };
+
   const localDateStr = (d) => {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, '0');
