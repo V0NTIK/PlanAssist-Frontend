@@ -7,7 +7,30 @@ import { Calendar, Clock, Play, Check, Settings, BarChart3, List, Home, LogOut, 
 
 const API_URL = 'https://planassist-api.onrender.com/api';
 
-// ── Campus → period range lookup (mirrors server CAMPUS_PERIODS) ─────────────
+// ── Staff position helpers ────────────────────────────────────────────────────
+const POSITION_RANKS = {
+  'user':0,'Spectator':1,'Broadcaster':2,'Editor':3,'Support':4,
+  'Moderator':5,'Manager':6,'Director':7,'Supervisor':8,'Owner':9
+};
+const positionRank = (pos) => POSITION_RANKS[pos] ?? 0;
+const isStaffPosition = (pos) => pos && pos !== 'user';
+// Returns true if actorPos can perform actions requiring minPos
+const hasRank = (actorPos, minPos) => positionRank(actorPos) >= positionRank(minPos);
+// Peer-tier positions that can view requests sideways but never approve/reject them
+const PEER_POSITIONS_FRONT = new Set(['Support','Editor','Broadcaster','Spectator']);
+
+// Staff-type tabs visibility per position
+const getAdminTabsForPosition = (pos) => {
+  const all = ['staff','directory','index','hpt','broadcasts','diagnostics','log','feedback','resources','bulletin','requests'];
+  if (!isStaffPosition(pos)) return [];
+  if (pos === 'Owner' || pos === 'Director' || pos === 'Manager' || pos === 'Supervisor') return all;
+  if (pos === 'Moderator') return all;
+  if (pos === 'Support')      return ['directory','index','broadcasts','diagnostics','log','feedback','resources','bulletin','requests'];
+  if (pos === 'Editor')       return ['broadcasts','resources','bulletin','directory','index','log','feedback','requests'];
+  if (pos === 'Broadcaster')  return ['broadcasts','bulletin','directory','index','diagnostics','log','feedback','resources','requests'];
+  if (pos === 'Spectator')    return ['directory','index','broadcasts','diagnostics','log','feedback','resources','bulletin','requests'];
+  return [];
+};
 const CAMPUS_PERIODS = {
   'Ashland':        '2-6',
   'Barbados':       '1-5',
@@ -268,12 +291,61 @@ const CAMPUS_OFFSETS = {
   'Stonewall':      { standard: -6, dst: -5 },
   'Trinidad':       { standard: -4, dst: -4 },
   'Vancouver':      { standard: -8, dst: -7 },
+  // ── Australian campuses (mirrors server.js CAMPUS_UTC_OFFSETS)
+  'Adelaide':       { standard: 9.5, dst: 10.5 },
+  'Albany':         { standard: 8,   dst: 8    },
+  'Albury':         { standard: 10,  dst: 11   },
+  'Armidale':       { standard: 10,  dst: 11   },
+  'Bairnsdale':     { standard: 10,  dst: 11   },
+  'Bendigo':        { standard: 10,  dst: 11   },
+  'Berwick':        { standard: 10,  dst: 11   },
+  'Brisbane':       { standard: 10,  dst: 10   },
+  'Condobolin':     { standard: 10,  dst: 11   },
+  'Cowra':          { standard: 10,  dst: 11   },
+  'Dalwallinu':     { standard: 8,   dst: 8    },
+  'Gnowangerup':    { standard: 8,   dst: 8    },
+  'Goulburn':       { standard: 10,  dst: 11   },
+  'Hobart':         { standard: 10,  dst: 11   },
+  'Illawara':       { standard: 10,  dst: 11   },
+  'Launceston':     { standard: 10,  dst: 11   },
+  'Leeton':         { standard: 10,  dst: 11   },
+  'Maitland':       { standard: 10,  dst: 11   },
+  'Maryborough':    { standard: 10,  dst: 10   },
+  'Melton':         { standard: 10,  dst: 11   },
+  'Mt Victoria':    { standard: 10,  dst: 11   },
+  'Nambour':        { standard: 10,  dst: 10   },
+  'Nathalia':       { standard: 10,  dst: 11   },
+  'Northam':        { standard: 8,   dst: 8    },
+  'Orange':         { standard: 10,  dst: 11   },
+  'Perth':          { standard: 8,   dst: 8    },
+  'Swan Hill':      { standard: 10,  dst: 11   },
+  'Sydney':         { standard: 10,  dst: 11   },
+  'Toowoomba':      { standard: 10,  dst: 10   },
+  'Wagga Wagga':    { standard: 10,  dst: 11   },
 };
 
+// Southern Hemisphere DST window (used by Australian campuses that observe
+// it — NSW, VIC, SA, TAS): runs roughly early October through early April,
+// the OPPOSITE months from Northern Hemisphere DST. Queensland and WA never
+// observe DST, but for those campuses standard === dst above, so this
+// function's result doesn't matter for them either way.
+function isSouthernDST() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-indexed
+  // Roughly: October (month 9) through March (month 2) is DST season.
+  // This intentionally uses calendar months rather than exact Sunday
+  // transitions since the 1-hour edge-case window around the actual
+  // transition date is not consequential for this app's period/streak logic.
+  return m >= 9 || m <= 2;
+}
+
 // Returns the campus UTC offset in hours, accounting for current DST state.
+// Uses the correct hemisphere's DST calendar depending on the campus.
 function getCampusOffsetHours(campus) {
   const entry = CAMPUS_OFFSETS[campus] || CAMPUS_OFFSETS['Ashland'];
-  return isNADST() ? entry.dst : entry.standard;
+  const dstActive = AUSTRALIAN_CAMPUSES.has(campus) ? isSouthernDST() : isNADST();
+  return dstActive ? entry.dst : entry.standard;
 }
 
 // Converts a UTC ISO timestamp string to a YYYY-MM-DD date string in the
@@ -485,7 +557,7 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
     email: user.email || '',
     grade: user.grade || '',
     campus: user.campus || 'Ashland',
-    is_admin: user.is_admin || false,
+    position: user.position || 'user',
     password: '',
   });
   const [campusInput, setCampusInput] = React.useState(user.campus || 'Ashland');
@@ -535,20 +607,21 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
           )}
         </div>
         <div className="flex items-center gap-2 pt-4">
-          <input type="checkbox" id="isAdminCheck" checked={form.is_admin}
-            onChange={e => {
-              if (!e.target.checked && user.id === currentUserId) return;
-              setForm(p => ({...p, is_admin: e.target.checked}));
-            }}
-            className="w-4 h-4 text-red-600 rounded" />
-          <label htmlFor="isAdminCheck" className="text-sm font-medium text-gray-700">Admin</label>
-          {user.id === currentUserId && <span className="text-xs text-gray-400">(can't remove own admin)</span>}
+          <label className="text-sm font-medium text-gray-700">Position</label>
+          <select value={form.position} disabled={user.id === currentUserId}
+            onChange={e => setForm(p => ({...p, position: e.target.value}))}
+            className="px-2 py-1 border border-gray-200 rounded-lg text-sm">
+            {['user','Spectator','Broadcaster','Editor','Support','Moderator','Manager','Director','Supervisor','Owner'].map(p => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          {user.id === currentUserId && <span className="text-xs text-gray-400">(can't change own position)</span>}
         </div>
       </div>
       <div className="flex gap-2 pt-1">
         <button onClick={onCancel} className="flex-1 px-3 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-600 hover:bg-gray-50">Cancel</button>
         <button onClick={() => {
-          const payload = { name: form.name, email: form.email, grade: form.grade, campus: form.campus, is_admin: form.is_admin };
+          const payload = { name: form.name, email: form.email, grade: form.grade, campus: form.campus };
           if (form.password.trim()) payload.password = form.password.trim();
           onSave(payload);
         }} className="flex-1 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Save Changes</button>
@@ -884,6 +957,37 @@ const PlanAssist = () => {
   const [hptNewPasscode, setHptNewPasscode] = useState('');
   const [hptAddLoading, setHptAddLoading] = useState(false);
   const [hptDeleteConfirm, setHptDeleteConfirm] = useState(null);
+  const [adminStaff, setAdminStaff] = useState([]);
+  const [adminStaffLoading, setAdminStaffLoading] = useState(false);
+  const [adminExpandedStaff, setAdminExpandedStaff] = useState(null);
+  const [adminStaffLog, setAdminStaffLog] = useState({});
+  const [adminStaffLogLoading, setAdminStaffLogLoading] = useState({});
+  const [adminTabLoading, setAdminTabLoading] = useState(false);
+  const [adminDirectoryEditId, setAdminDirectoryEditId] = useState(null);
+  const [adminDirectoryEditFields, setAdminDirectoryEditFields] = useState({});
+  const [adminDirectoryAdvModal, setAdminDirectoryAdvModal] = useState(null);
+  const [adminCanvasTokenVal, setAdminCanvasTokenVal] = useState('');
+  const [adminCanvasTokenLoading, setAdminCanvasTokenLoading] = useState(false);
+  const [adminIndexModal, setAdminIndexModal] = useState(null);
+  const [adminIndexModalData, setAdminIndexModalData] = useState(null);
+  const [adminIndexModalLoading, setAdminIndexModalLoading] = useState(false);
+  const [adminStaffLog2, setAdminStaffLog2] = useState([]);
+  const [adminStaffLogSearch, setAdminStaffLogSearch] = useState('');
+  const [adminStaffLogFilter, setAdminStaffLogFilter] = useState('');
+  const [adminFeedbackSearch, setAdminFeedbackSearch] = useState('');
+  const [adminFeedbackFilter, setAdminFeedbackFilter] = useState('all');
+  const [adminBulletinContent, setAdminBulletinContent] = useState('');
+  const [adminBulletinSaving, setAdminBulletinSaving] = useState(false);
+  const [adminBulletinMeta, setAdminBulletinMeta] = useState(null);
+  const [adminBroadcastsPollRef] = useState({ interval: null });
+  const [adminDirectorySort, setAdminDirectorySort] = useState('name_asc');
+  const [adminDirectoryFilter, setAdminDirectoryFilter] = useState({ status: 'all', grade: 'all', region: 'all', campus: '' });
+  const [adminIndexSort, setAdminIndexSort] = useState('created_desc');
+  const [adminIndexFilter, setAdminIndexFilter] = useState({ grade: 'all', region: 'all', enhanced: 'all' });
+  const [adminIndexSearch, setAdminIndexSearch] = useState('');
+  const [adminRequests, setAdminRequests] = useState([]);
+  const [adminRequestsLoading, setAdminRequestsLoading] = useState(false);
+  const [adminRequestsFilter, setAdminRequestsFilter] = useState('pending');
   // Account page state
   const [accountTab, setAccountTab] = useState('settings');
   const [settingsSubTab, setSettingsSubTab] = useState('other');
@@ -1561,18 +1665,19 @@ const PlanAssist = () => {
         setScheduleEnhanced(setupData.schedule_enhanced || false);
         // Load itinerary panel toggle prefs
         // Australian users: Events panel is always hidden (no bookings system)
-        const isAustralian = AUSTRALIAN_CAMPUSES.has(setupData.campus || '');
+        const isAustralian = setupData.region === 'Australia';
         setItineraryShowEvents(isAustralian ? false : (setupData.itinerary_show_events !== false));
         setItineraryShowOrganizer(setupData.itinerary_show_organizer !== false);
         setItineraryShowAgenda(setupData.itinerary_show_agenda !== false);
-        // Sync name + isAdmin from DB (in case admin changed it)
+        // Sync name + position from DB (in case it changed)
         if (setupData.name) {
-          setUser(prev => prev ? { ...prev, name: setupData.name, isAdmin: setupData.is_admin || false } : prev);
+          const isStaffUser = setupData.position && setupData.position !== 'user';
+          setUser(prev => prev ? { ...prev, name: setupData.name, isAdmin: isStaffUser, position: setupData.position || 'user' } : prev);
           setAccountSetup(prev => ({ ...prev, name: setupData.name }));
           const savedUser = localStorage.getItem('user');
           if (savedUser) {
             const parsed = JSON.parse(savedUser);
-            localStorage.setItem('user', JSON.stringify({ ...parsed, name: setupData.name, isAdmin: setupData.is_admin || false }));
+            localStorage.setItem('user', JSON.stringify({ ...parsed, name: setupData.name, isAdmin: isStaffUser, position: setupData.position || 'user' }));
           }
         }
         if (setupData.schedule_enhanced) {
@@ -1586,12 +1691,14 @@ const PlanAssist = () => {
           setLastSyncTimestamp(setupData.lastSync);
         }
         
-        // Update user object with grade + isAdmin + showInFeed (merge, don't clobber prior setUser)
+        // Update user object with grade + position + showInFeed (merge, don't clobber prior setUser)
+        const isStaffUser2 = setupData.position && setupData.position !== 'user';
         setUser(prev => {
           const merged = {
             ...(prev || {}),
             grade: setupData.grade,
-            isAdmin: setupData.is_admin || false,
+            isAdmin: isStaffUser2,
+            position: setupData.position || 'user',
             showInFeed: setupData.showInFeed !== false
           };
           localStorage.setItem('user', JSON.stringify(merged));
@@ -3957,9 +4064,76 @@ const PlanAssist = () => {
 
   const loadAdminAuditLog = async () => {
     try {
-      const data = await apiCall('/admin/audit-log', 'GET');
+      const data = await apiCall('/admin/staff-log', 'GET');
       setAdminAuditLog(data || []);
+      setAdminStaffLog2(data || []);
     } catch (err) { console.error(err); }
+  };
+
+  const loadAdminStaff = async () => {
+    setAdminStaffLoading(true);
+    try {
+      const data = await apiCall('/admin/staff', 'GET');
+      setAdminStaff(data || []);
+    } catch (err) { console.error(err); }
+    finally { setAdminStaffLoading(false); }
+  };
+
+  const loadAdminStaffUserLog = async (userId) => {
+    setAdminStaffLogLoading(prev => ({ ...prev, [userId]: true }));
+    try {
+      const data = await apiCall(`/admin/staff/${userId}/log`, 'GET');
+      setAdminStaffLog(prev => ({ ...prev, [userId]: data || [] }));
+    } catch (err) { console.error(err); }
+    finally { setAdminStaffLogLoading(prev => ({ ...prev, [userId]: false })); }
+  };
+
+  const loadAdminIndexModal = async (userId) => {
+    setAdminIndexModalLoading(true);
+    try {
+      const data = await apiCall(`/admin/users/${userId}`, 'GET');
+      setAdminIndexModalData(data);
+    } catch (err) { console.error(err); }
+    finally { setAdminIndexModalLoading(false); }
+  };
+
+  const loadAdminBulletin = async () => {
+    try {
+      const data = await apiCall('/admin/bulletin', 'GET');
+      setAdminBulletinContent(data.content || '');
+      setAdminBulletinMeta({ updatedAt: data.updatedAt, updatedByName: data.updatedByName });
+    } catch (err) { console.error(err); }
+  };
+
+  const loadAdminRequests = async () => {
+    setAdminRequestsLoading(true);
+    try {
+      const data = await apiCall('/admin/requests', 'GET');
+      setAdminRequests(data || []);
+    } catch (err) { console.error(err); }
+    finally { setAdminRequestsLoading(false); }
+  };
+
+  const approveAdminRequest = async (id) => {
+    try {
+      await apiCall(`/admin/requests/${id}/approve`, 'PATCH');
+      setAdminRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'approved' } : r));
+    } catch (err) { alert(err.message || 'Failed to approve request'); }
+  };
+
+  const rejectAdminRequest = async (id) => {
+    try {
+      await apiCall(`/admin/requests/${id}/reject`, 'PATCH');
+      setAdminRequests(prev => prev.map(r => r.id === id ? { ...r, status: 'rejected' } : r));
+    } catch (err) { alert(err.message || 'Failed to reject request'); }
+  };
+
+  const saveAdminBulletin = async () => {
+    setAdminBulletinSaving(true);
+    try {
+      await apiCall('/admin/bulletin', 'PUT', { content: adminBulletinContent });
+    } catch (err) { console.error(err); }
+    finally { setAdminBulletinSaving(false); }
   };
 
   const loadAdminFeedback = async () => {
@@ -3998,8 +4172,15 @@ const PlanAssist = () => {
     if (!hptNewName.trim() || !hptNewPasscode.trim()) return;
     setHptAddLoading(true);
     try {
-      const newUser = await apiCall('/admin/hpt-users', 'POST', { name: hptNewName.trim(), passcode: hptNewPasscode });
-      setAdminHptUsers(prev => [...prev, newUser]);
+      const result = await apiCall('/admin/hpt-users', 'POST', { name: hptNewName.trim(), passcode: hptNewPasscode });
+      if (result?.queued) {
+        setShowAddHptUser(false);
+        setHptNewName('');
+        setHptNewPasscode('');
+        alert('Your request to add this HPT user has been submitted for approval.');
+        return;
+      }
+      setAdminHptUsers(prev => [...prev, result]);
       setShowAddHptUser(false);
       setHptNewName('');
       setHptNewPasscode('');
@@ -4018,7 +4199,12 @@ const PlanAssist = () => {
 
   const adminBanUser = async (userId, reason) => {
     try {
-      await apiCall(`/admin/users/${userId}/ban`, 'POST', { reason });
+      const r = await apiCall(`/admin/users/${userId}/ban`, 'POST', { reason });
+      if (r?.queued) {
+        setShowBanDialog(null); setBanReason('');
+        alert('Your ban request has been submitted for approval.');
+        return;
+      }
       setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, is_banned: true, ban_reason: reason } : u));
       if (adminUserDetail?.user?.id === userId) setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, is_banned: true, ban_reason: reason } }));
       setShowBanDialog(null); setBanReason('');
@@ -4035,7 +4221,12 @@ const PlanAssist = () => {
 
   const adminEditUser = async (userId, fields) => {
     try {
-      await apiCall(`/admin/users/${userId}`, 'PATCH', fields);
+      const r = await apiCall(`/admin/users/${userId}`, 'PATCH', fields);
+      if (r?.queued) {
+        setEditingUser(null);
+        alert('Your edit request has been submitted for approval.');
+        return;
+      }
       setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, ...fields } : u));
       if (adminUserDetail?.user?.id === userId) setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, ...fields } }));
       setEditingUser(null);
@@ -4060,7 +4251,9 @@ const PlanAssist = () => {
   const adminAdjustCredits = async (userId, delta, reason) => {
     try {
       const r = await apiCall(`/admin/users/${userId}/adjust-credits`, 'POST', { delta, reason });
-      setAdminUserDetail(prev => ({ ...prev, user: { ...prev.user, credits: r.credits } }));
+      setAdminDirectoryAdvModal(prev => prev && prev.id === userId ? { ...prev, credits: r.credits } : prev);
+      setAdminIndexModalData(prev => prev && prev.user?.id === userId ? { ...prev, user: { ...prev.user, credits: r.credits } } : prev);
+      setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, credits: r.credits } : u));
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -4082,9 +4275,7 @@ const PlanAssist = () => {
     if (!confirm('Soft-delete this task?')) return;
     try {
       await apiCall(`/admin/tasks/${taskId}`, 'DELETE');
-      if (adminUserDetail) {
-        setAdminUserDetail(prev => ({ ...prev, tasks: prev.tasks.map(t => t.id === taskId ? { ...t, deleted: true } : t) }));
-      }
+      setAdminIndexModalData(prev => prev ? { ...prev, tasks: prev.tasks.filter(t => t.id !== taskId) } : prev);
     } catch (err) { alert('Failed: ' + err.message); }
   };
 
@@ -6974,8 +7165,15 @@ const PlanAssist = () => {
             </button>
             {user?.isAdmin && (
               <button
-                onClick={() => { setAdminSection('users'); setCurrentPage('admin'); loadAdminUsers(); }}
-                                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${currentPage === 'admin' ? 'bg-red-100 text-red-700' : 'text-red-600 hover:bg-red-50'}`}
+                onClick={() => {
+                  const pos = user?.position || 'user';
+                  const defaultTab = isStaffPosition(pos) ? (getAdminTabsForPosition(pos)[0] || 'directory') : 'directory';
+                  setAdminSection(defaultTab);
+                  setCurrentPage('admin');
+                  if (defaultTab === 'staff') loadAdminStaff();
+                  else if (defaultTab === 'directory' || defaultTab === 'index') loadAdminUsers();
+                }}
+                className={`px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-semibold ${currentPage === 'admin' ? 'bg-red-100 text-red-700' : 'text-red-600 hover:bg-red-50'}`}
               >
                 <Shield className="w-5 h-5" />
               </button>
@@ -12423,6 +12621,23 @@ const PlanAssist = () => {
                       {label}
                     </button>
                   ))}
+                  {/* Admin Pane — shown only for staff users, below Help */}
+                  {isStaffPosition(user?.position) && (
+                    <button
+                      onClick={() => {
+                        const pos = user?.position || 'user';
+                        const defaultTab = getAdminTabsForPosition(pos)[0] || 'directory';
+                        setAdminSection(defaultTab);
+                        setCurrentPage('admin');
+                        if (defaultTab === 'staff') loadAdminStaff();
+                        else if (defaultTab === 'directory' || defaultTab === 'index') { if (adminUsers.length === 0) loadAdminUsers(); }
+                      }}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-colors text-left text-red-600 hover:bg-red-50 mt-2 border-t border-gray-100 pt-3"
+                    >
+                      <Shield className="w-4 h-4 flex-shrink-0" />
+                      Admin Pane
+                    </button>
+                  )}
                 </nav>
               </div>
               )}
@@ -14201,1120 +14416,1194 @@ const PlanAssist = () => {
         )}
 
         {/* ── ADMIN CONSOLE ───────────────────────────────────────────────── */}
-        {currentPage === 'admin' && user?.isAdmin && (
-          <div className="h-full overflow-y-auto scrollbar-stable w-full"><div className="max-w-6xl mx-auto p-6">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
-                <Shield className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">Admin Console</h1>
-                <p className="text-sm text-gray-500">PlanAssist administration — handle with care</p>
-              </div>
-            </div>
+        {currentPage === 'admin' && user?.isAdmin && (() => {
+          const userPosition = user?.position || 'user';
+          const visibleTabs = getAdminTabsForPosition(userPosition);
+          const canEdit = (minPos) => hasRank(userPosition, minPos);
 
-            {/* Section tabs */}
-            <div className="flex gap-2 mb-6 bg-white rounded-xl shadow-sm border border-gray-100 p-1 flex-wrap">
-              {[
-                { id: 'users', label: 'Users', icon: UserCheck },
-                { id: 'announcements', label: 'Banners', icon: Bell },
-                { id: 'diagnostics', label: 'Diagnostics', icon: BarChart3 },
-                { id: 'hpt', label: 'HPT Control', icon: BookOpen },
-                { id: 'audit', label: 'Audit Log', icon: FileText },
-                { id: 'feedback', label: 'Feedback', icon: MessageSquare },
-                { id: 'help', label: 'Help Page', icon: HelpCircle },
-                { id: 'log', label: 'Log', icon: FileText },
-              ].map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => {
-                    setAdminSection(id);
-                    if (id === 'users' && adminUsers.length === 0) loadAdminUsers();
-                    if (id === 'diagnostics') { loadAdminDiagnostics(); loadAdminIpBlacklist(); }
-                    if (id === 'audit') loadAdminAuditLog();
-                    if (id === 'announcements') loadAdminAnnouncements();
-                    if (id === 'feedback') loadAdminFeedback();
-                    if (id === 'help') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); }
-                    if (id === 'log') { apiCall('/admin/log').then(d => setAdminLogContent(d.content || '')); }
-                    if (id === 'hpt') loadAdminHptUsers();
-                  }}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${adminSection === id ? 'bg-red-600 text-white' : 'text-gray-600 hover:bg-gray-100'}`}
-                >
-                  <Icon className="w-4 h-4" />{label}
-                </button>
-              ))}
-            </div>
+          // Tab definitions with icons (mapped as strings, Icon looked up inline)
+          const ALL_TABS = [
+            { id: 'staff',       label: 'Staff',       icon: 'Users' },
+            { id: 'directory',   label: 'Directory',   icon: 'BookUser' },
+            { id: 'index',       label: 'Index',       icon: 'LayoutList' },
+            { id: 'hpt',         label: 'HPT',         icon: 'GraduationCap' },
+            { id: 'broadcasts',  label: 'Broadcasts',  icon: 'Bell' },
+            { id: 'diagnostics', label: 'Diagnostics', icon: 'BarChart3' },
+            { id: 'log',         label: 'Log',         icon: 'ScrollText' },
+            { id: 'feedback',    label: 'Feedback',    icon: 'MessageSquare' },
+            { id: 'resources',   label: 'Resources',   icon: 'FileText' },
+            { id: 'bulletin',    label: 'Bulletin',    icon: 'Newspaper' },
+            { id: 'requests',    label: 'Requests',    icon: 'Inbox' },
+          ].filter(t => visibleTabs.includes(t.id));
 
-            {/* ── USERS ── */}
-            {adminSection === 'users' && (
-              <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                {/* User list */}
-                <div className="lg:col-span-2 bg-white rounded-xl shadow-sm border border-gray-100">
-                  <div className="p-4 border-b border-gray-100 space-y-2">
-                    {/* Search */}
-                    <div className="relative">
-                      <Search className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
-                      <input
-                        value={adminSearch}
-                        onChange={e => setAdminSearch(e.target.value)}
-                        placeholder="Search users..."
-                        className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                      />
-                    </div>
-                    {/* Filters */}
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <select
-                        value={adminFilter.status}
-                        onChange={e => setAdminFilter(f => ({ ...f, status: e.target.value }))}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
-                      >
-                        <option value="all">All Users</option>
-                        <option value="new">New Users</option>
-                        <option value="not_new">Not New</option>
-                        <option value="active">Active Now</option>
-                        <option value="not_active">Not Active</option>
-                        <option value="banned">Banned</option>
-                      </select>
-                      <select
-                        value={adminSort}
-                        onChange={e => setAdminSort(e.target.value)}
-                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 focus:ring-1 focus:ring-red-400 focus:border-transparent bg-white"
-                      >
-                        <option value="name_asc">A → Z</option>
-                        <option value="name_desc">Z → A</option>
-                        <option value="joined_newest">Newest First</option>
-                        <option value="joined_oldest">Oldest First</option>
-                        <option value="grade_asc">Grade ↑</option>
-                        <option value="grade_desc">Grade ↓</option>
-                        <option value="active_tasks_desc">Most Tasks</option>
-                        <option value="active_tasks_asc">Fewest Tasks</option>
-                        <option value="completions_desc">Most Completions</option>
-                        <option value="completions_asc">Fewest Completions</option>
-                        <option value="health_desc">Healthiest First</option>
-                        <option value="health_asc">Needs Attention First</option>
-                        <option value="credits_desc">Most Credits</option>
-                        <option value="credits_asc">Least Credits</option>
-                      </select>
-                    </div>
-                    {/* Active filter summary */}
-                    {(() => {
-                      const filtered = adminUsers
-                        .filter(u => !adminSearch || u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase()) || u.grade?.toString().includes(adminSearch))
-                        .filter(u => {
-                          if (adminFilter.status === 'new') return u.is_new_user;
-                          if (adminFilter.status === 'not_new') return !u.is_new_user;
-                          if (adminFilter.status === 'active') return u.in_session;
-                          if (adminFilter.status === 'not_active') return !u.in_session;
-                          if (adminFilter.status === 'banned') return u.is_banned;
-                          return true;
-                        })
-                        .filter(u => {
-                          return true;
-                        });
-                      const hasFilters = adminFilter.status !== 'all' || adminSearch;
-                      return (
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs text-gray-400">{filtered.length} of {adminUsers.length} users</span>
-                          <div className="flex items-center gap-2">
-                            {(() => {
-                              const activeCount = adminUsers.filter(u => u.in_session).length;
-                              return activeCount > 0 ? (
-                                <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>
-                                  {activeCount} active now
-                                </span>
-                              ) : (
-                                <span className="text-xs text-gray-300">0 active</span>
-                              );
-                            })()}
-                            {hasFilters && (
-                              <button
-                                onClick={() => { setAdminFilter({ status: 'all', grade: 'all', unsorted: 'all' }); setAdminSearch(''); }}
-                                className="text-xs text-red-500 hover:text-red-700 font-medium"
-                              >
-                                Clear filters
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })()}
+          const iconMap = { Users, BookUser: Users, LayoutList: FileText, GraduationCap: BookOpen, Bell, BarChart3, ScrollText: FileText, MessageSquare, FileText, Newspaper: FileText, Inbox: Bell };
+
+          // ── helpers ─────────────────────────────────────────────────────────
+          const fmtTime = (iso) => {
+            if (!iso) return '—';
+            const d = new Date(iso);
+            return d.toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
+          };
+          const fmtTimeAgo = (iso) => {
+            if (!iso) return 'Never';
+            const diff = Date.now() - new Date(iso).getTime();
+            const m = Math.floor(diff/60000);
+            if (m < 1) return 'Just now';
+            if (m < 60) return `${m}m ago`;
+            const h = Math.floor(m/60);
+            if (h < 24) return `${h}h ago`;
+            return `${Math.floor(h/24)}d ago`;
+          };
+          const positionColor = (pos) => ({
+            Owner:'bg-red-100 text-red-700', Supervisor:'bg-purple-100 text-purple-700',
+            Director:'bg-blue-100 text-blue-700', Manager:'bg-indigo-100 text-indigo-700',
+            Moderator:'bg-teal-100 text-teal-700', Support:'bg-green-100 text-green-700',
+            Editor:'bg-yellow-100 text-yellow-700', Broadcaster:'bg-orange-100 text-orange-700',
+            Spectator:'bg-gray-100 text-gray-600', user:'bg-gray-50 text-gray-400'
+          }[pos] || 'bg-gray-100 text-gray-600');
+
+          // ── Directory filter/sort logic ──────────────────────────────────────
+          const filteredDirectoryUsers = adminUsers.filter(u => {
+            const q = adminSearch.toLowerCase();
+            const matchSearch = !q || u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q) || u.grade?.includes(q);
+            const matchStatus = adminDirectoryFilter.status === 'all' ? true : adminDirectoryFilter.status === 'banned' ? u.is_banned : adminDirectoryFilter.status === 'new' ? u.is_new_user : adminDirectoryFilter.status === 'active' ? !u.is_banned && !u.is_new_user : true;
+            const matchGrade = adminDirectoryFilter.grade === 'all' || u.grade === adminDirectoryFilter.grade;
+            const matchRegion = adminDirectoryFilter.region === 'all' || u.region === adminDirectoryFilter.region;
+            const matchCampus = !adminDirectoryFilter.campus || u.campus?.toLowerCase().includes(adminDirectoryFilter.campus.toLowerCase());
+            return matchSearch && matchStatus && matchGrade && matchRegion && matchCampus;
+          }).sort((a,b) => {
+            if (adminDirectorySort === 'name_asc') return (a.name||'').localeCompare(b.name||'');
+            if (adminDirectorySort === 'name_desc') return (b.name||'').localeCompare(a.name||'');
+            if (adminDirectorySort === 'grade') return (parseInt(a.grade)||0) - (parseInt(b.grade)||0);
+            if (adminDirectorySort === 'created') return new Date(b.created_at) - new Date(a.created_at);
+            if (adminDirectorySort === 'sync') return new Date(b.last_sync||0) - new Date(a.last_sync||0);
+            return 0;
+          });
+
+          // ── Index filter/sort logic ──────────────────────────────────────────
+          const filteredIndexUsers = adminUsers.filter(u => {
+            const q = adminIndexSearch.toLowerCase();
+            const matchSearch = !q || u.name?.toLowerCase().includes(q) || u.email?.toLowerCase().includes(q);
+            const matchGrade = adminIndexFilter.grade === 'all' || u.grade === adminIndexFilter.grade;
+            const matchRegion = adminIndexFilter.region === 'all' || u.region === adminIndexFilter.region;
+            const matchEnhanced = adminIndexFilter.enhanced === 'all' || (adminIndexFilter.enhanced === 'yes' ? u.schedule_enhanced : !u.schedule_enhanced);
+            return matchSearch && matchGrade && matchRegion && matchEnhanced;
+          }).sort((a,b) => {
+            if (adminIndexSort === 'created_desc') return new Date(b.created_at) - new Date(a.created_at);
+            if (adminIndexSort === 'created_asc') return new Date(a.created_at) - new Date(b.created_at);
+            if (adminIndexSort === 'name') return (a.name||'').localeCompare(b.name||'');
+            if (adminIndexSort === 'tasks') return (parseInt(b.total_completed)||0) - (parseInt(a.total_completed)||0);
+            if (adminIndexSort === 'sync') return new Date(b.last_sync||0) - new Date(a.last_sync||0);
+            return 0;
+          });
+
+          // ── Staff log filter ─────────────────────────────────────────────────
+          const filteredLog = adminStaffLog2.filter(e => {
+            const q = adminStaffLogSearch.toLowerCase();
+            const matchSearch = !q || e.actor_name?.toLowerCase().includes(q) || e.action?.toLowerCase().includes(q) || e.target_user_name?.toLowerCase().includes(q);
+            const matchFilter = !adminStaffLogFilter || e.action === adminStaffLogFilter;
+            return matchSearch && matchFilter;
+          });
+
+          // ── Feedback filter ──────────────────────────────────────────────────
+          const filteredFeedback = adminFeedback.filter(f => {
+            const q = adminFeedbackSearch.toLowerCase();
+            const matchSearch = !q || f.user_name?.toLowerCase().includes(q) || f.feedback_text?.toLowerCase().includes(q) || f.user_email?.toLowerCase().includes(q);
+            const matchFilter = adminFeedbackFilter === 'all' ? true : adminFeedbackFilter === 'checked' ? f.checked : !f.checked;
+            return matchSearch && matchFilter;
+          });
+
+          // Unique action types for log filter
+          const logActionTypes = [...new Set(adminStaffLog2.map(e => e.action))].sort();
+
+          const loadingSpinner = <div className="flex items-center justify-center py-20"><div className="w-8 h-8 border-3 border-red-500 border-t-transparent rounded-full animate-spin"/></div>;
+
+          return (
+          <div className="h-full overflow-y-auto scrollbar-stable w-full">
+            <div className="max-w-7xl mx-auto p-6">
+
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
+                    <Shield className="w-6 h-6 text-white" />
                   </div>
-                  <div className="overflow-y-auto max-h-[600px]">
-                    {adminLoading && <div className="p-4 text-center text-gray-400 text-sm">Loading...</div>}
-                    {(() => {
-                      const sortFn = (a, b) => {
-                        switch (adminSort) {
-                          case 'name_desc': return (b.name || '').localeCompare(a.name || '');
-                          case 'joined_newest': return new Date(b.created_at) - new Date(a.created_at);
-                          case 'joined_oldest': return new Date(a.created_at) - new Date(b.created_at);
-                          case 'grade_asc': return (parseInt(a.grade) || 0) - (parseInt(b.grade) || 0);
-                          case 'grade_desc': return (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0);
-                          case 'active_tasks_desc': return (parseInt(b.active_tasks) || 0) - (parseInt(a.active_tasks) || 0);
-                          case 'active_tasks_asc': return (parseInt(a.active_tasks) || 0) - (parseInt(b.active_tasks) || 0);
-                          case 'completions_desc': return (parseInt(b.total_completed) || 0) - (parseInt(a.total_completed) || 0);
-                          case 'completions_asc': return (parseInt(a.total_completed) || 0) - (parseInt(b.total_completed) || 0);
-                          case 'health_desc': {
-                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.round(Math.min(100,Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25))+(u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)))); };
-                            return hs(b) - hs(a);
-                          }
-                          case 'health_asc': {
-                            const hs = (u) => { const d=u.last_sync?Math.floor((Date.now()-new Date(u.last_sync))/86400000):99; return Math.round(Math.min(100,Math.max(0,25-d*3)+(u.has_canvas_token?25:0)+Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25))+(u.in_session?25:(parseInt(u.completed_this_week)>0?20:0)))); };
-                            return hs(a) - hs(b);
-                          }
-                          case 'credits_desc': return (parseInt(b.credits) || 0) - (parseInt(a.credits) || 0);
-                          case 'credits_asc': return (parseInt(a.credits) || 0) - (parseInt(b.credits) || 0);
-                          default: return (a.name || '').localeCompare(b.name || '');
-                        }
-                      };
-                      return adminUsers
-                        .filter(u => !adminSearch || u.name?.toLowerCase().includes(adminSearch.toLowerCase()) || u.email?.toLowerCase().includes(adminSearch.toLowerCase()) || u.grade?.toString().includes(adminSearch))
-                        .filter(u => {
-                          if (adminFilter.status === 'new') return u.is_new_user;
-                          if (adminFilter.status === 'not_new') return !u.is_new_user;
-                          if (adminFilter.status === 'active') return u.in_session;
-                          if (adminFilter.status === 'not_active') return !u.in_session;
-                          if (adminFilter.status === 'banned') return u.is_banned;
-                          return true;
-                        })
-                        .filter(u => {
-                          return true;
-                        })
-                        .sort(sortFn)
-                        .map(u => (
-                          <div
-                            key={u.id}
-                            onClick={() => { setAdminSelectedUser(u.id); loadAdminUserDetail(u.id); setAdminOptionsOpen(false); }}
-                            className={`p-3 border-b border-gray-50 cursor-pointer hover:bg-gray-50 transition-colors ${adminSelectedUser === u.id ? 'bg-red-50 border-l-2 border-l-red-500' : ''}`}
-                          >
-                            <div className="flex items-center justify-between">
-                              <div>
-                                <div className="flex items-center gap-1.5">
-                                  <p className="font-medium text-sm text-gray-900">{u.name || '(unnamed)'}</p>
-                                  {(() => {
-                                    const daysSinceSync = u.last_sync ? Math.floor((Date.now() - new Date(u.last_sync)) / 86400000) : 99;
-                                    const s = Math.round(Math.min(100, Math.max(0,25-daysSinceSync*3) + (u.has_canvas_token?25:0) + Math.min(25,Math.round(((parseInt(u.completed_this_week)||0)/Math.max(1,parseInt(u.active_tasks)||1))*25)) + (u.in_session?25:(parseInt(u.completed_this_week)>0?20:0))));
-                                    return <span className={`text-xs font-bold px-1.5 py-0.5 rounded-full ${s>=75?'text-green-700 bg-green-100':s>=45?'text-amber-700 bg-amber-100':'text-red-700 bg-red-100'}`}>{s}</span>;
-                                  })()}
-                                </div>
-                                <p className="text-xs text-gray-400">{u.email}</p>
-                              </div>
-                              <div className="flex flex-col items-end gap-1">
-                                <span className="text-xs text-gray-500">Gr {u.grade || '?'}</span>
-                                <div className="flex gap-1 flex-wrap justify-end">
-                                  {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded font-medium">Admin</span>}
-                                  {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-1.5 rounded font-medium">Banned</span>}
-                                  {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded font-medium">New</span>}
-                                  
-                                  {u.in_session && <span className="text-xs bg-green-100 text-green-700 px-1.5 rounded font-medium flex items-center gap-0.5"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>Active</span>}
-                                </div>
-                              </div>
-                            </div>
-                            <div className="mt-1">
-                              <span className="text-xs text-gray-400">{parseInt(u.active_tasks) || 0} tasks · {parseInt(u.total_completed) || 0} completed · joined {new Date(u.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} · last sync {u.last_sync ? new Date(u.last_sync).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'never'}</span>
-                            </div>
-                          </div>
-                        ));
-                    })()}
+                  <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Admin Pane</h1>
+                    <p className="text-sm text-gray-500">
+                      Signed in as <span className={`font-semibold px-1.5 py-0.5 rounded text-xs ${positionColor(userPosition)}`}>{userPosition}</span>
+                    </p>
                   </div>
                 </div>
+              </div>
 
-                {/* User detail */}
-                <div className="lg:col-span-3">
-                  {!adminUserDetail && (
-                    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-8 text-center text-gray-400">
-                      <UserCheck className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                      <p className="text-sm">Select a user to view details</p>
-                    </div>
-                  )}
-                  {adminUserDetail && (() => {
-                    const u = adminUserDetail.user;
-                    return (
-                      <div className="space-y-4">
-                        {/* Profile card */}
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <div className="flex items-start justify-between mb-4">
-                            <div>
-                              <h3 className="text-lg font-bold text-gray-900">{u.name}</h3>
-                              <p className="text-sm text-gray-500">{u.email}</p>
-                              <p className="text-xs text-gray-400 mt-0.5">Grade {u.grade} · Joined {new Date(u.created_at).toLocaleDateString()}</p>
+              {/* Tab Bar */}
+              <div className="flex gap-1 mb-6 bg-gray-50 rounded-xl border border-gray-200 p-1 flex-wrap">
+                {ALL_TABS.map(({ id, label, icon: iconName }) => {
+                  const Icon = iconMap[iconName] || FileText;
+                  return (
+                    <button key={id}
+                      onClick={() => {
+                        setAdminSection(id);
+                        setAdminTabLoading(true);
+                        setTimeout(() => setAdminTabLoading(false), 400);
+                        if (id === 'staff') loadAdminStaff();
+                        else if (id === 'directory' || id === 'index') { if (adminUsers.length === 0) loadAdminUsers(); }
+                        else if (id === 'hpt') loadAdminHptUsers();
+                        else if (id === 'broadcasts') { loadAdminAnnouncements(); }
+                        else if (id === 'diagnostics') { loadAdminDiagnostics(); if (hasRank(userPosition, 'Manager')) loadAdminIpBlacklist(); }
+                        else if (id === 'log') loadAdminAuditLog();
+                        else if (id === 'feedback') loadAdminFeedback();
+                        else if (id === 'resources') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); apiCall('/admin/log').then(d => setAdminLogContent(d.content||'')); }
+                        else if (id === 'bulletin') loadAdminBulletin();
+                        else if (id === 'requests') loadAdminRequests();
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${adminSection === id ? 'bg-red-600 text-white shadow-sm' : 'text-gray-600 hover:bg-white hover:shadow-sm'}`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />{label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {adminTabLoading ? loadingSpinner : (<>
+
+              {/* ── STAFF TAB ─────────────────────────────────────────────── */}
+              {adminSection === 'staff' && (
+                <div>
+                  <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-lg font-bold text-gray-900">Staff Members</h2>
+                    <span className="text-sm text-gray-500">{adminStaff.length} member{adminStaff.length !== 1 ? 's' : ''}</span>
+                  </div>
+                  {adminStaffLoading ? loadingSpinner : adminStaff.length === 0 ? (
+                    <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No staff members found.</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {adminStaff.map(s => {
+                        const expanded = adminExpandedStaff === s.id;
+                        const canExpand = canEdit('Manager');
+                        return (
+                          <div key={s.id} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                            <div
+                              className={`flex items-center gap-4 px-5 py-4 ${canExpand ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                              onClick={() => {
+                                if (!canExpand) return;
+                                if (expanded) { setAdminExpandedStaff(null); }
+                                else { setAdminExpandedStaff(s.id); loadAdminStaffUserLog(s.id); }
+                              }}
+                            >
+                              <div className="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center font-bold text-red-700 text-sm flex-shrink-0">
+                                {(s.name||'?')[0].toUpperCase()}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-gray-900 text-sm">{s.name}</span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${positionColor(s.position)}`}>{s.position}</span>
+                                  {s.is_banned && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">Banned</span>}
+                                  {s.in_session && <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full font-medium">● In Session</span>}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-0.5">{s.email} · {s.campus} · {s.region}</p>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-xs text-gray-400">Last sync</p>
+                                <p className="text-xs font-medium text-gray-600">{fmtTimeAgo(s.last_sync)}</p>
+                              </div>
+                              {canExpand && <ChevronRight className={`w-4 h-4 text-gray-400 flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`} />}
                             </div>
-                            <div className="flex gap-2 flex-wrap justify-end">
-                              {u.is_admin && <span className="text-xs bg-red-100 text-red-600 px-2 py-1 rounded-full font-semibold">Admin</span>}
-                              {u.is_banned && <span className="text-xs bg-orange-100 text-orange-600 px-2 py-1 rounded-full font-semibold">Blocked</span>}
-                              {u.schedule_enhanced && <span className="text-xs bg-green-100 text-green-600 px-2 py-1 rounded-full font-semibold">Enhanced</span>}
-                              {adminUserDetail.tasks.some(t => t.session_active) && (
-                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-semibold flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse inline-block"></span>
-                                  Active: {adminUserDetail.tasks.find(t => t.session_active)?.title?.replace(/\s*\[[^\]]+\]\s*/,'')?.slice(0,30) || 'Task'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Edit form */}
-                          {editingUser === u.id ? (
-                            <EditUserForm user={u} onSave={fields => adminEditUser(u.id, fields)} onCancel={() => setEditingUser(null)} currentUserId={user.id} />
-                          ) : (
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <button onClick={() => setEditingUser(u.id)} className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 flex items-center gap-1">
-                                <Edit2 className="w-3.5 h-3.5" />Edit
-                              </button>
-
-                              {/* Options dropdown */}
-                              <div className="relative">
-                                <button
-                                  onClick={() => setAdminOptionsOpen(o => !o)}
-                                  className="text-xs px-3 py-1.5 bg-red-50 text-red-700 rounded-lg hover:bg-red-100 flex items-center gap-1 font-medium"
-                                >
-                                  Options <ChevronDown className="w-3.5 h-3.5" />
-                                </button>
-                                {adminOptionsOpen && (
-                                  <div className="absolute left-0 top-full mt-1 w-56 bg-white border border-gray-200 rounded-xl shadow-lg z-50 overflow-hidden">
-                                    {/* Clear Token */}
-                                    <button onClick={() => { adminClearToken(u.id); setAdminOptionsOpen(false); }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-50 flex items-center gap-2 text-yellow-700">
-                                      <X className="w-3.5 h-3.5" />Clear Canvas Token
-                                    </button>
-                                    {/* Grant Shield */}
-                                    <button onClick={async () => {
-                                      setAdminOptionsOpen(false);
-                                      try {
-                                        const r = await apiCall(`/admin/users/${u.id}/grant-shield`, 'POST', {});
-                                        alert(`✅ Shield granted to ${u.name}. They now have ${r.shields} shield(s).`);
-                                        loadAdminUsers();
-                                      } catch (err) { alert('Failed: ' + err.message); }
-                                    }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-50 flex items-center gap-2 text-amber-700">
-                                      🛡️ Grant Shield {u.streak_shields_available > 0 && <span className="ml-auto font-bold text-amber-600">({u.streak_shields_available} held)</span>}
-                                    </button>
-                                    <div className="border-t border-gray-100" />
-                                    {/* Block / Unblock Account */}
-                                    {u.is_banned ? (
-                                      <button onClick={() => { adminUnbanUser(u.id); setAdminOptionsOpen(false); }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-50 flex items-center gap-2 text-green-700">
-                                        <UserCheck className="w-3.5 h-3.5" />Unblock Account
-                                      </button>
-                                    ) : (
-                                      <button onClick={() => { setShowBanDialog(u.id); setAdminOptionsOpen(false); }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-red-50 flex items-center gap-2 text-red-700">
-                                        <Ban className="w-3.5 h-3.5" />Block Account
-                                      </button>
-                                    )}
-                                    {/* Block IP */}
-                                    <button
-                                      onClick={async () => {
-                                        setAdminOptionsOpen(false);
-                                        const ip = u.last_login_ip;
-                                        if (!ip) { alert('No login IP on record for this user. They must log in at least once for an IP to be recorded.'); return; }
-                                        if (!confirm(`Block IP address ${ip} (last known login IP for ${u.name})?\n\nThis will prevent all logins from this address.`)) return;
+                            {expanded && (
+                              <div className="border-t border-gray-100 px-5 py-4 bg-gray-50">
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                                  {[
+                                    ['Grade', s.grade || '—'],
+                                    ['Joined', fmtTime(s.created_at)],
+                                    ['Last Updated', fmtTime(s.updated_at)],
+                                    ['Last Sync', fmtTime(s.last_sync)],
+                                  ].map(([k,v]) => (
+                                    <div key={k} className="bg-white rounded-lg p-3 border border-gray-200">
+                                      <p className="text-xs text-gray-400">{k}</p>
+                                      <p className="text-sm font-semibold text-gray-900">{v}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                                {canEdit('Manager') && s.id !== user?.id && (
+                                  <div className="flex items-center gap-2 mb-4 bg-white rounded-lg p-3 border border-gray-200">
+                                    <label className="text-xs font-semibold text-gray-500 flex-shrink-0">Change Position</label>
+                                    <select
+                                      defaultValue={s.position}
+                                      onChange={async (e) => {
+                                        const newPos = e.target.value;
+                                        if (newPos === s.position) return;
                                         try {
-                                          await apiCall(`/admin/users/${u.id}/block-ip`, 'POST', { reason: `Blocked via admin panel (user: ${u.name})` });
-                                          alert(`✅ IP ${ip} has been blocked.`);
-                                        } catch (err) { alert('Failed: ' + err.message); }
+                                          const r = await apiCall(`/admin/staff/${s.id}/position`, 'PATCH', { position: newPos });
+                                          if (r?.queued) {
+                                            alert('Position change submitted for approval.');
+                                          } else {
+                                            setAdminStaff(prev => prev.map(x => x.id === s.id ? { ...x, position: newPos } : x));
+                                          }
+                                        } catch (err) { alert(err.message || 'Failed to change position'); }
                                       }}
-                                      className="w-full text-left text-xs px-4 py-2.5 hover:bg-red-50 flex items-center gap-2 text-red-700"
+                                      className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-red-300"
                                     >
-                                      🚫 Block IP {u.last_login_ip ? <span className="ml-auto font-mono text-gray-400">{u.last_login_ip}</span> : <span className="ml-auto text-gray-300 italic">none on record</span>}
-                                    </button>
-                                    <div className="border-t border-gray-100" />
-                                    {/* Hacked PlanAssist insignia */}
-                                    {(adminUserDetail?.insignia || []).some(i => i.label === 'Hacked PlanAssist') ? (
-                                      <button onClick={async () => {
-                                        setAdminOptionsOpen(false);
-                                        if (!confirm(`Revoke "Hacked PlanAssist" from ${u.name}?`)) return;
-                                        try { await apiCall(`/admin/users/${u.id}/revoke-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); }
-                                        catch (err) { alert('Failed: ' + err.message); }
-                                      }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-900 bg-gray-800 flex items-center gap-2 text-green-400 font-mono">
-                                        ⚠ Revoke Hack Insignia
-                                      </button>
-                                    ) : (
-                                      <button onClick={async () => {
-                                        setAdminOptionsOpen(false);
-                                        if (!confirm(`Grant "Hacked PlanAssist" to ${u.name}?`)) return;
-                                        try { await apiCall(`/admin/users/${u.id}/grant-hacked-insignia`, 'POST', {}); await loadAdminUserDetail(u.id); alert(`✅ Granted to ${u.name}.`); }
-                                        catch (err) { alert('Failed: ' + err.message); }
-                                      }} className="w-full text-left text-xs px-4 py-2.5 hover:bg-gray-900 bg-gray-800 flex items-center gap-2 text-green-400 font-mono">
-                                        ⚠ Grant Hack Insignia
-                                      </button>
-                                    )}
+                                      {['user','Spectator','Broadcaster','Editor','Support','Moderator','Manager','Director','Supervisor','Owner'].map(p => (
+                                        <option key={p} value={p}>{p}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                                <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Recent Log</h4>
+                                {adminStaffLogLoading[s.id] ? loadingSpinner : (adminStaffLog[s.id] || []).length === 0 ? (
+                                  <p className="text-xs text-gray-400 italic">No log entries.</p>
+                                ) : (
+                                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                                    {(adminStaffLog[s.id] || []).map(e => (
+                                      <div key={e.id} className="flex items-center gap-2 text-xs bg-white rounded-lg px-3 py-2 border border-gray-100">
+                                        <span className="font-mono text-red-600 font-medium flex-shrink-0">{e.action}</span>
+                                        {e.target_user_name && <span className="text-gray-500">→ {e.target_user_name}</span>}
+                                        <span className="ml-auto text-gray-400 flex-shrink-0">{fmtTimeAgo(e.created_at)}</span>
+                                      </div>
+                                    ))}
                                   </div>
                                 )}
                               </div>
-
-                              {/* Inline status badges */}
-                              {u.is_banned && <span className="text-xs bg-orange-100 text-orange-700 px-2 py-1 rounded-full">Blocked</span>}
-                            </div>
-                          )}
-
-                          {u.is_banned && u.ban_reason && (
-                            <p className="mt-3 text-xs text-orange-700 bg-orange-50 rounded-lg px-3 py-2">
-                              Block reason: {u.ban_reason}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Credits */}
-                        <AdminCreditsCard
-                          user={u}
-                          onSetCredits={amount => adminSetCredits(u.id, amount)}
-                          onAdjustCredits={(delta, reason) => adminAdjustCredits(u.id, delta, reason)}
-                        />
-
-                        {/* Canvas Token */}
-                        <AdminTokenCard
-                          user={u}
-                          onViewToken={() => adminViewCanvasToken(u.id)}
-                          onSetToken={token => adminSetCanvasToken(u.id, token)}
-                        />
-
-                        {/* Tasks */}
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-semibold text-gray-700 mb-3 text-sm">Active Tasks ({adminUserDetail.tasks.length})</h4>
-                          {adminUserDetail.tasks.length === 0 ? (
-                            <p className="text-xs text-gray-400 text-center py-4">No active tasks.</p>
-                          ) : (
-                            <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                              {adminUserDetail.tasks.map(t => (
-                                <div key={t.id} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
-                                  <div className="flex-1 min-w-0">
-                                    <span className="font-medium text-gray-800 truncate block">{t.title}{t.segment ? ` · ${t.segment}` : ''}</span>
-                                    <span className="text-gray-400">{t.class} · {(() => { if (!t.deadline_date) return 'no date'; const dp = (t.deadline_date.includes('T') ? t.deadline_date.split('T')[0] : t.deadline_date); const d = t.deadline_time ? new Date(dp + 'T' + t.deadline_time + 'Z') : new Date(dp + 'T23:59:00'); return d.toLocaleDateString(); })()}</span>
-                                  </div>
-                                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                                    {t.session_active && <span className="text-green-500 text-xs font-medium">Active</span>}
-                                    <button onClick={() => adminDeleteTask(t.id)} className="text-red-400 hover:text-red-600">
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Recent completions */}
-                        {adminUserDetail.recentCompletions?.length > 0 && (
-                          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                            <h4 className="font-semibold text-gray-700 mb-3 text-sm">Recent Completions ({adminUserDetail.recentCompletions.length})</h4>
-                            <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                              {adminUserDetail.recentCompletions.map((tc, i) => (
-                                <div key={i} className="flex items-center justify-between text-xs p-2 bg-gray-50 rounded-lg">
-                                  <div className="flex-1 min-w-0">
-                                    <span className="font-medium text-gray-800 truncate block">{tc.title}</span>
-                                    <span className="text-gray-400">{tc.class}</span>
-                                  </div>
-                                  <div className="text-right flex-shrink-0 ml-2">
-                                    <p className="text-gray-600">{tc.actual_time}m logged</p>
-                                    <p className="text-gray-400">{new Date(tc.completed_at).toLocaleDateString()}</p>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                            )}
                           </div>
-                        )}
-
-
-                      </div>
-                    );
-                  })()}
-                </div>
-              </div>
-            )}
-
-            {/* ── ANNOUNCEMENTS ── */}
-            {adminSection === 'announcements' && (
-              <div className="space-y-6">
-                {/* Compose */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                  <h3 className="font-bold text-gray-900 mb-4">New Banner</h3>
-                  <div className="space-y-3">
-                    <textarea
-                      value={newAnnouncementMsg}
-                      onChange={e => setNewAnnouncementMsg(e.target.value)}
-                      placeholder="Banner message..."
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-500 resize-none h-20"
-                    />
-                    <div className="flex gap-3 items-center flex-wrap">
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => setNewAnnouncementType('info')}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium border-2 ${newAnnouncementType === 'info' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 text-gray-600'}`}
-                        >
-                          <span className="flex items-center gap-1.5"><Bell className="w-3.5 h-3.5" />Dismissible (blue)</span>
-                        </button>
-                        <button
-                          onClick={() => setNewAnnouncementType('urgent')}
-                          className={`px-4 py-2 rounded-lg text-sm font-medium border-2 ${newAnnouncementType === 'urgent' ? 'border-red-500 bg-red-50 text-red-700' : 'border-gray-200 text-gray-600'}`}
-                        >
-                          <span className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" />Permanent (red)</span>
-                        </button>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-500 font-medium">Audience:</span>
-                        {[['all','Everyone'],['existing','Existing Users'],['new','New Users']].map(([val,lbl]) => (
-                          <button key={val}
-                            onClick={() => setNewAnnouncementAudience(val)}
-                            className={`text-xs px-2.5 py-1 rounded-lg border font-medium transition-all ${(newAnnouncementAudience||'all') === val ? 'bg-red-600 text-white border-red-600' : 'border-gray-300 text-gray-600 hover:border-red-400'}`}
-                          >{lbl}</button>
-                        ))}
-                      </div>
-                      <button
-                        onClick={adminCreateAnnouncement}
-                        disabled={!newAnnouncementMsg.trim()}
-                        className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
-                      >
-                        Publish Banner
-                      </button>
+                        );
+                      })}
                     </div>
-                    <div className={`text-xs rounded-lg px-3 py-2 ${newAnnouncementType === 'urgent' ? 'bg-red-600 text-white' : 'bg-blue-600 text-white'}`}>
-                      Preview: {newAnnouncementMsg || 'Your message here...'}
-                    </div>
-                  </div>
+                  )}
                 </div>
+              )}
 
-                {/* Existing */}
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                  <h3 className="font-bold text-gray-900 mb-4">Active Banners</h3>
-                  <div className="space-y-3">
-                    {adminAnnouncements.filter(a => a.is_active).map(a => (
-                      <div key={a.id} className={`flex items-start justify-between p-3 rounded-lg text-sm ${a.type === 'urgent' ? 'bg-red-50 border border-red-200' : 'bg-blue-50 border border-blue-200'}`}>
-                        <div>
-                          <p className={`font-medium ${a.type === 'urgent' ? 'text-red-800' : 'text-blue-800'}`}>{a.message}</p>
-                          <p className="text-xs text-gray-400 mt-1">{a.type === 'urgent' ? 'Permanent' : 'Dismissible'} · by {a.author_name} · {new Date(a.created_at).toLocaleDateString()}</p>
-                        </div>
-                        <button onClick={() => adminDeactivateAnnouncement(a.id)} className="ml-3 text-xs text-gray-500 hover:text-red-600 flex-shrink-0 underline">
-                          Deactivate
-                        </button>
+              {/* ── DIRECTORY TAB ─────────────────────────────────────────── */}
+              {adminSection === 'directory' && (
+                <div>
+                  {/* Filters */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-48">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Search</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                        <input value={adminSearch} onChange={e=>setAdminSearch(e.target.value)} placeholder="Name, email, grade..." className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300" />
+                      </div>
+                    </div>
+                    {[
+                      { label:'Status', key:'status', opts:[['all','All'],['active','Active'],['banned','Banned'],['new','New']] },
+                      { label:'Grade', key:'grade', opts:[['all','All Grade'],...Array.from({length:10},(_,i)=>[(i+3).toString(),(i+3).toString()])] },
+                      { label:'Region', key:'region', opts:[['all','All'],['North America','NA'],['Australia','AU']] },
+                    ].map(({label,key,opts}) => (
+                      <div key={key}>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                        <select value={adminDirectoryFilter[key]} onChange={e=>setAdminDirectoryFilter(p=>({...p,[key]:e.target.value}))} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                          {opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                        </select>
                       </div>
                     ))}
-                    {adminAnnouncements.filter(a => !a.is_active).length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mt-4 mb-2">Past Banners</p>
-                        {adminAnnouncements.filter(a => !a.is_active).slice(0, 5).map(a => (
-                          <div key={a.id} className="flex items-center justify-between p-2.5 rounded-lg text-xs bg-gray-50 text-gray-400 mb-1.5">
-                            <span className="truncate">{a.message}</span>
-                            <span className="ml-2 flex-shrink-0">{new Date(a.created_at).toLocaleDateString()}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {adminAnnouncements.filter(a => a.is_active).length === 0 && (
-                      <p className="text-gray-400 text-sm">No active banners</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ── DIAGNOSTICS ── */}
-            {adminSection === 'diagnostics' && (
-              <div className="space-y-6">
-
-                {adminLoading && <div className="text-center py-10 text-gray-400">Loading diagnostics...</div>}
-                {adminDiagnostics && (() => {
-                  const d = adminDiagnostics;
-                  return (
-                    <div className="space-y-5">
-                      {/* New user signups */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                          <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                          New Signups — Last 3 Days ({d.newUsers.length})
-                        </h4>
-                        {d.newUsers.length === 0 && <p className="text-gray-400 text-sm">No new signups</p>}
-                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                          {d.newUsers.map(u => (
-                            <div key={u.id} className="flex items-center justify-between text-xs p-2 bg-green-50 rounded-lg">
-                              <div>
-                                <span className="font-semibold text-gray-800">{u.name || '(unnamed)'}</span>
-                                <span className="text-gray-500 ml-2">{u.email}</span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                <span className="text-gray-400">Gr {u.grade || '?'}</span>
-                                {u.is_new_user && <span className="bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded text-xs font-medium">Setup pending</span>}
-                                <span className="text-gray-400">{new Date(u.created_at).toLocaleDateString()}</span>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Grade stats */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3">Completion Stats by Grade</h4>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                          {d.gradeStats.map(g => (
-                            <div key={g.grade} className="p-3 bg-gray-50 rounded-lg text-center">
-                              <p className="text-lg font-bold text-purple-600">Grade {g.grade}</p>
-                              <p className="text-xs text-gray-500">{g.user_count} users</p>
-                              <p className="text-sm font-semibold text-gray-700">{g.total_completions} completions</p>
-                              <p className="text-xs text-gray-400">Avg {g.avg_actual_min}m actual / {g.avg_estimated_min}m est</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* No token */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-yellow-500" />
-                          No Canvas Token ({d.noToken.length})
-                        </h4>
-                        {d.noToken.length === 0 && <p className="text-green-600 text-sm">All set up ✓</p>}
-                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                          {d.noToken.map(u => (
-                            <div key={u.id} className="flex justify-between text-xs p-2 bg-yellow-50 rounded-lg">
-                              <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
-                              <span className="text-gray-400">Gr {u.grade}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Stale syncs */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                          <AlertTriangle className="w-4 h-4 text-orange-500" />
-                          Stale Syncs — No activity in 7+ days ({d.staleSyncs.length})
-                        </h4>
-                        {d.staleSyncs.length === 0 && <p className="text-green-600 text-sm">All users syncing ✓</p>}
-                        <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                          {d.staleSyncs.map(u => (
-                            <div key={u.id} className="flex justify-between text-xs p-2 bg-orange-50 rounded-lg">
-                              <span className="font-medium text-gray-800">{u.name} <span className="text-gray-400">({u.email})</span></span>
-                              <span className="text-gray-400">{u.last_sync ? new Date(u.last_sync).toLocaleDateString() : 'never'}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Duplicates */}
-                      {d.duplicates.length > 0 && (
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                            Duplicate Tasks ({d.duplicates.length})
-                          </h4>
-                          <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                            {d.duplicates.map((d2, i) => (
-                              <div key={i} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
-                                <span className="font-medium text-gray-800">{d2.user_name}</span>
-                                <span className="text-gray-500 truncate mx-3 flex-1">{d2.url}</span>
-                                <span className="text-red-600 font-bold">{d2.count}×</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Bad tasks */}
-                      {d.badTasks.length > 0 && (
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                            Tasks Missing Deadlines ({d.badTasks.length})
-                          </h4>
-                          <div className="space-y-1.5 max-h-64 overflow-y-auto">
-                            {d.badTasks.map(t => (
-                              <div key={t.id} className="flex justify-between text-xs p-2 bg-red-50 rounded-lg">
-                                <span className="font-medium text-gray-800">{t.title}</span>
-                                <span className="text-gray-400">{t.user_name} · Gr {t.grade}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Activity Heatmap — time-of-day across all days */}
-                      {d.activityHeatmap && (
-                        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                          <h4 className="font-bold text-gray-900 mb-3">Activity Heatmap — Time of Day (your local time, all days combined)</h4>
-                          <div className="flex items-end gap-1 h-20">
-                            {d.activityHeatmap.map((bucket) => {
-                              const max = Math.max(...d.activityHeatmap.map(b => b.count), 1);
-                              const pct = Math.round((bucket.count / max) * 100);
-                              return (
-                                <div key={bucket.hour} className="flex flex-col items-center flex-1 gap-1" title={`${bucket.hour}:00 — ${bucket.count} completions`}>
-                                  <div className="w-full rounded-t" style={{ height: `${Math.max(4, pct * 0.68)}px`, backgroundColor: `rgba(124,77,255,${0.15 + pct/100*0.85})` }} />
-                                  <span className="text-xs text-gray-400" style={{ fontSize: '9px' }}>{bucket.hour}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Bulk Actions */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-3">Bulk Actions</h4>
-                        <button onClick={async () => {
-                          if (!window.confirm('Grant a Streak Shield to ALL users?')) return;
-                          try {
-                            const r = await apiCall('/admin/grant-shields-all', 'POST', {});
-                            alert(`✅ Granted shields to ${r.affected} users.`);
-                          } catch (err) { alert('Failed: ' + err.message); }
-                        }} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-sm font-semibold transition-colors">
-                          🛡️ Grant Streak Shield to All Users
-                        </button>
-                      </div>
-
-                      {/* IP Blacklist */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
-                          <Ban className="w-4 h-4 text-red-500" />
-                          IP Blacklist ({adminIpBlacklist.length})
-                        </h4>
-
-                        {/* Add new IP */}
-                        <div className="flex gap-2 mb-4">
-                          <input
-                            value={newBlockIp}
-                            onChange={e => setNewBlockIp(e.target.value)}
-                            placeholder="IP address (e.g. 1.2.3.4)"
-                            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-400 focus:border-transparent font-mono"
-                          />
-                          <input
-                            value={newBlockReason}
-                            onChange={e => setNewBlockReason(e.target.value)}
-                            placeholder="Reason (optional)"
-                            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-red-400 focus:border-transparent"
-                          />
-                          <button
-                            disabled={ipBlockSubmitting || !newBlockIp.trim()}
-                            onClick={async () => {
-                              setIpBlockSubmitting(true);
-                              try {
-                                await apiCall('/admin/ip-blacklist', 'POST', { ip_address: newBlockIp.trim(), reason: newBlockReason.trim() });
-                                setNewBlockIp(''); setNewBlockReason('');
-                                await loadAdminIpBlacklist();
-                              } catch (err) { alert('Failed: ' + err.message); }
-                              finally { setIpBlockSubmitting(false); }
-                            }}
-                            className="px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50 whitespace-nowrap"
-                          >
-                            {ipBlockSubmitting ? '…' : 'Block IP'}
-                          </button>
-                        </div>
-
-                        {/* Blocked IPs list */}
-                        {ipBlacklistLoading && <p className="text-xs text-gray-400 py-2">Loading...</p>}
-                        {!ipBlacklistLoading && adminIpBlacklist.length === 0 && (
-                          <p className="text-xs text-gray-400 text-center py-4">No IPs blocked</p>
-                        )}
-                        {adminIpBlacklist.length > 0 && (
-                          <div className="space-y-1.5 max-h-60 overflow-y-auto">
-                            {adminIpBlacklist.map(entry => (
-                              <div key={entry.id} className="flex items-center justify-between text-xs p-2.5 bg-red-50 rounded-lg gap-2">
-                                <div className="flex-1 min-w-0">
-                                  <span className="font-mono font-semibold text-red-800">{entry.ip_address}</span>
-                                  {entry.reason && <span className="text-gray-500 ml-2">{entry.reason}</span>}
-                                </div>
-                                <div className="flex items-center gap-2 flex-shrink-0 text-gray-400">
-                                  {entry.blocked_by_name && <span>by {entry.blocked_by_name}</span>}
-                                  <span>{new Date(entry.created_at).toLocaleDateString()}</span>
-                                  <button
-                                    onClick={async () => {
-                                      if (!confirm(`Unblock ${entry.ip_address}?`)) return;
-                                      try { await apiCall(`/admin/ip-blacklist/${entry.id}`, 'DELETE'); await loadAdminIpBlacklist(); }
-                                      catch (err) { alert('Failed: ' + err.message); }
-                                    }}
-                                    className="text-red-400 hover:text-red-600 ml-1"
-                                    title="Remove from blacklist"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Scrollbar preference */}
-                      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                        <h4 className="font-bold text-gray-900 mb-1">Scrollbar Style</h4>
-                        <p className="text-xs text-gray-400 mb-3">Toggle the custom themed scrollbar for all users on this device. Disabling uses the browser default (or hides it entirely).</p>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => {
-                              const next = !showCustomScrollbar;
-                              setShowCustomScrollbar(next);
-                              localStorage.setItem('pa-custom-scrollbar', next ? 'on' : 'off');
-                            }}
-                            className={`relative w-11 h-6 rounded-full transition-colors ${showCustomScrollbar ? 'bg-purple-600' : 'bg-gray-300'}`}
-                          >
-                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${showCustomScrollbar ? 'translate-x-5' : ''}`} />
-                          </button>
-                          <span className="text-sm text-gray-700">{showCustomScrollbar ? 'Custom scrollbar enabled' : 'Custom scrollbar disabled'}</span>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        <button onClick={loadAdminDiagnostics} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh diagnostics</button>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </div>
-            )}
-
-            {/* ── HPT CONTROL ── */}
-            {adminSection === 'hpt' && (
-              <div className="space-y-6">
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                  <div className="flex items-center justify-between mb-5">
                     <div>
-                      <h3 className="font-bold text-gray-900 text-lg">HPT Users</h3>
-                      <p className="text-sm text-gray-500 mt-0.5">High Performing Team — teacher/staff accounts for HPT Mode.</p>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Sort</label>
+                      <select value={adminDirectorySort} onChange={e=>setAdminDirectorySort(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                        <option value="name_asc">Name A→Z</option>
+                        <option value="name_desc">Name Z→A</option>
+                        <option value="grade">Grade</option>
+                        <option value="created">Newest First</option>
+                        <option value="sync">Last Sync</option>
+                      </select>
                     </div>
-                    <button
-                      onClick={() => { setShowAddHptUser(true); setHptNewName(''); setHptNewPasscode(''); }}
-                      className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-xl text-sm font-semibold hover:bg-purple-700"
-                    >
-                      <Plus className="w-4 h-4" /> Add HPT User
-                    </button>
+                    <span className="text-xs text-gray-400 self-end pb-2">{filteredDirectoryUsers.length} result{filteredDirectoryUsers.length !== 1 ? 's' : ''}</span>
                   </div>
 
-                  {hptLoading && (
-                    <div className="flex items-center justify-center py-10">
-                      <div className="w-6 h-6 border-2 border-purple-500 border-t-transparent rounded-full animate-spin" />
-                    </div>
-                  )}
-
-                  {!hptLoading && adminHptUsers.length === 0 && (
-                    <div className="text-center py-10">
-                      <BookOpen className="w-8 h-8 text-gray-300 mx-auto mb-2" />
-                      <p className="text-gray-400 text-sm">No HPT users yet. Add the first one.</p>
-                    </div>
-                  )}
-
-                  {!hptLoading && adminHptUsers.length > 0 && (
-                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-                      {/* Left: user list */}
-                      <div className="lg:col-span-2 border border-gray-200 rounded-xl overflow-hidden">
-                        {adminHptUsers.map((u, i) => (
-                          <div
-                            key={u.id}
-                            onClick={() => setAdminSelectedHptUser(u)}
-                            className={`flex items-center justify-between px-4 py-3 cursor-pointer ${i > 0 ? 'border-t border-gray-100' : ''} ${adminSelectedHptUser?.id === u.id ? 'bg-purple-50' : 'hover:bg-gray-50'}`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-lg flex items-center justify-center flex-shrink-0">
-                                <span className="text-white text-xs font-bold">{u.name.charAt(0).toUpperCase()}</span>
+                  {/* User rows */}
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    {adminLoading ? loadingSpinner : filteredDirectoryUsers.length === 0 ? (
+                      <div className="p-12 text-center text-gray-400">No users match your filters.</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100">
+                        {filteredDirectoryUsers.map(u => {
+                          const isEditing = adminDirectoryEditId === u.id;
+                          const ef = adminDirectoryEditFields;
+                          return (
+                            <div key={u.id} className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                {isEditing ? (
+                                  <div className="flex flex-wrap gap-2">
+                                    {[['name','Name'],['email','Email'],['grade','Grade'],['campus','Campus'],['region','Region']].map(([field,ph])=>(
+                                      <input key={field} value={ef[field]??u[field]??''} onChange={e=>setAdminDirectoryEditFields(p=>({...p,[field]:e.target.value}))}
+                                        placeholder={ph} className="border border-gray-300 rounded-lg px-2 py-1 text-sm w-32 focus:ring-2 focus:ring-red-300" />
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-medium text-gray-900 text-sm">{u.name}</span>
+                                    <span className="text-xs text-gray-400">{u.email}</span>
+                                    {u.position && u.position !== 'user' && <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${positionColor(u.position)}`}>{u.position}</span>}
+                                    {u.is_banned && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded">Banned</span>}
+                                    {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded">New</span>}
+                                  </div>
+                                )}
+                                <p className="text-xs text-gray-400 mt-0.5">Grade {u.grade} · {u.campus} · {u.region} · Sync: {fmtTimeAgo(u.last_sync)}</p>
                               </div>
-                              <div>
-                                <p className="font-semibold text-gray-800 text-sm">{u.name}</p>
-                                <p className="text-xs text-gray-400 mt-0.5">
-                                  {u.studio_count} studio{u.studio_count !== 1 ? 's' : ''}
-                                </p>
-                              </div>
+                              {(canEdit('Moderator') || userPosition === 'Support') && (
+                                <div className="flex items-center gap-1.5 flex-shrink-0">
+                                  {isEditing ? (
+                                    <>
+                                      <button onClick={async()=>{
+                                        await adminEditUser(u.id, adminDirectoryEditFields);
+                                        setAdminDirectoryEditId(null); setAdminDirectoryEditFields({});
+                                      }} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-semibold hover:bg-green-600">Save</button>
+                                      <button onClick={()=>{setAdminDirectoryEditId(null);setAdminDirectoryEditFields({});}} className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-300">Cancel</button>
+                                      <button onClick={()=>setAdminDirectoryAdvModal(u)} className="px-2 py-1.5 bg-gray-100 text-gray-600 rounded-lg text-xs font-semibold hover:bg-gray-200">+</button>
+                                    </>
+                                  ) : (
+                                    <button onClick={()=>{setAdminDirectoryEditId(u.id);setAdminDirectoryEditFields({});}} className="px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-200">Edit</button>
+                                  )}
+                                </div>
+                              )}
                             </div>
-                            <button
-                              onClick={e => { e.stopPropagation(); setHptDeleteConfirm(u); }}
-                              className="text-red-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50"
-                              title="Delete HPT user"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── INDEX TAB ─────────────────────────────────────────────── */}
+              {adminSection === 'index' && (
+                <div>
+                  {/* Filters */}
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-48">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Search</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                        <input value={adminIndexSearch} onChange={e=>setAdminIndexSearch(e.target.value)} placeholder="Name or email..." className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300" />
+                      </div>
+                    </div>
+                    {[
+                      { label:'Grade', key:'grade', opts:[['all','All Grade'],...Array.from({length:10},(_,i)=>[(i+3).toString(),(i+3).toString()])] },
+                      { label:'Region', key:'region', opts:[['all','All'],['North America','NA'],['Australia','AU']] },
+                      { label:'Enhanced', key:'enhanced', opts:[['all','All'],['yes','Enhanced'],['no','Basic']] },
+                    ].map(({label,key,opts})=>(
+                      <div key={key}>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+                        <select value={adminIndexFilter[key]} onChange={e=>setAdminIndexFilter(p=>({...p,[key]:e.target.value}))} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                          {opts.map(([v,l])=><option key={v} value={v}>{l}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Sort</label>
+                      <select value={adminIndexSort} onChange={e=>setAdminIndexSort(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                        <option value="created_desc">Newest First</option>
+                        <option value="created_asc">Oldest First</option>
+                        <option value="name">Name</option>
+                        <option value="tasks">Most Completions</option>
+                        <option value="sync">Last Sync</option>
+                      </select>
+                    </div>
+                    <span className="text-xs text-gray-400 self-end pb-2">{filteredIndexUsers.length} user{filteredIndexUsers.length!==1?'s':''}</span>
+                  </div>
+
+                  {/* User rows */}
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    {adminLoading ? loadingSpinner : (
+                      <div className="divide-y divide-gray-100">
+                        {filteredIndexUsers.map(u => (
+                          <div key={u.id}
+                            className={`px-5 py-3 flex items-center gap-3 transition-colors ${canEdit('Moderator') ? 'cursor-pointer hover:bg-gray-50' : ''}`}
+                            onClick={() => {
+                              if (!canEdit('Moderator')) return;
+                              setAdminIndexModal(u);
+                              setAdminIndexModalData(null);
+                              loadAdminIndexModal(u.id);
+                            }}
+                          >
+                            <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-600 flex-shrink-0">
+                              {(u.name||'?')[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-gray-900 text-sm">{u.name}</span>
+                                {u.is_new_user && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 rounded">New</span>}
+                                {u.schedule_enhanced && <span className="text-xs bg-purple-100 text-purple-600 px-1.5 rounded">Enhanced</span>}
+                                {u.position && u.position !== 'user' && <span className={`text-xs px-1.5 rounded font-medium ${positionColor(u.position)}`}>{u.position}</span>}
+                                {u.is_banned && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded">Banned</span>}
+                                {u.in_session && <span className="text-xs bg-green-100 text-green-600 px-1.5 rounded">● Live</span>}
+                              </div>
+                              <p className="text-xs text-gray-400 mt-0.5">{u.email} · Gr {u.grade} · {u.campus} · {u.region}</p>
+                            </div>
+                            <div className="text-right flex-shrink-0 text-xs text-gray-500 space-y-0.5">
+                              <p><span className="font-semibold text-gray-700">{u.total_completed||0}</span> completions</p>
+                              <p><span className="font-semibold text-gray-700">{u.active_tasks||0}</span> tasks</p>
+                              <p className="text-gray-400">{fmtTimeAgo(u.last_sync)}</p>
+                            </div>
+                            {canEdit('Moderator') && <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />}
                           </div>
                         ))}
                       </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
-                      {/* Right: selected user detail, or About info */}
-                      <div className="lg:col-span-3">
-                        {adminSelectedHptUser ? (
-                          <div className="bg-white rounded-xl border border-gray-200 p-5 h-full">
-                            <div className="flex items-start justify-between mb-4">
-                              <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 bg-gradient-to-br from-yellow-400 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0">
-                                  <span className="text-white text-lg font-bold">{adminSelectedHptUser.name.charAt(0).toUpperCase()}</span>
-                                </div>
-                                <div>
-                                  <h4 className="font-bold text-gray-900 text-base">{adminSelectedHptUser.name}</h4>
-                                  <p className="text-sm text-purple-600 font-medium">HPT Staff</p>
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => setAdminSelectedHptUser(null)}
-                                className="text-gray-400 hover:text-gray-600 p-1 rounded-lg hover:bg-gray-100"
-                              >
-                                <X className="w-4 h-4" />
-                              </button>
+              {/* ── HPT TAB ───────────────────────────────────────────────── */}
+              {adminSection === 'hpt' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  <div className="bg-white rounded-xl border border-gray-200">
+                    <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                      <h2 className="font-bold text-gray-900">HPT Users</h2>
+                      {canEdit('Moderator') && userPosition !== 'Supervisor' && (
+                        <button onClick={()=>setShowAddHptUser(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">
+                          <Plus className="w-3.5 h-3.5" /> Add HPT User
+                        </button>
+                      )}
+                    </div>
+                    {hptLoading ? loadingSpinner : (
+                      <div className="divide-y divide-gray-100">
+                        {adminHptUsers.map(h => (
+                          <div key={h.id} onClick={()=>setAdminSelectedHptUser(adminSelectedHptUser?.id===h.id?null:h)}
+                            className="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700">
+                              {(h.name||'?')[0].toUpperCase()}
                             </div>
-                            <div className="grid grid-cols-2 gap-3 mb-4">
-                              <div className="bg-gray-50 rounded-xl p-3">
-                                <p className="text-2xl font-bold text-gray-900">{adminSelectedHptUser.studio_count}</p>
-                                <p className="text-xs text-gray-500 mt-0.5">Studio{adminSelectedHptUser.studio_count !== 1 ? 's' : ''} created</p>
-                              </div>
-                              <div className="bg-gray-50 rounded-xl p-3">
-                                <p className="text-sm font-semibold text-gray-700">{new Date(adminSelectedHptUser.created_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</p>
-                                <p className="text-xs text-gray-500 mt-0.5">Date added</p>
-                              </div>
+                            <div className="flex-1">
+                              <p className="font-medium text-sm text-gray-900">{h.name}</p>
+                              <p className="text-xs text-gray-400">{h.studio_count||0} studios · {h.member_count||0} students</p>
                             </div>
-                            <div className="border-t border-gray-100 pt-4 flex items-center justify-between">
-                              <p className="text-xs text-gray-400">HPT ID: {adminSelectedHptUser.id}</p>
-                              <button
-                                onClick={() => setHptDeleteConfirm(adminSelectedHptUser)}
-                                className="flex items-center gap-1.5 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" /> Remove User
-                              </button>
-                            </div>
+                            {h.is_banned && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded">Banned</span>}
+                            <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${adminSelectedHptUser?.id===h.id?'rotate-90':''}`} />
                           </div>
-                        ) : (
-                          <div className="bg-gray-50 rounded-xl border border-gray-200 p-5 h-full flex flex-col">
-                            <div className="flex items-center gap-2 mb-3">
-                              <Info className="w-4 h-4 text-gray-400" />
-                              <h4 className={`font-semibold text-sm ${colorTheme === 'dark' ? 'text-gray-300' : colorTheme === 'cool' ? 'text-green-300' : colorTheme === 'warm' ? 'text-pink-700' : 'text-gray-600'}`}>Select a user to see details</h4>
-                            </div>
-                            <p className="text-sm text-gray-400 leading-relaxed">Click any HPT user in the list to view their details here — including when they were added, how many Studios they manage, and quick actions.</p>
-                            <div className="mt-4 pt-4 border-t border-gray-200 space-y-2 text-xs text-gray-400">
-                              <p>💡 HPT users log in via the Teacher portal using their generated passcode.</p>
-                              <p>🔒 Passcodes are hashed — they can't be recovered. Delete and re-add if lost.</p>
-                            </div>
-                          </div>
-                        )}
+                        ))}
+                        {adminHptUsers.length === 0 && <div className="p-8 text-center text-gray-400 text-sm">No HPT users yet.</div>}
                       </div>
+                    )}
+                  </div>
+                  {adminSelectedHptUser && (
+                    <div className="bg-white rounded-xl border border-gray-200 p-5">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center font-bold text-blue-700">
+                          {(adminSelectedHptUser.name||'?')[0].toUpperCase()}
+                        </div>
+                        <div>
+                          <h3 className="font-bold text-gray-900">{adminSelectedHptUser.name}</h3>
+                          <p className="text-xs text-gray-400">HPT User</p>
+                        </div>
+                      </div>
+                      {canEdit('Moderator') && (
+                        <div className="space-y-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+                            <input defaultValue={adminSelectedHptUser.name} id="hpt-edit-name" className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300" />
+                          </div>
+                          <button onClick={async()=>{
+                            const nm = document.getElementById('hpt-edit-name')?.value;
+                            if (!nm?.trim()) return;
+                            const r = await apiCall(`/admin/hpt-users/${adminSelectedHptUser.id}`, 'PATCH', { name: nm.trim() });
+                            if (r?.queued) { alert('Name change submitted for approval.'); return; }
+                            setAdminHptUsers(prev=>prev.map(h=>h.id===adminSelectedHptUser.id?{...h,name:nm.trim()}:h));
+                            setAdminSelectedHptUser(prev=>({...prev,name:nm.trim()}));
+                          }} className="w-full py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">Save Name</button>
+                          {(canEdit('Director') || userPosition === 'Moderator') && (
+                            <button onClick={async()=>{
+                              const newPass = Math.random().toString(36).slice(2,10).toUpperCase();
+                              const r = await apiCall(`/admin/hpt-users/${adminSelectedHptUser.id}`, 'PATCH', { passcode: newPass });
+                              if (r?.queued) { alert('Passcode regeneration submitted for approval.'); return; }
+                              alert(`New passcode: ${newPass}`);
+                            }} className="w-full py-2 bg-yellow-500 text-white rounded-lg text-sm font-semibold hover:bg-yellow-600">Regenerate Passcode</button>
+                          )}
+                          <button onClick={()=>setHptDeleteConfirm(adminSelectedHptUser.id)} className="w-full py-2 bg-red-50 text-red-600 rounded-lg text-sm font-semibold hover:bg-red-100 border border-red-200">Delete HPT User</button>
+                          {hptDeleteConfirm === adminSelectedHptUser.id && (
+                            <div className="border border-red-200 bg-red-50 rounded-lg p-3 space-y-2">
+                              <p className="text-xs text-red-700">Permanently delete {adminSelectedHptUser.name}? This cannot be undone.</p>
+                              <div className="flex gap-2">
+                                <button onClick={()=>handleDeleteHptUser(adminSelectedHptUser.id)} className="flex-1 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Confirm Delete</button>
+                                <button onClick={()=>setHptDeleteConfirm(null)} className="flex-1 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-300">Cancel</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
+              )}
 
-                {/* Add HPT User modal */}
-                {showAddHptUser && (
-                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-                      <div className="flex items-center justify-between mb-5">
-                        <h3 className="text-lg font-bold text-gray-900">Add HPT User</h3>
-                        <button onClick={() => setShowAddHptUser(false)} className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
-                      </div>
-                      <div className="space-y-4">
+              {/* ── BROADCASTS TAB ────────────────────────────────────────── */}
+              {adminSection === 'broadcasts' && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Post new — visible to anyone who can post directly or submit a request (Support and above, plus Editor/Broadcaster) */}
+                  {(canEdit('Support') || userPosition === 'Editor' || userPosition === 'Broadcaster') && (
+                    <div className="bg-white rounded-xl border border-gray-200 p-5">
+                      <h2 className="font-bold text-gray-900 mb-4">Post New Broadcast</h2>
+                      <div className="space-y-3">
                         <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">Teacher's Full Name</label>
-                          <input
-                            value={hptNewName}
-                            onChange={e => {
-                              setHptNewName(e.target.value);
-                              if (e.target.value.trim()) {
-                                setHptNewPasscode(generateHptPasscode(e.target.value));
-                              } else {
-                                setHptNewPasscode('');
-                              }
-                            }}
-                            placeholder="e.g. Sarah Thompson"
-                            className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-purple-500"
-                          />
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Type</label>
+                          <select value={newAnnouncementType} onChange={e=>setNewAnnouncementType(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                            <option value="info">Info (dismissible, blue)</option>
+                            <option value="urgent">Urgent (non-dismissible, red)</option>
+                          </select>
                         </div>
                         <div>
-                          <label className="block text-sm font-semibold text-gray-700 mb-1.5">Generated Passcode</label>
-                          <div className="flex gap-2">
-                            <input
-                              value={hptNewPasscode}
-                              readOnly
-                              className="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl text-sm font-mono bg-gray-50 text-gray-700"
-                              placeholder="Fill in name first…"
-                            />
-                            <button
-                              onClick={() => hptNewName.trim() && setHptNewPasscode(generateHptPasscode(hptNewName))}
-                              disabled={!hptNewName.trim()}
-                              className="px-3 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl text-sm font-medium disabled:opacity-40"
-                              title="Regenerate"
-                            >
-                              <RefreshCw className="w-4 h-4" />
-                            </button>
-                            {hptNewPasscode && (
-                              <button
-                                onClick={() => navigator.clipboard.writeText(hptNewPasscode)}
-                                className="px-3 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-600 rounded-xl text-sm"
-                                title="Copy passcode"
-                              >
-                                <Copy className="w-4 h-4" />
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Audience</label>
+                          <select value={newAnnouncementAudience} onChange={e=>setNewAnnouncementAudience(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                            <option value="all">All users</option>
+                            <option value="existing">Existing users only</option>
+                            <option value="new">New users only</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Message <span className="text-gray-400">({newAnnouncementMsg.length}/500)</span></label>
+                          <textarea value={newAnnouncementMsg} onChange={e=>setNewAnnouncementMsg(e.target.value)} rows={3} maxLength={500} placeholder="Broadcast message..." className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300 resize-none" />
+                        </div>
+                        <button onClick={async()=>{
+                          if (!newAnnouncementMsg.trim()) return;
+                          const r = await apiCall('/admin/announcements','POST',{message:newAnnouncementMsg.trim(),type:newAnnouncementType,target_audience:newAnnouncementAudience});
+                          setNewAnnouncementMsg('');
+                          if (r?.queued) { alert('Broadcast submitted for approval.'); } else { loadAdminAnnouncements(); }
+                        }} className="w-full py-2.5 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700">Post Broadcast</button>
+                      </div>
+                    </div>
+                  )}
+                  {/* Live list */}
+                  <div className="bg-white rounded-xl border border-gray-200">
+                    <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+                      <h2 className="font-bold text-gray-900">Active Broadcasts</h2>
+                      <div className="flex items-center gap-1.5 text-xs text-green-600">
+                        <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                        Live
+                      </div>
+                    </div>
+                    <div className="divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                      {adminAnnouncements.filter(a=>a.is_active).length === 0 ? (
+                        <div className="p-8 text-center text-gray-400 text-sm">No active broadcasts.</div>
+                      ) : adminAnnouncements.filter(a=>a.is_active).map(a => (
+                        <div key={a.id} className={`px-4 py-3 border-l-4 ${a.type==='urgent'?'border-red-400 bg-red-50':'border-blue-400 bg-blue-50'}`}>
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-gray-900">{a.message}</p>
+                              <p className="text-xs text-gray-500 mt-1">{a.type} · {a.target_audience} · {fmtTimeAgo(a.created_at)}</p>
+                            </div>
+                            {canEdit('Manager') && (
+                              <button onClick={async()=>{
+                                await apiCall(`/admin/announcements/${a.id}/deactivate`,'PATCH');
+                                loadAdminAnnouncements();
+                              }} className="p-1 text-gray-400 hover:text-red-500 flex-shrink-0">
+                                <X className="w-4 h-4" />
                               </button>
                             )}
                           </div>
-                          <p className="text-xs text-gray-400 mt-1.5">Auto-generated from last name + 3 digits + symbol. Copy and share with the teacher before saving — it cannot be recovered after.</p>
                         </div>
-                      </div>
-                      <div className="flex gap-3 mt-6">
-                        <button onClick={() => setShowAddHptUser(false)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200">Cancel</button>
-                        <button
-                          onClick={handleAddHptUser}
-                          disabled={hptAddLoading || !hptNewName.trim() || !hptNewPasscode.trim()}
-                          className="flex-1 py-2.5 bg-purple-600 text-white rounded-xl text-sm font-bold hover:bg-purple-700 disabled:opacity-50"
-                        >
-                          {hptAddLoading ? 'Adding…' : 'Add HPT User'}
-                        </button>
-                      </div>
+                      ))}
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* Delete confirm */}
-                {hptDeleteConfirm && (
-                  <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center">
-                      <Trash2 className="w-10 h-10 text-red-500 mx-auto mb-3" />
-                      <h3 className="text-lg font-bold text-gray-900 mb-2">Delete {hptDeleteConfirm.name}?</h3>
-                      <p className="text-sm text-gray-500 mb-5">This will remove their HPT access and delete all Studios they created. This cannot be undone.</p>
-                      <div className="flex gap-3">
-                        <button onClick={() => setHptDeleteConfirm(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium">Cancel</button>
-                        <button onClick={() => handleDeleteHptUser(hptDeleteConfirm.id)} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-bold hover:bg-red-700">Delete</button>
+              {/* ── DIAGNOSTICS TAB ───────────────────────────────────────── */}
+              {adminSection === 'diagnostics' && (
+                <div>
+                  {!adminDiagnostics ? loadingSpinner : userPosition === 'Support' ? (
+                    /* Support: brief, Feedback-centered diagnostics only */
+                    <div className="bg-white rounded-xl border border-gray-200 p-5 max-w-md">
+                      <h3 className="font-bold text-gray-900 mb-3">Feedback Summary</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                          <p className="text-xl font-bold text-gray-900">{adminFeedback.length}</p>
+                          <p className="text-xs text-gray-400">Total Submissions</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                          <p className="text-xl font-bold text-gray-900">{adminFeedback.filter(f=>!f.checked).length}</p>
+                          <p className="text-xs text-gray-400">Unchecked</p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── AUDIT LOG ── */}
-            {adminSection === 'audit' && (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-bold text-gray-900">Admin Audit Log</h3>
-                  <button onClick={loadAdminAuditLog} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh</button>
-                </div>
-                <div className="space-y-2 max-h-[600px] overflow-y-auto">
-                  {adminAuditLog.length === 0 && <p className="text-gray-400 text-sm">No actions recorded yet</p>}
-                  {adminAuditLog.map(entry => {
-                    const actionLabels = {
-                      CREATE_ANNOUNCEMENT:    '📢 Created Announcement',
-                      DEACTIVATE_ANNOUNCEMENT:'🔕 Deactivated Announcement',
-                      EDIT_USER:              '✏️ Edited User',
-                      BAN_USER:               '🚫 Banned User',
-                      UNBAN_USER:             '✅ Unbanned User',
-                      CLEAR_CANVAS_TOKEN:     '🔑 Cleared Canvas Token',
-                      DELETE_TASK:            '🗑️ Deleted Task',
-                      UPDATE_HELP:            '📖 Updated Help Page',
-                      GRANT_STREAK_SHIELD:    '🛡️ Granted Streak Shield',
-                      GRANT_SHIELDS_ALL:      '🛡️ Granted Shields to All',
-                      hpt_user_created:       '📚 Created HPT User',
-                      hpt_user_deleted:       '📚 Deleted HPT User',
-                    };
-                    const details = typeof entry.details === 'string' ? JSON.parse(entry.details) : (entry.details || {});
-                    const detailKeys = Object.keys(details);
-                    const friendlyDetails = detailKeys.length > 0
-                      ? detailKeys.map(k => {
-                          if (k === 'task_title') return `"${details[k]}"`;
-                          if (k === 'message') return `"${details[k]}"`;
-                          if (k === 'content_length') return `${details[k]} chars`;
-                          if (k === 'reason') return `reason: ${details[k]}`;
-                          if (k === 'type') return `type: ${details[k]}`;
-                          if (k === 'users_affected') return `${details[k]} users affected`;
-                          if (k === 'name') return `name: ${details[k]}`;
-                          return null;
-                        }).filter(Boolean).join(', ')
-                      : null;
-                    return (
-                      <div key={entry.id} className="flex items-start gap-3 text-xs p-3 bg-gray-50 rounded-lg">
-                        <div className="flex-1">
-                          <span className="font-bold text-gray-800">{entry.admin_name}</span>
-                          <span className="mx-1.5 font-medium text-purple-700">{actionLabels[entry.action] || entry.action}</span>
-                          {entry.target_user_name && <span className="text-gray-600">on <span className="font-medium">{entry.target_user_name}</span></span>}
-                          {friendlyDetails && <span className="ml-2 text-gray-400 italic">{friendlyDetails}</span>}
+                  ) : userPosition === 'Broadcaster' ? (
+                    /* Broadcaster: brief, Banner-centered diagnostics only */
+                    <div className="bg-white rounded-xl border border-gray-200 p-5 max-w-md">
+                      <h3 className="font-bold text-gray-900 mb-3">Broadcast Summary</h3>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                          <p className="text-xl font-bold text-gray-900">{adminAnnouncements.filter(a=>a.is_active).length}</p>
+                          <p className="text-xs text-gray-400">Active Broadcasts</p>
                         </div>
-                        <span className="text-gray-400 flex-shrink-0">{new Date(entry.created_at).toLocaleString()}</span>
+                        <div className="bg-gray-50 rounded-lg p-3 text-center">
+                          <p className="text-xl font-bold text-gray-900">{adminAnnouncements.length}</p>
+                          <p className="text-xs text-gray-400">Total Broadcasts</p>
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ── FEEDBACK ── */}
-            {adminSection === 'feedback' && (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-gray-900">User Feedback & Bug Reports</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">{adminFeedback.length} submission{adminFeedback.length !== 1 ? 's' : ''} · {adminFeedback.filter(f => !f.checked).length} unchecked</p>
-                  </div>
-                  <button onClick={loadAdminFeedback} className="text-sm text-gray-500 hover:text-gray-700 underline">Refresh</button>
-                </div>
-                <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                  {adminFeedback.length === 0 && <p className="text-gray-400 text-sm">No feedback submitted yet.</p>}
-                  {adminFeedback.map(fb => (
-                    <div key={fb.id} className={`p-4 rounded-xl border transition-colors ${fb.checked ? 'bg-green-50 border-green-200 opacity-70' : 'bg-gray-50 border-gray-100'}`}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 flex-1 min-w-0">
-                          <button
-                            onClick={async () => {
-                              const newVal = !fb.checked;
-                              try {
-                                await apiCall(`/admin/feedback/${fb.id}/checked`, 'PATCH', { checked: newVal });
-                                setAdminFeedback(prev => prev.map(f => f.id === fb.id ? { ...f, checked: newVal } : f));
-                              } catch (err) { alert('Failed to update: ' + err.message); }
-                            }}
-                            className={`mt-0.5 flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${fb.checked ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-400'}`}
-                            title={fb.checked ? 'Mark unchecked' : 'Mark checked'}
-                          >
-                            {fb.checked && <Check className="w-3 h-3 text-white" />}
-                          </button>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="font-semibold text-sm text-gray-900">{fb.user_name || '(unknown)'}</span>
-                              <span className="text-xs text-gray-400">{fb.user_email}</span>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
+                      {/* Stale syncs */}
+                      <div className="bg-white rounded-xl border border-gray-200 p-5">
+                        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-orange-400 rounded-full" />
+                          Stale Syncs <span className="text-xs text-gray-400 font-normal">({adminDiagnostics.staleSyncs?.length||0})</span>
+                        </h3>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {(adminDiagnostics.staleSyncs||[]).map(u=>(
+                            <div key={u.id} className="flex items-center justify-between text-xs">
+                              <span className="text-gray-700">{u.name} <span className="text-gray-400">Gr{u.grade}</span></span>
+                              <span className="text-orange-600">{fmtTimeAgo(u.last_sync)}</span>
                             </div>
-                            <p className={`text-sm whitespace-pre-wrap leading-relaxed ${fb.checked ? 'text-gray-400 line-through' : 'text-gray-700'}`}>{fb.feedback_text}</p>
+                          ))}
+                          {(adminDiagnostics.staleSyncs||[]).length===0&&<p className="text-xs text-gray-400 italic">All synced recently.</p>}
+                        </div>
+                      </div>
+                      {/* No canvas token */}
+                      <div className="bg-white rounded-xl border border-gray-200 p-5">
+                        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-red-400 rounded-full" />
+                          No Canvas Token <span className="text-xs text-gray-400 font-normal">({adminDiagnostics.noToken?.length||0})</span>
+                        </h3>
+                        <div className="space-y-1 max-h-48 overflow-y-auto">
+                          {(adminDiagnostics.noToken||[]).map(u=>(
+                            <div key={u.id} className="text-xs text-gray-700">{u.name} <span className="text-gray-400">Gr{u.grade}</span></div>
+                          ))}
+                          {(adminDiagnostics.noToken||[]).length===0&&<p className="text-xs text-gray-400 italic">All users have tokens.</p>}
+                        </div>
+                      </div>
+                      {/* New users */}
+                      <div className="bg-white rounded-xl border border-gray-200 p-5">
+                        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                          <span className="w-2 h-2 bg-blue-400 rounded-full" />
+                          Recent Signups <span className="text-xs text-gray-400 font-normal">({adminDiagnostics.newUsers?.length||0})</span>
+                        </h3>
+                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                          {(adminDiagnostics.newUsers||[]).map(u=>(
+                            <div key={u.id} className="flex items-center justify-between text-xs">
+                              <span className="text-gray-700">{u.name||u.email}</span>
+                              <span className="text-blue-600">{fmtTimeAgo(u.created_at)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      {/* Grade stats — hidden for Moderator and below */}
+                      {canEdit('Manager') && (
+                        <div className="bg-white rounded-xl border border-gray-200 p-5 md:col-span-2">
+                          <h3 className="font-bold text-gray-900 mb-3">Completions by Grade</h3>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead><tr className="text-gray-400 border-b border-gray-100">
+                                <th className="text-left pb-2">Grade</th><th className="text-right pb-2">Users</th><th className="text-right pb-2">Completions</th><th className="text-right pb-2">Avg Actual</th><th className="text-right pb-2">Avg Est.</th>
+                              </tr></thead>
+                              <tbody className="divide-y divide-gray-50">
+                                {(adminDiagnostics.gradeStats||[]).map(r=>(
+                                  <tr key={r.grade}><td className="py-1.5 font-medium text-gray-900">Grade {r.grade}</td><td className="text-right text-gray-600">{r.user_count}</td><td className="text-right text-gray-600">{r.total_completions}</td><td className="text-right text-gray-600">{r.avg_actual_min}m</td><td className="text-right text-gray-600">{r.avg_estimated_min}m</td></tr>
+                                ))}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
-                        <span className="text-xs text-gray-400 flex-shrink-0">{new Date(fb.created_at).toLocaleString()}</span>
+                      )}
+                      {/* Activity heatmap */}
+                      <div className="bg-white rounded-xl border border-gray-200 p-5">
+                        <h3 className="font-bold text-gray-900 mb-3">Activity Heatmap (UTC)</h3>
+                        <div className="flex items-end gap-0.5 h-16">
+                          {(adminDiagnostics.activityHeatmap||[]).map(({hour,count})=>{
+                            const max = Math.max(...(adminDiagnostics.activityHeatmap||[]).map(h=>h.count),1);
+                            const pct = Math.round((count/max)*100);
+                            return (
+                              <div key={hour} className="flex-1 flex flex-col items-center gap-0.5" title={`${hour}:00 — ${count} completions`}>
+                                <div className="w-full bg-red-500 rounded-sm" style={{height:`${Math.max(pct,2)}%`,opacity:0.2+pct/100*0.8}} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <div className="flex justify-between text-xs text-gray-400 mt-1"><span>0h</span><span>12h</span><span>23h</span></div>
+                      </div>
+                      {/* Duplicate tasks */}
+                      {(adminDiagnostics.duplicates||[]).length>0 && (
+                        <div className="bg-white rounded-xl border border-orange-200 p-5">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-yellow-400 rounded-full" /> Duplicate Tasks
+                          </h3>
+                          <div className="space-y-1 max-h-40 overflow-y-auto">
+                            {adminDiagnostics.duplicates.map((d,i)=>(
+                              <div key={i} className="text-xs text-gray-600">{d.user_name} — {d.count}× duplicates</div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* IP Blacklist */}
+                      {canEdit('Manager') && (
+                        <div className="bg-white rounded-xl border border-gray-200 p-5">
+                          <h3 className="font-bold text-gray-900 mb-3">IP Blacklist ({adminIpBlacklist.length})</h3>
+                          <div className="space-y-1 max-h-32 overflow-y-auto mb-3">
+                            {adminIpBlacklist.map(b=>(
+                              <div key={b.id} className="flex items-center justify-between text-xs">
+                                <span className="font-mono text-gray-700">{b.ip_address}</span>
+                                <button onClick={async()=>{await apiCall(`/admin/ip-blacklist/${b.id}`,'DELETE');loadAdminIpBlacklist();}} className="text-red-400 hover:text-red-600"><X className="w-3 h-3"/></button>
+                              </div>
+                            ))}
+                            {adminIpBlacklist.length===0&&<p className="text-xs text-gray-400 italic">No blocked IPs.</p>}
+                          </div>
+                          {canEdit('Director') && (
+                            <div className="flex gap-2">
+                              <input value={newBlockIp} onChange={e=>setNewBlockIp(e.target.value)} placeholder="IP address" className="flex-1 px-2 py-1.5 border border-gray-200 rounded-lg text-xs focus:ring-2 focus:ring-red-300" />
+                              <button onClick={async()=>{
+                                if (!newBlockIp.trim()) return;
+                                await apiCall('/admin/ip-blacklist','POST',{ip_address:newBlockIp.trim(),reason:newBlockReason});
+                                setNewBlockIp('');setNewBlockReason('');loadAdminIpBlacklist();
+                              }} className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Block</button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── LOG TAB ───────────────────────────────────────────────── */}
+              {adminSection === 'log' && (
+                <div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-48">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Search</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                        <input value={adminStaffLogSearch} onChange={e=>setAdminStaffLogSearch(e.target.value)} placeholder="Actor, action, target..." className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300" />
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ── ADMIN LOG ── */}
-            {adminSection === 'log' && (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-gray-900">Admin Log</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">Shared notes, tasks, and issues for admins. Auto-saves when you click Save.</p>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Action Filter</label>
+                      <select value={adminStaffLogFilter} onChange={e=>setAdminStaffLogFilter(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                        <option value="">All Actions</option>
+                        {logActionTypes.map(a=><option key={a} value={a}>{a}</option>)}
+                      </select>
+                    </div>
+                    <span className="text-xs text-gray-400 self-end pb-2">{filteredLog.length} entr{filteredLog.length!==1?'ies':'y'}</span>
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    {adminLoading ? loadingSpinner : filteredLog.length === 0 ? (
+                      <div className="p-12 text-center text-gray-400">No log entries found.</div>
+                    ) : (
+                      <div className="divide-y divide-gray-100 max-h-[60vh] overflow-y-auto">
+                        {filteredLog.map(e => (
+                          <div key={e.id} className="px-5 py-3 flex items-start gap-3">
+                            <div className="flex-shrink-0 mt-0.5">
+                              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${positionColor(e.actor_position)}`}>{e.actor_position}</span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-gray-900 text-sm">{e.actor_name}</span>
+                                <span className="font-mono text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded">{e.action}</span>
+                                {e.target_user_name && <span className="text-xs text-gray-500">→ {e.target_user_name}</span>}
+                              </div>
+                              {e.details && Object.keys(e.details).length > 0 && (
+                                <p className="text-xs text-gray-400 mt-0.5 truncate">{JSON.stringify(e.details)}</p>
+                              )}
+                            </div>
+                            <span className="text-xs text-gray-400 flex-shrink-0">{fmtTimeAgo(e.created_at)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <textarea
-                  value={adminLogContent}
-                  onChange={e => setAdminLogContent(e.target.value)}
-                  placeholder="Track tasks, issues, notes, and anything else here. This document is shared across all admins."
-                  className="w-full h-[500px] px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:ring-2 focus:ring-red-500 font-mono"
-                />
-                <div className="flex justify-between items-center mt-3">
-                  <p className="text-xs text-gray-400">{adminLogContent.length} characters</p>
-                  <button
-                    onClick={saveAdminLog}
-                    disabled={adminLogSaving}
-                    className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {adminLogSaving ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : 'Save Log'}
-                  </button>
-                </div>
-              </div>
-            )}
+              )}
 
-            {/* ── HELP PAGE EDITOR ── */}
-            {adminSection === 'help' && (
-              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-gray-900">Help Page Content</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">This content is shown to all users on their Help tab. Plain text is supported.</p>
+              {/* ── FEEDBACK TAB ──────────────────────────────────────────── */}
+              {adminSection === 'feedback' && (
+                <div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex flex-wrap gap-3 items-end">
+                    <div className="flex-1 min-w-48">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Search</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                        <input value={adminFeedbackSearch} onChange={e=>setAdminFeedbackSearch(e.target.value)} placeholder="Name, email, content..." className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
+                      <select value={adminFeedbackFilter} onChange={e=>setAdminFeedbackFilter(e.target.value)} className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                        <option value="all">All</option>
+                        <option value="unchecked">Unchecked</option>
+                        <option value="checked">Checked</option>
+                      </select>
+                    </div>
+                    <span className="text-xs text-gray-400 self-end pb-2">{filteredFeedback.length} submission{filteredFeedback.length!==1?'s':''}</span>
+                  </div>
+                  <div className="space-y-3">
+                    {adminLoading ? loadingSpinner : filteredFeedback.length === 0 ? (
+                      <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No feedback found.</div>
+                    ) : filteredFeedback.map(f => (
+                      <div key={f.id} className={`bg-white rounded-xl border p-4 ${f.checked?'border-gray-100 opacity-70':'border-gray-200'}`}>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap mb-1">
+                              <span className="font-semibold text-sm text-gray-900">{f.user_name}</span>
+                              <span className="text-xs text-gray-400">{f.user_email}</span>
+                              {f.grade && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 rounded">Gr{f.grade}</span>}
+                              {f.campus && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 rounded">{f.campus}</span>}
+                              {f.region && <span className="text-xs bg-gray-100 text-gray-600 px-1.5 rounded">{f.region}</span>}
+                              <span className="text-xs text-gray-400 ml-auto">{fmtTimeAgo(f.created_at)}</span>
+                            </div>
+                            <p className="text-sm text-gray-700 leading-relaxed">{f.feedback_text}</p>
+                          </div>
+                          {(canEdit('Moderator') || userPosition === 'Support') && (
+                            <button onClick={async()=>{
+                              const next = !f.checked;
+                              await apiCall(`/admin/feedback/${f.id}/checked`,'PATCH',{checked:next});
+                              setAdminFeedback(prev=>prev.map(x=>x.id===f.id?{...x,checked:next}:x));
+                            }} className={`flex-shrink-0 w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${f.checked?'bg-green-500 border-green-500':'border-gray-300 hover:border-green-400'}`}>
+                              {f.checked && <Check className="w-3.5 h-3.5 text-white" />}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <textarea
-                  value={adminHelpContent}
-                  onChange={e => setAdminHelpContent(e.target.value)}
-                  placeholder="Write help content here... Explain how PlanAssist works, how to sync, how sessions work, etc."
-                  className="w-full h-96 px-4 py-3 border border-gray-200 rounded-xl text-sm resize-none focus:ring-2 focus:ring-red-500 font-mono"
-                />
-                <div className="flex justify-end mt-3">
-                  <button
-                    onClick={saveAdminHelp}
-                    disabled={adminHelpSaving}
-                    className="px-5 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50 flex items-center gap-2"
-                  >
-                    {adminHelpSaving ? <><div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Saving...</> : 'Save Help Content'}
-                  </button>
+              )}
+
+              {/* ── RESOURCES TAB ─────────────────────────────────────────── */}
+              {adminSection === 'resources' && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
+                    <div className="flex items-center justify-between mb-4">
+                      <h2 className="font-bold text-gray-900">Help Page</h2>
+                      {(canEdit('Support')) && (
+                        <button onClick={async()=>{
+                          setAdminHelpSaving(true);
+                          try{
+                            const r = await apiCall('/admin/help','PUT',{content:adminHelpContent});
+                            if (r?.queued) alert('Resource edit submitted for approval.');
+                          } finally{setAdminHelpSaving(false);}
+                        }} disabled={adminHelpSaving} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+                          {adminHelpSaving?'Saving…':'Save Help'}
+                        </button>
+                      )}
+                    </div>
+                    <textarea value={adminHelpContent} onChange={e=>setAdminHelpContent(e.target.value)} readOnly={!canEdit('Support')} rows={20} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-300 resize-none" placeholder="Help page content (Markdown)..." />
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-bold text-gray-900 mb-3 text-sm">Recent Changes</h3>
+                    <div className="space-y-2 max-h-96 overflow-y-auto">
+                      {adminStaffLog2.filter(e=>e.action==='EDIT_HELP'||e.action==='EDIT_HELP_PAGE').slice(0,20).map(e=>(
+                        <div key={e.id} className="text-xs border border-gray-100 rounded-lg px-3 py-2">
+                          <p className="font-medium text-gray-900">{e.actor_name}</p>
+                          <p className="text-gray-400">{fmtTimeAgo(e.created_at)}</p>
+                        </div>
+                      ))}
+                      {adminStaffLog2.filter(e=>e.action==='EDIT_HELP'||e.action==='EDIT_HELP_PAGE').length===0 && <p className="text-xs text-gray-400 italic">No edits logged yet.</p>}
+                    </div>
+                  </div>
                 </div>
+              )}
+
+              {/* ── BULLETIN TAB ──────────────────────────────────────────── */}
+              {adminSection === 'bulletin' && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
+                    <div className="flex items-center justify-between mb-1">
+                      <h2 className="font-bold text-gray-900">Staff Bulletin</h2>
+                      {userPosition !== 'Supervisor' && (
+                        <button onClick={saveAdminBulletin} disabled={adminBulletinSaving} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+                          {adminBulletinSaving?'Saving…':'Save'}
+                        </button>
+                      )}
+                    </div>
+                    {adminBulletinMeta?.updatedAt && (
+                      <p className="text-xs text-gray-400 mb-3">Last updated {fmtTimeAgo(adminBulletinMeta.updatedAt)}{adminBulletinMeta.updatedByName ? ` by ${adminBulletinMeta.updatedByName}` : ''}</p>
+                    )}
+                    <textarea value={adminBulletinContent} onChange={e=>setAdminBulletinContent(e.target.value)} readOnly={userPosition === 'Supervisor'} rows={22} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-300 resize-none" placeholder="Staff bulletin board — shared notes, announcements, pinned items..." />
+                    {userPosition === 'Supervisor' && <p className="text-xs text-gray-400 mt-1 italic">Supervisors can view the bulletin but cannot edit it directly.</p>}
+                  </div>
+                  <div className="bg-white rounded-xl border border-gray-200 p-5">
+                    <h3 className="font-bold text-gray-900 mb-3 text-sm">Role Reference</h3>
+                    <div className="space-y-2">
+                      {['Owner','Supervisor','Director','Manager','Moderator','Support','Editor','Broadcaster','Spectator'].map(p=>(
+                        <div key={p} className="flex items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${positionColor(p)}`}>{p}</span>
+                          <span className="text-xs text-gray-400">Rank {POSITION_RANKS[p]}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── REQUESTS TAB ──────────────────────────────────────────── */}
+              {adminSection === 'requests' && (() => {
+                const canAct = !PEER_POSITIONS_FRONT.has(userPosition) && userPosition !== 'Spectator';
+                const filteredRequests = adminRequests.filter(r => adminRequestsFilter === 'all' ? true : r.status === adminRequestsFilter);
+                const requestTypeLabel = (t) => ({
+                  BAN_USER: 'Ban User', EDIT_USER: 'Edit User', PROMOTE_POSITION: 'Promote Position',
+                  POST_BANNER: 'Post Broadcast', EDIT_RESOURCE: 'Edit Resource',
+                  ADD_HPT_USER: 'Add HPT User', EDIT_HPT_USER: 'Edit HPT User'
+                }[t] || t);
+                const statusColor = (s) => ({ pending:'bg-yellow-100 text-yellow-700', approved:'bg-green-100 text-green-700', rejected:'bg-red-100 text-red-700' }[s] || 'bg-gray-100 text-gray-600');
+                return (
+                  <div>
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex gap-1.5">
+                        {['pending','approved','rejected','all'].map(f=>(
+                          <button key={f} onClick={()=>setAdminRequestsFilter(f)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize ${adminRequestsFilter===f?'bg-red-600 text-white':'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>{f}</button>
+                        ))}
+                      </div>
+                      <span className="text-xs text-gray-400">{filteredRequests.length} request{filteredRequests.length!==1?'s':''}</span>
+                    </div>
+                    {adminRequestsLoading ? loadingSpinner : filteredRequests.length === 0 ? (
+                      <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No requests found.</div>
+                    ) : (
+                      <div className="space-y-3">
+                        {filteredRequests.map(r => (
+                          <div key={r.id} className="bg-white rounded-xl border border-gray-200 p-4">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap mb-1">
+                                  <span className="font-mono text-xs bg-gray-100 text-gray-700 px-1.5 py-0.5 rounded font-semibold">{requestTypeLabel(r.request_type)}</span>
+                                  <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium capitalize ${statusColor(r.status)}`}>{r.status}</span>
+                                  <span className="text-xs text-gray-400">requires {r.min_approver_position}+</span>
+                                </div>
+                                <p className="text-sm text-gray-700">
+                                  <span className="font-semibold">{r.requestor_name}</span> <span className="text-gray-400">({r.requestor_position})</span>
+                                  {r.target_user_name && <> → <span className="font-semibold">{r.target_user_name}</span></>}
+                                </p>
+                                {r.payload && Object.keys(r.payload).length > 0 && (
+                                  <p className="text-xs text-gray-400 mt-1 truncate">{JSON.stringify(r.payload)}</p>
+                                )}
+                                {r.status !== 'pending' && r.resolved_by_name && (
+                                  <p className="text-xs text-gray-400 mt-1">{r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.resolved_by_name}</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0">
+                                <span className="text-xs text-gray-400">{fmtTimeAgo(r.created_at)}</span>
+                                {r.status === 'pending' && canAct && hasRank(userPosition, r.min_approver_position) && (
+                                  <>
+                                    <button onClick={()=>approveAdminRequest(r.id)} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-semibold hover:bg-green-600">Approve</button>
+                                    <button onClick={()=>rejectAdminRequest(r.id)} className="px-3 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-300">Reject</button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              </>)}
+
+            </div>
+          </div>
+          );
+        })()}
+
+        {/* ── Index User Detail Modal ── */}
+        {adminIndexModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={()=>{setAdminIndexModal(null);setAdminIndexModalData(null);}}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col" onClick={e=>e.stopPropagation()}>
+              {/* Modal header */}
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-lg font-bold text-gray-600">
+                    {(adminIndexModal.name||'?')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">{adminIndexModal.name}</h3>
+                    <p className="text-xs text-gray-500">{adminIndexModal.email} · Grade {adminIndexModal.grade} · {adminIndexModal.campus} · {adminIndexModal.region}</p>
+                  </div>
+                </div>
+                <button onClick={()=>{setAdminIndexModal(null);setAdminIndexModalData(null);}} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="w-5 h-5"/></button>
               </div>
-            )}
+              {/* Modal body */}
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                {adminIndexModalLoading ? (
+                  <div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-3 border-red-500 border-t-transparent rounded-full animate-spin"/></div>
+                ) : adminIndexModalData ? (() => {
+                  const { user: u, tasks, recentCompletions, insignia, feedbackCount, activity, dismissals } = adminIndexModalData;
+                  const [modalTab, setModalTab] = React.useState('overview');
+                  // Moderators can't view the Activity-related insights for any user in this modal
+                  const canViewActivity = userPosition !== 'Moderator';
+                  const modalTabs = [
+                    {id:'overview',label:'Overview'},{id:'tasks',label:'Tasks'},
+                    {id:'completions',label:'Completions'},
+                    ...(canViewActivity ? [{id:'activity',label:'Activity'}] : []),
+                    {id:'dismissals',label:'Dismissals'},
+                  ];
+                  // Completion heatmap by hour
+                  const hourCounts = Array(24).fill(0);
+                  (activity||[]).forEach(a => { hourCounts[new Date(a.completed_at).getUTCHours()]++; });
+                  const maxHour = Math.max(...hourCounts, 1);
+                  return (
+                    <div>
+                      {/* Quick stats */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                        {[
+                          ['Active Tasks', u.active_tasks||adminIndexModal.active_tasks||0],
+                          ['Completions', u.total_completed||adminIndexModal.total_completed||0],
+                          ['Credits', u.credits||0],
+                          ['Feedback', feedbackCount||0],
+                        ].map(([k,v])=>(
+                          <div key={k} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+                            <p className="text-xl font-bold text-gray-900">{v}</p>
+                            <p className="text-xs text-gray-400">{k}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {/* Tab nav */}
+                      <div className="flex gap-1 border-b border-gray-200 mb-4">
+                        {modalTabs.map(t=>(
+                          <button key={t.id} onClick={()=>setModalTab(t.id)} className={`px-3 py-2 text-xs font-semibold rounded-t-lg ${modalTab===t.id?'bg-red-600 text-white':'text-gray-500 hover:text-gray-700'}`}>{t.label}</button>
+                        ))}
+                      </div>
+                      {/* Tab content */}
+                      {modalTab==='overview' && (
+                        <div className="space-y-3">
+                          {[
+                            ['Position', u.position||'user'], ['Grade', u.grade], ['Campus', u.campus],
+                            ['Region', u.region], ['Enhanced', u.schedule_enhanced?'Yes':'No'],
+                            ['Joined', new Date(u.created_at).toLocaleString()],
+                            ['Last Sync', u.last_sync?new Date(u.last_sync).toLocaleString():'Never'],
+                            ['Shields', u.streak_shields_available||0], ['Insignia Days', u.insignia_days||0],
+                            ['Active Insignia', u.insignia_selected||'Default'],
+                            ['Last IP', u.last_login_ip||'—'],
+                            ['Banned', u.is_banned?`Yes — ${u.ban_reason}`:'No'],
+                          ].map(([k,v])=>(
+                            <div key={k} className="flex items-center justify-between py-1.5 border-b border-gray-50">
+                              <span className="text-xs text-gray-400">{k}</span>
+                              <span className="text-xs font-medium text-gray-900 text-right max-w-xs truncate">{String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {modalTab==='tasks' && (
+                        <div className="space-y-1 max-h-64 overflow-y-auto">
+                          {(tasks||[]).length===0?<p className="text-sm text-gray-400 italic">No active tasks.</p>:tasks.map(t=>(
+                            <div key={t.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
+                              <span className="flex-1 text-gray-800 truncate">{t.title}</span>
+                              <span className="text-gray-400 flex-shrink-0">{t.deadline_date||'No deadline'}</span>
+                              {hasRank(user?.position,'Manager') && (
+                                <button onClick={()=>adminDeleteTask(t.id)} className="text-red-400 hover:text-red-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {modalTab==='completions' && (
+                        <div className="space-y-1 max-h-64 overflow-y-auto">
+                          {(recentCompletions||[]).length===0?<p className="text-sm text-gray-400 italic">No completions yet.</p>:recentCompletions.map((c,i)=>(
+                            <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
+                              <span className="flex-1 text-gray-800 truncate">{c.title}</span>
+                              <span className="text-gray-400">{c.actual_time}m</span>
+                              <span className="text-gray-300">{new Date(c.completed_at).toLocaleDateString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {modalTab==='activity' && (
+                        <div>
+                          <p className="text-xs text-gray-400 mb-3">Completion heatmap by UTC hour (last 200 completions)</p>
+                          <div className="flex items-end gap-0.5 h-20 mb-1">
+                            {hourCounts.map((c,h)=>(
+                              <div key={h} className="flex-1 flex flex-col items-center" title={`${h}:00 UTC — ${c}`}>
+                                <div className="w-full bg-red-400 rounded-sm" style={{height:`${Math.max((c/maxHour)*100,c>0?4:0)}%`,opacity:0.3+(c/maxHour)*0.7}} />
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex justify-between text-xs text-gray-400"><span>0h</span><span>12h</span><span>23h</span></div>
+                        </div>
+                      )}
+                      {modalTab==='dismissals' && (
+                        <div className="space-y-1 max-h-64 overflow-y-auto">
+                          {(dismissals||[]).length===0?<p className="text-sm text-gray-400 italic">No banner dismissals.</p>:dismissals.map((d,i)=>(
+                            <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
+                              <span className="flex-1 text-gray-800 truncate">{d.title}</span>
+                              <span className="text-gray-400">{new Date(d.dismissed_at).toLocaleDateString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })() : null}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Directory Advanced Modal ── */}
+        {adminDirectoryAdvModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={()=>{setAdminDirectoryAdvModal(null);setAdminCanvasTokenVal('');}}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e=>e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
+                <h3 className="text-lg font-bold text-gray-900">Advanced — {adminDirectoryAdvModal.name}</h3>
+                <button onClick={()=>{setAdminDirectoryAdvModal(null);setAdminCanvasTokenVal('');}} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="w-5 h-5"/></button>
+              </div>
+              <div className="px-6 py-4 space-y-3">
+                {/* Ban/Unban — Moderator can attempt a ban (routes to Director+ approval); Unban stays Manager+ direct */}
+                {adminDirectoryAdvModal.is_banned ? (
+                  hasRank(user?.position,'Manager') && (
+                    <button onClick={async()=>{await adminUnbanUser(adminDirectoryAdvModal.id);setAdminDirectoryAdvModal(prev=>({...prev,is_banned:false}));}} className="w-full py-2.5 bg-green-50 text-green-700 rounded-xl text-sm font-semibold hover:bg-green-100 border border-green-200">Unban User</button>
+                  )
+                ) : (
+                  hasRank(user?.position,'Moderator') && (
+                    <button onClick={()=>{setShowBanDialog(adminDirectoryAdvModal.id);setAdminDirectoryAdvModal(null);}} className="w-full py-2.5 bg-red-50 text-red-700 rounded-xl text-sm font-semibold hover:bg-red-100 border border-red-200">Ban User</button>
+                  )
+                )}
+                {/* IP Block — Director+ only */}
+                {hasRank(user?.position,'Director') && (
+                  <button onClick={async()=>{
+                    const reason = prompt('Block reason (optional):');
+                    try { await apiCall(`/admin/users/${adminDirectoryAdvModal.id}/block-ip`,'POST',{reason}); setAdminDirectoryAdvModal(null); }
+                    catch(err) { alert(err.message || 'Failed to block IP'); }
+                  }} className="w-full py-2.5 bg-orange-50 text-orange-700 rounded-xl text-sm font-semibold hover:bg-orange-100 border border-orange-200">Block IP Address</button>
+                )}
+                {/* Canvas token — Director+ only */}
+                {hasRank(user?.position,'Director') && (
+                  <div className="space-y-2">
+                    <button onClick={async()=>{
+                      setAdminCanvasTokenLoading(true);
+                      try { const r=await apiCall(`/admin/users/${adminDirectoryAdvModal.id}/canvas-token`,'GET'); setAdminCanvasTokenVal(r.token||'(none)'); }
+                      catch(err) { alert(err.message || 'Failed to load token'); }
+                      finally { setAdminCanvasTokenLoading(false); }
+                    }} className="w-full py-2.5 bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-100 border border-gray-200">
+                      {adminCanvasTokenLoading?'Loading…':'View Canvas Token'}
+                    </button>
+                    {adminCanvasTokenVal && <p className="text-xs font-mono bg-gray-50 rounded-lg px-3 py-2 break-all text-gray-700">{adminCanvasTokenVal}</p>}
+                    <button onClick={async()=>{
+                      const t=prompt('New Canvas token:');
+                      if (!t) return;
+                      try { await apiCall(`/admin/users/${adminDirectoryAdvModal.id}/set-canvas-token`,'POST',{token:t}); alert('Canvas token updated.'); }
+                      catch(err) { alert(err.message || 'Failed to set token'); }
+                    }} className="w-full py-2.5 bg-gray-50 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-100 border border-gray-200">Replace Canvas Token</button>
+                    <button onClick={async()=>{
+                      if (!confirm('Clear Canvas token?')) return;
+                      try { await apiCall(`/admin/users/${adminDirectoryAdvModal.id}/clear-token`,'POST'); setAdminCanvasTokenVal(''); alert('Canvas token cleared.'); }
+                      catch(err) { alert(err.message || 'Failed to clear token'); }
+                    }} className="w-full py-2.5 bg-red-50 text-red-600 rounded-xl text-sm font-semibold hover:bg-red-100 border border-red-200">Clear Canvas Token</button>
+                  </div>
+                )}
+                {/* Password reset — Director+ only */}
+                {hasRank(user?.position,'Director') && (
+                  <button onClick={async()=>{
+                    const p=prompt('New password (min 6 chars):');
+                    if (!p||p.length<6) return;
+                    try { await apiCall(`/admin/users/${adminDirectoryAdvModal.id}`,'PATCH',{password:p}); alert('Password updated.'); }
+                    catch(err) { alert(err.message || 'Failed to update password'); }
+                  }} className="w-full py-2.5 bg-yellow-50 text-yellow-700 rounded-xl text-sm font-semibold hover:bg-yellow-100 border border-yellow-200">Replace Password</button>
+                )}
+                {/* Credits */}
+                {hasRank(user?.position,'Manager') && (
+                  <div className="flex gap-2">
+                    <button onClick={()=>adminAdjustCredits(adminDirectoryAdvModal.id,50)} className="flex-1 py-2.5 bg-purple-50 text-purple-700 rounded-xl text-sm font-semibold hover:bg-purple-100 border border-purple-200">+50 Credits</button>
+                    <button onClick={()=>adminAdjustCredits(adminDirectoryAdvModal.id,-50)} className="flex-1 py-2.5 bg-gray-50 text-gray-600 rounded-xl text-sm font-semibold hover:bg-gray-100 border border-gray-200">−50 Credits</button>
+                  </div>
+                )}
+                {/* Hacked insignia — Manager+ */}
+                {hasRank(user?.position,'Manager') && (
+                  <button onClick={async()=>{
+                    try {
+                      await apiCall(`/admin/users/${adminDirectoryAdvModal.id}/grant-hacked-insignia`,'POST');
+                      alert('"Hacked PlanAssist" insignia granted.');
+                    } catch (err) { alert(err.message || 'Failed to grant insignia'); }
+                  }} className="w-full py-2.5 bg-gray-900 text-white rounded-xl text-sm font-semibold hover:bg-gray-700">Grant "Hacked PlanAssist" Insignia</button>
+                )}
+              </div>
             </div>
           </div>
         )}
