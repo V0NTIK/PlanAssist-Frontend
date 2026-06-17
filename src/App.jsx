@@ -630,7 +630,123 @@ const EditUserForm = ({ user, onSave, onCancel, currentUserId }) => {
   );
 };
 
-// ── GoalsPanel — standalone component to avoid Rules of Hooks violations ─────
+// ── IndexUserModalBody — standalone component to avoid Rules of Hooks violations.
+// This was previously an inline IIFE with its own useState call, conditionally
+// rendered inside a ternary — that pattern made the number of hooks the parent
+// component calls vary between renders (zero while loading, one once data
+// arrives), which is exactly what triggers "Minified React error #310".
+// Extracting it as a real component fixes this: the hook now belongs to this
+// component's own render, which mounts/unmounts as a whole rather than
+// silently changing the parent's hook count.
+const IndexUserModalBody = ({ adminIndexModalData, adminIndexModal, userPosition, user, hasRank, adminDeleteTask, fmtTimeAgo }) => {
+  const { user: u, tasks, recentCompletions, insignia, feedbackCount, activity, dismissals } = adminIndexModalData;
+  const [modalTab, setModalTab] = React.useState('overview');
+  // Moderators can't view the Activity-related insights for any user in this modal
+  const canViewActivity = userPosition !== 'Moderator';
+  const modalTabs = [
+    {id:'overview',label:'Overview'},{id:'tasks',label:'Tasks'},
+    {id:'completions',label:'Completions'},
+    ...(canViewActivity ? [{id:'activity',label:'Activity'}] : []),
+    {id:'dismissals',label:'Dismissals'},
+  ];
+  // Completion heatmap by hour
+  const hourCounts = Array(24).fill(0);
+  (activity||[]).forEach(a => { hourCounts[new Date(a.completed_at).getUTCHours()]++; });
+  const maxHour = Math.max(...hourCounts, 1);
+  return (
+    <div>
+      {/* Quick stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+        {[
+          ['Active Tasks', u.active_tasks||adminIndexModal.active_tasks||0],
+          ['Completions', u.total_completed||adminIndexModal.total_completed||0],
+          ['Credits', u.credits||0],
+          ['Feedback', feedbackCount||0],
+        ].map(([k,v])=>(
+          <div key={k} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+            <p className="text-xl font-bold text-gray-900">{v}</p>
+            <p className="text-xs text-gray-400">{k}</p>
+          </div>
+        ))}
+      </div>
+      {/* Tab nav */}
+      <div className="flex gap-1 border-b border-gray-200 mb-4">
+        {modalTabs.map(t=>(
+          <button key={t.id} onClick={()=>setModalTab(t.id)} className={`px-3 py-2 text-xs font-semibold rounded-t-lg ${modalTab===t.id?'bg-red-600 text-white':'text-gray-500 hover:text-gray-700'}`}>{t.label}</button>
+        ))}
+      </div>
+      {/* Tab content */}
+      {modalTab==='overview' && (
+        <div className="space-y-3">
+          {[
+            ['Position', u.position||'user'], ['Grade', u.grade], ['Campus', u.campus],
+            ['Region', u.region], ['Enhanced', u.schedule_enhanced?'Yes':'No'],
+            ['Joined', new Date(u.created_at).toLocaleString()],
+            ['Last Sync', u.last_sync?new Date(u.last_sync).toLocaleString():'Never'],
+            ['Shields', u.streak_shields_available||0], ['Insignia Days', u.insignia_days||0],
+            ['Active Insignia', u.insignia_selected||'Default'],
+            ['Last IP', u.last_login_ip||'—'],
+            ['Banned', u.is_banned?`Yes — ${u.ban_reason}`:'No'],
+          ].map(([k,v])=>(
+            <div key={k} className="flex items-center justify-between py-1.5 border-b border-gray-50">
+              <span className="text-xs text-gray-400">{k}</span>
+              <span className="text-xs font-medium text-gray-900 text-right max-w-xs truncate">{String(v)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {modalTab==='tasks' && (
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {(tasks||[]).length===0?<p className="text-sm text-gray-400 italic">No active tasks.</p>:tasks.map(t=>(
+            <div key={t.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
+              <span className="flex-1 text-gray-800 truncate">{t.title}</span>
+              <span className="text-gray-400 flex-shrink-0">{t.deadline_date||'No deadline'}</span>
+              {hasRank(user?.position,'Manager') && (
+                <button onClick={()=>adminDeleteTask(t.id)} className="text-red-400 hover:text-red-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {modalTab==='completions' && (
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {(recentCompletions||[]).length===0?<p className="text-sm text-gray-400 italic">No completions yet.</p>:recentCompletions.map((c,i)=>(
+            <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
+              <span className="flex-1 text-gray-800 truncate">{c.title}</span>
+              <span className="text-gray-400">{c.actual_time}m</span>
+              <span className="text-gray-300">{new Date(c.completed_at).toLocaleDateString()}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {modalTab==='activity' && (
+        <div>
+          <p className="text-xs text-gray-400 mb-3">Completion heatmap by UTC hour (last 200 completions)</p>
+          <div className="flex items-end gap-0.5 h-20 mb-1">
+            {hourCounts.map((c,h)=>(
+              <div key={h} className="flex-1 flex flex-col items-center" title={`${h}:00 UTC — ${c}`}>
+                <div className="w-full bg-red-400 rounded-sm" style={{height:`${Math.max((c/maxHour)*100,c>0?4:0)}%`,opacity:0.3+(c/maxHour)*0.7}} />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between text-xs text-gray-400"><span>0h</span><span>12h</span><span>23h</span></div>
+        </div>
+      )}
+      {modalTab==='dismissals' && (
+        <div className="space-y-1 max-h-64 overflow-y-auto">
+          {(dismissals||[]).length===0?<p className="text-sm text-gray-400 italic">No banner dismissals.</p>:dismissals.map((d,i)=>(
+            <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
+              <span className="flex-1 text-gray-800 truncate">{d.title}</span>
+              <span className="text-gray-400">{new Date(d.dismissed_at).toLocaleDateString()}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+
 const GoalsPanel = ({ courses, userGoals, setUserGoals, loadGoals, apiCall, classColors }) => {
   const goalCourses = courses.filter(c => c.grading_period_id != null && c.enabled !== false);
 
@@ -926,6 +1042,8 @@ const PlanAssist = () => {
   const [adminSelectedUser, setAdminSelectedUser] = useState(null);
   const [adminUserDetail, setAdminUserDetail] = useState(null);
   const [adminDiagnostics, setAdminDiagnostics] = useState(null);
+  const [adminBannerEngagement, setAdminBannerEngagement] = useState(null);
+  const [adminFeedbackStaleness, setAdminFeedbackStaleness] = useState(null);
   const [adminIpBlacklist, setAdminIpBlacklist] = useState([]);
   const [ipBlacklistLoading, setIpBlacklistLoading] = useState(false);
   const [newBlockIp, setNewBlockIp] = useState('');
@@ -958,6 +1076,14 @@ const PlanAssist = () => {
   const [hptAddLoading, setHptAddLoading] = useState(false);
   const [hptDeleteConfirm, setHptDeleteConfirm] = useState(null);
   const [adminStaff, setAdminStaff] = useState([]);
+  const [showAddStaffModal, setShowAddStaffModal] = useState(false);
+  const [addStaffSearch, setAddStaffSearch] = useState('');
+  const [addStaffResults, setAddStaffResults] = useState([]);
+  const [addStaffSearching, setAddStaffSearching] = useState(false);
+  const [addStaffSelectedUser, setAddStaffSelectedUser] = useState(null);
+  const [addStaffPosition, setAddStaffPosition] = useState('Spectator');
+  const [addStaffSubmitting, setAddStaffSubmitting] = useState(false);
+  const [removeStaffConfirm, setRemoveStaffConfirm] = useState(null);
   const [adminStaffLoading, setAdminStaffLoading] = useState(false);
   const [adminExpandedStaff, setAdminExpandedStaff] = useState(null);
   const [adminStaffLog, setAdminStaffLog] = useState({});
@@ -4062,6 +4188,22 @@ const PlanAssist = () => {
     finally { setAdminLoading(false); }
   };
 
+  const loadAdminBannerEngagement = async () => {
+    setAdminBannerEngagement(null);
+    try {
+      const data = await apiCall('/admin/diagnostics/banner-engagement', 'GET');
+      setAdminBannerEngagement(data || []);
+    } catch (err) { console.error(err); setAdminBannerEngagement([]); }
+  };
+
+  const loadAdminFeedbackStaleness = async () => {
+    setAdminFeedbackStaleness(null);
+    try {
+      const data = await apiCall('/admin/diagnostics/feedback-staleness', 'GET');
+      setAdminFeedbackStaleness(data);
+    } catch (err) { console.error(err); setAdminFeedbackStaleness({}); }
+  };
+
   const loadAdminIpBlacklist = async () => {
     setIpBlacklistLoading(true);
     try {
@@ -4086,6 +4228,47 @@ const PlanAssist = () => {
       setAdminStaff(data || []);
     } catch (err) { console.error(err); }
     finally { setAdminStaffLoading(false); }
+  };
+
+  const searchAddStaffUsers = async (query) => {
+    setAddStaffSearch(query);
+    setAddStaffSelectedUser(null);
+    if (query.trim().length < 2) { setAddStaffResults([]); return; }
+    setAddStaffSearching(true);
+    try {
+      const data = await apiCall(`/admin/staff/search-users?q=${encodeURIComponent(query.trim())}`, 'GET');
+      setAddStaffResults(data || []);
+    } catch (err) { console.error(err); setAddStaffResults([]); }
+    finally { setAddStaffSearching(false); }
+  };
+
+  const submitAddStaff = async () => {
+    if (!addStaffSelectedUser) return;
+    setAddStaffSubmitting(true);
+    try {
+      const r = await apiCall(`/admin/staff/${addStaffSelectedUser.id}/position`, 'PATCH', { position: addStaffPosition });
+      if (r?.queued) {
+        alert('Promotion request submitted for approval.');
+      } else {
+        loadAdminStaff();
+      }
+      setShowAddStaffModal(false);
+      setAddStaffSearch(''); setAddStaffResults([]); setAddStaffSelectedUser(null); setAddStaffPosition('Spectator');
+    } catch (err) { alert(err.message || 'Failed to add staff member'); }
+    finally { setAddStaffSubmitting(false); }
+  };
+
+  const handleRemoveStaff = async (userId) => {
+    try {
+      const r = await apiCall(`/admin/staff/${userId}/position`, 'PATCH', { position: 'user' });
+      if (r?.queued) {
+        alert('Demotion request submitted for approval.');
+      } else {
+        setAdminStaff(prev => prev.filter(s => s.id !== userId));
+      }
+      setRemoveStaffConfirm(null);
+      setAdminExpandedStaff(prev => prev === userId ? null : prev);
+    } catch (err) { alert(err.message || 'Failed to remove staff member'); }
   };
 
   const loadAdminStaffUserLog = async (userId) => {
@@ -4260,6 +4443,10 @@ const PlanAssist = () => {
   const adminAdjustCredits = async (userId, delta, reason) => {
     try {
       const r = await apiCall(`/admin/users/${userId}/adjust-credits`, 'POST', { delta, reason });
+      if (r?.queued) {
+        alert('Credit adjustment submitted for approval.');
+        return;
+      }
       setAdminDirectoryAdvModal(prev => prev && prev.id === userId ? { ...prev, credits: r.credits } : prev);
       setAdminIndexModalData(prev => prev && prev.user?.id === userId ? { ...prev, user: { ...prev.user, credits: r.credits } } : prev);
       setAdminUsers(prev => prev.map(u => u.id === userId ? { ...u, credits: r.credits } : u));
@@ -14545,7 +14732,11 @@ const PlanAssist = () => {
                         else if (id === 'directory' || id === 'index') { if (adminUsers.length === 0) loadAdminUsers(); }
                         else if (id === 'hpt') loadAdminHptUsers();
                         else if (id === 'broadcasts') { loadAdminAnnouncements(); }
-                        else if (id === 'diagnostics') { loadAdminDiagnostics(); if (hasRank(userPosition, 'Manager')) loadAdminIpBlacklist(); }
+                        else if (id === 'diagnostics') {
+                          if (userPosition === 'Broadcaster') loadAdminBannerEngagement();
+                          else if (userPosition === 'Support') loadAdminFeedbackStaleness();
+                          else { loadAdminDiagnostics(); if (hasRank(userPosition, 'Manager')) loadAdminIpBlacklist(); }
+                        }
                         else if (id === 'log') loadAdminAuditLog();
                         else if (id === 'feedback') loadAdminFeedback();
                         else if (id === 'resources') { apiCall('/help').then(d => setAdminHelpContent(d.content || '')); apiCall('/admin/log').then(d => setAdminLogContent(d.content||'')); }
@@ -14567,7 +14758,14 @@ const PlanAssist = () => {
                 <div>
                   <div className="flex items-center justify-between mb-4">
                     <h2 className="text-lg font-bold text-gray-900">Staff Members</h2>
-                    <span className="text-sm text-gray-500">{adminStaff.length} member{adminStaff.length !== 1 ? 's' : ''}</span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm text-gray-500">{adminStaff.length} member{adminStaff.length !== 1 ? 's' : ''}</span>
+                      {canEdit('Manager') && (
+                        <button onClick={()=>setShowAddStaffModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">
+                          <Plus className="w-3.5 h-3.5" /> Add Staff Member
+                        </button>
+                      )}
+                    </div>
                   </div>
                   {adminStaffLoading ? loadingSpinner : adminStaff.length === 0 ? (
                     <div className="bg-white rounded-xl border border-gray-200 p-12 text-center text-gray-400">No staff members found.</div>
@@ -14642,6 +14840,16 @@ const PlanAssist = () => {
                                         <option key={p} value={p}>{p}</option>
                                       ))}
                                     </select>
+                                    <button onClick={()=>setRemoveStaffConfirm(s.id)} className="px-3 py-1.5 bg-red-50 text-red-600 rounded-lg text-xs font-semibold hover:bg-red-100 border border-red-200 flex-shrink-0">Remove</button>
+                                  </div>
+                                )}
+                                {removeStaffConfirm === s.id && (
+                                  <div className="border border-red-200 bg-red-50 rounded-lg p-3 mb-4 space-y-2">
+                                    <p className="text-xs text-red-700">Demote {s.name} to a regular user? They will lose all staff access immediately.</p>
+                                    <div className="flex gap-2">
+                                      <button onClick={()=>handleRemoveStaff(s.id)} className="flex-1 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700">Confirm Remove</button>
+                                      <button onClick={()=>setRemoveStaffConfirm(null)} className="flex-1 py-1.5 bg-gray-200 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-300">Cancel</button>
+                                    </div>
                                   </div>
                                 )}
                                 <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Recent Log</h4>
@@ -14735,7 +14943,7 @@ const PlanAssist = () => {
                                 )}
                                 <p className="text-xs text-gray-400 mt-0.5">Grade {u.grade} · {u.campus} · {u.region} · Sync: {fmtTimeAgo(u.last_sync)}</p>
                               </div>
-                              {(canEdit('Moderator') || userPosition === 'Support') && (
+                              {((canEdit('Moderator') || userPosition === 'Support') && userPosition !== 'Supervisor') && (
                                 <div className="flex items-center gap-1.5 flex-shrink-0">
                                   {isEditing ? (
                                     <>
@@ -14854,8 +15062,8 @@ const PlanAssist = () => {
                     {hptLoading ? loadingSpinner : (
                       <div className="divide-y divide-gray-100">
                         {adminHptUsers.map(h => (
-                          <div key={h.id} onClick={()=>setAdminSelectedHptUser(adminSelectedHptUser?.id===h.id?null:h)}
-                            className="px-4 py-3 cursor-pointer hover:bg-gray-50 flex items-center gap-3">
+                          <div key={h.id} onClick={()=>{ if (userPosition !== 'Supervisor') setAdminSelectedHptUser(adminSelectedHptUser?.id===h.id?null:h); }}
+                            className={`px-4 py-3 flex items-center gap-3 ${userPosition !== 'Supervisor' ? 'cursor-pointer hover:bg-gray-50' : ''}`}>
                             <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-sm font-bold text-blue-700">
                               {(h.name||'?')[0].toUpperCase()}
                             </div>
@@ -14864,7 +15072,7 @@ const PlanAssist = () => {
                               <p className="text-xs text-gray-400">{h.studio_count||0} studios · {h.member_count||0} students</p>
                             </div>
                             {h.is_banned && <span className="text-xs bg-red-100 text-red-600 px-1.5 rounded">Banned</span>}
-                            <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${adminSelectedHptUser?.id===h.id?'rotate-90':''}`} />
+                            {userPosition !== 'Supervisor' && <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${adminSelectedHptUser?.id===h.id?'rotate-90':''}`} />}
                           </div>
                         ))}
                         {adminHptUsers.length === 0 && <div className="p-8 text-center text-gray-400 text-sm">No HPT users yet.</div>}
@@ -14924,8 +15132,8 @@ const PlanAssist = () => {
               {/* ── BROADCASTS TAB ────────────────────────────────────────── */}
               {adminSection === 'broadcasts' && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Post new — visible to anyone who can post directly or submit a request (Support and above, plus Editor/Broadcaster) */}
-                  {(canEdit('Support') || userPosition === 'Editor' || userPosition === 'Broadcaster') && (
+                  {/* Post new — visible to anyone who can post directly or submit a request (Support and above, plus Editor/Broadcaster); Supervisor is view-only */}
+                  {((canEdit('Support') || userPosition === 'Editor' || userPosition === 'Broadcaster') && userPosition !== 'Supervisor') && (
                     <div className="bg-white rounded-xl border border-gray-200 p-5">
                       <h2 className="font-bold text-gray-900 mb-4">Post New Broadcast</h2>
                       <div className="space-y-3">
@@ -14995,37 +15203,83 @@ const PlanAssist = () => {
               {/* ── DIAGNOSTICS TAB ───────────────────────────────────────── */}
               {adminSection === 'diagnostics' && (
                 <div>
-                  {!adminDiagnostics ? loadingSpinner : userPosition === 'Support' ? (
-                    /* Support: brief, Feedback-centered diagnostics only */
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 max-w-md">
-                      <h3 className="font-bold text-gray-900 mb-3">Feedback Summary</h3>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xl font-bold text-gray-900">{adminFeedback.length}</p>
-                          <p className="text-xs text-gray-400">Total Submissions</p>
+                  {userPosition === 'Support' ? (
+                    /* Support: Feedback-staleness diagnostics */
+                    !adminFeedbackStaleness ? loadingSpinner : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 max-w-2xl">
+                        <div className="bg-white rounded-xl border border-gray-200 p-5">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-green-400 rounded-full" />
+                            Feedback Queue
+                          </h3>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                              <p className="text-xl font-bold text-gray-900">{adminFeedbackStaleness.uncheckedCount ?? 0}</p>
+                              <p className="text-xs text-gray-400">Unchecked</p>
+                            </div>
+                            <div className="bg-gray-50 rounded-lg p-3 text-center">
+                              <p className="text-xl font-bold text-gray-900">{adminFeedbackStaleness.checkedCount ?? 0}</p>
+                              <p className="text-xs text-gray-400">Checked</p>
+                            </div>
+                          </div>
                         </div>
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xl font-bold text-gray-900">{adminFeedback.filter(f=>!f.checked).length}</p>
-                          <p className="text-xs text-gray-400">Unchecked</p>
+                        <div className="bg-white rounded-xl border border-gray-200 p-5">
+                          <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                            <span className="w-2 h-2 bg-orange-400 rounded-full" />
+                            Staleness
+                          </h3>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Avg. age (unchecked)</span>
+                              <span className="font-semibold text-gray-900">{adminFeedbackStaleness.avgAgeDaysUnchecked != null ? `${adminFeedbackStaleness.avgAgeDaysUnchecked}d` : '—'}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Oldest unchecked</span>
+                              <span className="font-semibold text-orange-600">{adminFeedbackStaleness.oldestAgeDaysUnchecked != null ? `${adminFeedbackStaleness.oldestAgeDaysUnchecked}d` : '—'}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-gray-500">Avg. time-to-check</span>
+                              <span className="font-semibold text-gray-900">{adminFeedbackStaleness.avgAgeDaysChecked != null ? `${adminFeedbackStaleness.avgAgeDaysChecked}d` : '—'}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
+                    )
                   ) : userPosition === 'Broadcaster' ? (
-                    /* Broadcaster: brief, Banner-centered diagnostics only */
-                    <div className="bg-white rounded-xl border border-gray-200 p-5 max-w-md">
-                      <h3 className="font-bold text-gray-900 mb-3">Broadcast Summary</h3>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xl font-bold text-gray-900">{adminAnnouncements.filter(a=>a.is_active).length}</p>
-                          <p className="text-xs text-gray-400">Active Broadcasts</p>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-3 text-center">
-                          <p className="text-xl font-bold text-gray-900">{adminAnnouncements.length}</p>
-                          <p className="text-xs text-gray-400">Total Broadcasts</p>
-                        </div>
+                    /* Broadcaster: banner engagement/dismissal diagnostics */
+                    !adminBannerEngagement ? loadingSpinner : adminBannerEngagement.length === 0 ? (
+                      <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-400 max-w-2xl">No broadcasts have been posted yet.</div>
+                    ) : (
+                      <div className="space-y-3 max-w-2xl">
+                        {adminBannerEngagement.map(b => {
+                          const pct = b.eligible_count > 0 ? Math.round((b.dismissal_count / b.eligible_count) * 100) : 0;
+                          return (
+                            <div key={b.id} className={`bg-white rounded-xl border p-4 ${b.is_active ? 'border-gray-200' : 'border-gray-100 opacity-60'}`}>
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <p className="text-sm text-gray-800 flex-1 truncate">{b.message}</p>
+                                <span className={`text-xs px-1.5 py-0.5 rounded font-medium flex-shrink-0 ${b.type==='urgent'?'bg-red-100 text-red-600':'bg-blue-100 text-blue-600'}`}>{b.type}</span>
+                              </div>
+                              <div className="grid grid-cols-3 gap-3 text-center mb-2">
+                                <div className="bg-gray-50 rounded-lg p-2">
+                                  <p className="text-sm font-bold text-gray-900">{b.dismissal_count}/{b.eligible_count}</p>
+                                  <p className="text-xs text-gray-400">Dismissed ({pct}%)</p>
+                                </div>
+                                <div className="bg-gray-50 rounded-lg p-2">
+                                  <p className="text-sm font-bold text-gray-900">{b.avg_minutes_to_dismiss != null ? `${b.avg_minutes_to_dismiss}m` : '—'}</p>
+                                  <p className="text-xs text-gray-400">Avg. Time to Dismiss</p>
+                                </div>
+                                <div className="bg-gray-50 rounded-lg p-2">
+                                  <p className="text-sm font-bold text-gray-900">{fmtTimeAgo(b.created_at)}</p>
+                                  <p className="text-xs text-gray-400">Launched</p>
+                                </div>
+                              </div>
+                              <p className="text-xs text-gray-400">{b.target_audience} · {b.is_active ? 'Active' : 'Deactivated'}{b.last_dismissal_at ? ` · last dismissal ${fmtTimeAgo(b.last_dismissal_at)}` : ''}</p>
+                            </div>
+                          );
+                        })}
                       </div>
-                    </div>
-                  ) : (
+                    )
+                  ) : !adminDiagnostics ? loadingSpinner : (
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
                       {/* Stale syncs */}
                       <div className="bg-white rounded-xl border border-gray-200 p-5">
@@ -15254,7 +15508,7 @@ const PlanAssist = () => {
                             </div>
                             <p className="text-sm text-gray-700 leading-relaxed">{f.feedback_text}</p>
                           </div>
-                          {(canEdit('Moderator') || userPosition === 'Support') && (
+                          {((canEdit('Moderator') || userPosition === 'Support') && userPosition !== 'Supervisor') && (
                             <button onClick={async()=>{
                               const next = !f.checked;
                               await apiCall(`/admin/feedback/${f.id}/checked`,'PATCH',{checked:next});
@@ -15276,7 +15530,7 @@ const PlanAssist = () => {
                   <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
                     <div className="flex items-center justify-between mb-4">
                       <h2 className="font-bold text-gray-900">Help Page</h2>
-                      {(canEdit('Support')) && (
+                      {(canEdit('Support') && userPosition !== 'Supervisor') && (
                         <button onClick={async()=>{
                           setAdminHelpSaving(true);
                           try{
@@ -15288,7 +15542,7 @@ const PlanAssist = () => {
                         </button>
                       )}
                     </div>
-                    <textarea value={adminHelpContent} onChange={e=>setAdminHelpContent(e.target.value)} readOnly={!canEdit('Support')} rows={20} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-300 resize-none" placeholder="Help page content (Markdown)..." />
+                    <textarea value={adminHelpContent} onChange={e=>setAdminHelpContent(e.target.value)} readOnly={!canEdit('Support') || userPosition === 'Supervisor'} rows={20} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-300 resize-none" placeholder="Help page content (Markdown)..." />
                   </div>
                   <div className="bg-white rounded-xl border border-gray-200 p-5">
                     <h3 className="font-bold text-gray-900 mb-3 text-sm">Recent Changes</h3>
@@ -15311,7 +15565,7 @@ const PlanAssist = () => {
                   <div className="lg:col-span-2 bg-white rounded-xl border border-gray-200 p-5">
                     <div className="flex items-center justify-between mb-1">
                       <h2 className="font-bold text-gray-900">Staff Bulletin</h2>
-                      {userPosition !== 'Supervisor' && (
+                      {userPosition !== 'Supervisor' && userPosition !== 'Spectator' && (
                         <button onClick={saveAdminBulletin} disabled={adminBulletinSaving} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
                           {adminBulletinSaving?'Saving…':'Save'}
                         </button>
@@ -15320,8 +15574,8 @@ const PlanAssist = () => {
                     {adminBulletinMeta?.updatedAt && (
                       <p className="text-xs text-gray-400 mb-3">Last updated {fmtTimeAgo(adminBulletinMeta.updatedAt)}{adminBulletinMeta.updatedByName ? ` by ${adminBulletinMeta.updatedByName}` : ''}</p>
                     )}
-                    <textarea value={adminBulletinContent} onChange={e=>setAdminBulletinContent(e.target.value)} readOnly={userPosition === 'Supervisor'} rows={22} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-300 resize-none" placeholder="Staff bulletin board — shared notes, announcements, pinned items..." />
-                    {userPosition === 'Supervisor' && <p className="text-xs text-gray-400 mt-1 italic">Supervisors can view the bulletin but cannot edit it directly.</p>}
+                    <textarea value={adminBulletinContent} onChange={e=>setAdminBulletinContent(e.target.value)} readOnly={userPosition === 'Supervisor' || userPosition === 'Spectator'} rows={22} className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm font-mono focus:ring-2 focus:ring-red-300 resize-none" placeholder="Staff bulletin board — shared notes, announcements, pinned items..." />
+                    {(userPosition === 'Supervisor' || userPosition === 'Spectator') && <p className="text-xs text-gray-400 mt-1 italic">You can view the bulletin but cannot edit it directly.</p>}
                   </div>
                   <div className="bg-white rounded-xl border border-gray-200 p-5">
                     <h3 className="font-bold text-gray-900 mb-3 text-sm">Role Reference</h3>
@@ -15339,12 +15593,13 @@ const PlanAssist = () => {
 
               {/* ── REQUESTS TAB ──────────────────────────────────────────── */}
               {adminSection === 'requests' && (() => {
-                const canAct = !PEER_POSITIONS_FRONT.has(userPosition) && userPosition !== 'Spectator';
+                const canAct = !PEER_POSITIONS_FRONT.has(userPosition) && userPosition !== 'Spectator' && userPosition !== 'Supervisor';
                 const filteredRequests = adminRequests.filter(r => adminRequestsFilter === 'all' ? true : r.status === adminRequestsFilter);
                 const requestTypeLabel = (t) => ({
                   BAN_USER: 'Ban User', EDIT_USER: 'Edit User', PROMOTE_POSITION: 'Promote Position',
                   POST_BANNER: 'Post Broadcast', EDIT_RESOURCE: 'Edit Resource',
-                  ADD_HPT_USER: 'Add HPT User', EDIT_HPT_USER: 'Edit HPT User'
+                  ADD_HPT_USER: 'Add HPT User', EDIT_HPT_USER: 'Edit HPT User',
+                  ADJUST_CREDITS: 'Adjust Credits'
                 }[t] || t);
                 const statusColor = (s) => ({ pending:'bg-yellow-100 text-yellow-700', approved:'bg-green-100 text-green-700', rejected:'bg-red-100 text-red-700' }[s] || 'bg-gray-100 text-gray-600');
                 return (
@@ -15427,113 +15682,80 @@ const PlanAssist = () => {
               <div className="flex-1 overflow-y-auto px-6 py-4">
                 {adminIndexModalLoading ? (
                   <div className="flex items-center justify-center py-16"><div className="w-8 h-8 border-3 border-red-500 border-t-transparent rounded-full animate-spin"/></div>
-                ) : adminIndexModalData ? (() => {
-                  const { user: u, tasks, recentCompletions, insignia, feedbackCount, activity, dismissals } = adminIndexModalData;
-                  const [modalTab, setModalTab] = React.useState('overview');
-                  // Moderators can't view the Activity-related insights for any user in this modal
-                  const canViewActivity = userPosition !== 'Moderator';
-                  const modalTabs = [
-                    {id:'overview',label:'Overview'},{id:'tasks',label:'Tasks'},
-                    {id:'completions',label:'Completions'},
-                    ...(canViewActivity ? [{id:'activity',label:'Activity'}] : []),
-                    {id:'dismissals',label:'Dismissals'},
-                  ];
-                  // Completion heatmap by hour
-                  const hourCounts = Array(24).fill(0);
-                  (activity||[]).forEach(a => { hourCounts[new Date(a.completed_at).getUTCHours()]++; });
-                  const maxHour = Math.max(...hourCounts, 1);
-                  return (
-                    <div>
-                      {/* Quick stats */}
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                        {[
-                          ['Active Tasks', u.active_tasks||adminIndexModal.active_tasks||0],
-                          ['Completions', u.total_completed||adminIndexModal.total_completed||0],
-                          ['Credits', u.credits||0],
-                          ['Feedback', feedbackCount||0],
-                        ].map(([k,v])=>(
-                          <div key={k} className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
-                            <p className="text-xl font-bold text-gray-900">{v}</p>
-                            <p className="text-xs text-gray-400">{k}</p>
-                          </div>
-                        ))}
-                      </div>
-                      {/* Tab nav */}
-                      <div className="flex gap-1 border-b border-gray-200 mb-4">
-                        {modalTabs.map(t=>(
-                          <button key={t.id} onClick={()=>setModalTab(t.id)} className={`px-3 py-2 text-xs font-semibold rounded-t-lg ${modalTab===t.id?'bg-red-600 text-white':'text-gray-500 hover:text-gray-700'}`}>{t.label}</button>
-                        ))}
-                      </div>
-                      {/* Tab content */}
-                      {modalTab==='overview' && (
-                        <div className="space-y-3">
-                          {[
-                            ['Position', u.position||'user'], ['Grade', u.grade], ['Campus', u.campus],
-                            ['Region', u.region], ['Enhanced', u.schedule_enhanced?'Yes':'No'],
-                            ['Joined', new Date(u.created_at).toLocaleString()],
-                            ['Last Sync', u.last_sync?new Date(u.last_sync).toLocaleString():'Never'],
-                            ['Shields', u.streak_shields_available||0], ['Insignia Days', u.insignia_days||0],
-                            ['Active Insignia', u.insignia_selected||'Default'],
-                            ['Last IP', u.last_login_ip||'—'],
-                            ['Banned', u.is_banned?`Yes — ${u.ban_reason}`:'No'],
-                          ].map(([k,v])=>(
-                            <div key={k} className="flex items-center justify-between py-1.5 border-b border-gray-50">
-                              <span className="text-xs text-gray-400">{k}</span>
-                              <span className="text-xs font-medium text-gray-900 text-right max-w-xs truncate">{String(v)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {modalTab==='tasks' && (
-                        <div className="space-y-1 max-h-64 overflow-y-auto">
-                          {(tasks||[]).length===0?<p className="text-sm text-gray-400 italic">No active tasks.</p>:tasks.map(t=>(
-                            <div key={t.id} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
-                              <span className="flex-1 text-gray-800 truncate">{t.title}</span>
-                              <span className="text-gray-400 flex-shrink-0">{t.deadline_date||'No deadline'}</span>
-                              {hasRank(user?.position,'Manager') && (
-                                <button onClick={()=>adminDeleteTask(t.id)} className="text-red-400 hover:text-red-600 flex-shrink-0"><Trash2 className="w-3.5 h-3.5"/></button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {modalTab==='completions' && (
-                        <div className="space-y-1 max-h-64 overflow-y-auto">
-                          {(recentCompletions||[]).length===0?<p className="text-sm text-gray-400 italic">No completions yet.</p>:recentCompletions.map((c,i)=>(
-                            <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
-                              <span className="flex-1 text-gray-800 truncate">{c.title}</span>
-                              <span className="text-gray-400">{c.actual_time}m</span>
-                              <span className="text-gray-300">{new Date(c.completed_at).toLocaleDateString()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {modalTab==='activity' && (
-                        <div>
-                          <p className="text-xs text-gray-400 mb-3">Completion heatmap by UTC hour (last 200 completions)</p>
-                          <div className="flex items-end gap-0.5 h-20 mb-1">
-                            {hourCounts.map((c,h)=>(
-                              <div key={h} className="flex-1 flex flex-col items-center" title={`${h}:00 UTC — ${c}`}>
-                                <div className="w-full bg-red-400 rounded-sm" style={{height:`${Math.max((c/maxHour)*100,c>0?4:0)}%`,opacity:0.3+(c/maxHour)*0.7}} />
-                              </div>
-                            ))}
-                          </div>
-                          <div className="flex justify-between text-xs text-gray-400"><span>0h</span><span>12h</span><span>23h</span></div>
-                        </div>
-                      )}
-                      {modalTab==='dismissals' && (
-                        <div className="space-y-1 max-h-64 overflow-y-auto">
-                          {(dismissals||[]).length===0?<p className="text-sm text-gray-400 italic">No banner dismissals.</p>:dismissals.map((d,i)=>(
-                            <div key={i} className="flex items-center gap-2 px-3 py-2 bg-gray-50 rounded-lg text-xs">
-                              <span className="flex-1 text-gray-800 truncate">{d.title}</span>
-                              <span className="text-gray-400">{new Date(d.dismissed_at).toLocaleDateString()}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                ) : adminIndexModalData ? (
+                  <IndexUserModalBody
+                    adminIndexModalData={adminIndexModalData}
+                    adminIndexModal={adminIndexModal}
+                    userPosition={userPosition}
+                    user={user}
+                    hasRank={hasRank}
+                    adminDeleteTask={adminDeleteTask}
+                    fmtTimeAgo={fmtTimeAgo}
+                  />
+                ) : null}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Add Staff Member Modal ── */}
+        {showAddStaffModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4" onClick={()=>{setShowAddStaffModal(false);setAddStaffSearch('');setAddStaffResults([]);setAddStaffSelectedUser(null);}}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md" onClick={e=>e.stopPropagation()}>
+              <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100">
+                <h3 className="text-lg font-bold text-gray-900">Add Staff Member</h3>
+                <button onClick={()=>{setShowAddStaffModal(false);setAddStaffSearch('');setAddStaffResults([]);setAddStaffSelectedUser(null);}} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="w-5 h-5"/></button>
+              </div>
+              <div className="px-6 py-4 space-y-3">
+                {!addStaffSelectedUser ? (
+                  <>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Search for a user</label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-gray-400" />
+                      <input
+                        value={addStaffSearch}
+                        onChange={e=>searchAddStaffUsers(e.target.value)}
+                        placeholder="Name or email…"
+                        className="w-full pl-8 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300"
+                      />
                     </div>
-                  );
-                })() : null}
+                    <div className="max-h-56 overflow-y-auto space-y-1">
+                      {addStaffSearching ? (
+                        <p className="text-xs text-gray-400 italic py-2 text-center">Searching…</p>
+                      ) : addStaffSearch.trim().length < 2 ? (
+                        <p className="text-xs text-gray-400 italic py-2 text-center">Type at least 2 characters to search.</p>
+                      ) : addStaffResults.length === 0 ? (
+                        <p className="text-xs text-gray-400 italic py-2 text-center">No matching regular users found.</p>
+                      ) : addStaffResults.map(u => (
+                        <button key={u.id} onClick={()=>setAddStaffSelectedUser(u)} className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 border border-gray-100">
+                          <p className="text-sm font-medium text-gray-900">{u.name}</p>
+                          <p className="text-xs text-gray-400">{u.email} · Gr{u.grade} · {u.campus}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2 border border-gray-100">
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">{addStaffSelectedUser.name}</p>
+                        <p className="text-xs text-gray-400">{addStaffSelectedUser.email}</p>
+                      </div>
+                      <button onClick={()=>setAddStaffSelectedUser(null)} className="text-xs text-gray-400 hover:text-gray-600">Change</button>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Initial Position</label>
+                      <select value={addStaffPosition} onChange={e=>setAddStaffPosition(e.target.value)} className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-red-300">
+                        {['Spectator','Broadcaster','Editor','Support','Moderator','Manager','Director','Supervisor','Owner'].map(p => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <button onClick={submitAddStaff} disabled={addStaffSubmitting} className="w-full py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 disabled:opacity-50">
+                      {addStaffSubmitting ? 'Adding…' : 'Add Staff Member'}
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -15580,13 +15802,13 @@ const PlanAssist = () => {
                 <button onClick={()=>{setAdminDirectoryAdvModal(null);setAdminCanvasTokenVal('');}} className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"><X className="w-5 h-5"/></button>
               </div>
               <div className="px-6 py-4 space-y-3">
-                {/* Ban/Unban — Moderator can attempt a ban (routes to Director+ approval); Unban stays Manager+ direct */}
+                {/* Ban/Unban — Support's attempt routes to Moderator+ approval; Moderator+ bans directly; Unban stays Manager+ direct */}
                 {adminDirectoryAdvModal.is_banned ? (
                   hasRank(user?.position,'Manager') && (
                     <button onClick={async()=>{await adminUnbanUser(adminDirectoryAdvModal.id);setAdminDirectoryAdvModal(prev=>({...prev,is_banned:false}));}} className="w-full py-2.5 bg-green-50 text-green-700 rounded-xl text-sm font-semibold hover:bg-green-100 border border-green-200">Unban User</button>
                   )
                 ) : (
-                  hasRank(user?.position,'Moderator') && (
+                  hasRank(user?.position,'Support') && (
                     <button onClick={()=>{setShowBanDialog(adminDirectoryAdvModal.id);setAdminDirectoryAdvModal(null);}} className="w-full py-2.5 bg-red-50 text-red-700 rounded-xl text-sm font-semibold hover:bg-red-100 border border-red-200">Ban User</button>
                   )
                 )}
@@ -15633,7 +15855,7 @@ const PlanAssist = () => {
                   }} className="w-full py-2.5 bg-yellow-50 text-yellow-700 rounded-xl text-sm font-semibold hover:bg-yellow-100 border border-yellow-200">Replace Password</button>
                 )}
                 {/* Credits */}
-                {hasRank(user?.position,'Manager') && (() => {
+                {hasRank(user?.position,'Support') && (() => {
                   const creditInputId = `credit-amount-${adminDirectoryAdvModal.id}`;
                   return (
                     <div className="space-y-2">
