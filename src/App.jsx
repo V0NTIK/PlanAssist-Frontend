@@ -15740,7 +15740,7 @@ const PlanAssist = () => {
                   <IndexUserModalBody
                     adminIndexModalData={adminIndexModalData}
                     adminIndexModal={adminIndexModal}
-                    userPosition={userPosition}
+                    userPosition={user?.position || 'user'}
                     user={user}
                     hasRank={hasRank}
                     adminDeleteTask={adminDeleteTask}
