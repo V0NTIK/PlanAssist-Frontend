@@ -16,6 +16,19 @@ const positionRank = (pos) => POSITION_RANKS[pos] ?? 0;
 const isStaffPosition = (pos) => pos && pos !== 'user';
 // Returns true if actorPos can perform actions requiring minPos
 const hasRank = (actorPos, minPos) => positionRank(actorPos) >= positionRank(minPos);
+// Formats an ISO timestamp as a relative "time ago" string (module-scoped since
+// it's pure and used both inside the admin console IIFE and the sibling Index
+// User Detail Modal, which sits outside that IIFE's scope).
+const fmtTimeAgo = (iso) => {
+  if (!iso) return 'Never';
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff/60000);
+  if (m < 1) return 'Just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m/60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h/24)}d ago`;
+};
 // Peer-tier positions that can view requests sideways but never approve/reject them
 const PEER_POSITIONS_FRONT = new Set(['Support','Editor','Broadcaster','Spectator']);
 
@@ -14678,16 +14691,6 @@ const PlanAssist = () => {
             if (!iso) return '—';
             const d = new Date(iso);
             return d.toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
-          };
-          const fmtTimeAgo = (iso) => {
-            if (!iso) return 'Never';
-            const diff = Date.now() - new Date(iso).getTime();
-            const m = Math.floor(diff/60000);
-            if (m < 1) return 'Just now';
-            if (m < 60) return `${m}m ago`;
-            const h = Math.floor(m/60);
-            if (h < 24) return `${h}h ago`;
-            return `${Math.floor(h/24)}d ago`;
           };
           const positionColor = (pos) => ({
             Owner:'bg-red-100 text-red-700', Supervisor:'bg-purple-100 text-purple-700',
