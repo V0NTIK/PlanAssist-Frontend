@@ -5196,7 +5196,6 @@ const PlanAssist = () => {
   // Separate effect: keep zoomAlarmStopRef up to date (no interval, just refs)
   useEffect(() => {
     const stopAlarm = () => {
-      console.log('[ZoomCheck] stopAlarm/dismiss invoked');
       if (zoomPingAudioRef.current) {
         try { zoomPingAudioRef.current.stop(); } catch(e) {}
         zoomPingAudioRef.current = null;
@@ -5217,7 +5216,6 @@ const PlanAssist = () => {
 
   useEffect(() => {
     if (!isAuthenticated || !accountSetup.campus) return;
-    console.log(`[ZoomCheck] effect MOUNTED campus=${accountSetup.campus}`);
     const PERIOD_TIMES_UTC = {
       1: { h: 11, m: 25 }, 2: { h: 12, m: 28 }, 3: { h: 13, m: 31 },
       4: { h: 15, m: 21 }, 5: { h: 17, m: 1  }, 6: { h: 18, m: 4  },
@@ -5261,15 +5259,11 @@ const PlanAssist = () => {
       const now = new Date();
       const nowUTCMins = now.getUTCHours() * 60 + now.getUTCMinutes();
       const todayStr = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; })();
-      console.log(`[ZoomCheck] tick ${now.toISOString()} nowUTCMins=${nowUTCMins} firedKeys=${JSON.stringify([...zoomFiredPeriodsRef.current])}`);
 
       // Reset fired-period keys at midnight
       const prevKeys = zoomFiredPeriodsRef.current;
-      const cleaned = new Set([...prevKeys].filter(k => k.startsWith(todayStr)));
-      if (cleaned.size !== prevKeys.size) {
-        console.log(`[ZoomCheck] firedKeys Set REPLACED (cleanup) prevSize=${prevKeys.size} newSize=${cleaned.size}`);
-        zoomFiredPeriodsRef.current = cleaned;
-      }
+      const cleaned = new Set([...prevKeys].filter(k => k.includes(todayStr)));
+      if (cleaned.size !== prevKeys.size) zoomFiredPeriodsRef.current = cleaned;
 
       const periodRange = accountSetup.tzPeriods || getEffectivePeriods(accountSetup.campus);
       const [rangeStart, rangeEnd] = periodRange.split('-').map(Number);
@@ -5285,7 +5279,6 @@ const PlanAssist = () => {
         const periodMins = t.h * 60 + t.m;
         const diff = periodMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
-          console.log(`[ZoomCheck] Loop1 match period=${period} periodKey=${periodKey} alreadyFired=${zoomFiredPeriodsRef.current.has(periodKey)} diff=${diff}`);
           if (zoomFiredPeriodsRef.current.has(periodKey)) break; // already fired this window
           zoomFiredPeriodsRef.current.add(periodKey); // mark fired immediately, before any async
 
@@ -5315,7 +5308,6 @@ const PlanAssist = () => {
         const eventUtcMins = eH * 60 + eM;
         const diff = eventUtcMins - nowUTCMins;
         if (diff >= 0 && diff <= 1) {
-          console.log(`[ZoomCheck] Loop2 match key=${key} firedKey=${firedKey} diff=${diff} zoomNumber=${event.zoom_number}`);
           zoomFiredPeriodsRef.current.add(firedKey); // mark fired immediately
           const zoomNumber = event.zoom_number || null;
           if (!zoomNumber) continue;
@@ -5328,7 +5320,7 @@ const PlanAssist = () => {
     };
     check();
     const interval = setInterval(check, 30000);
-    return () => { console.log('[ZoomCheck] effect UNMOUNTED/torn down'); clearInterval(interval); };
+    return () => clearInterval(interval);
   }, [isAuthenticated, accountSetup.campus]);
 
   // Feature 6: Auto-sync every 30 minutes while app is visible
