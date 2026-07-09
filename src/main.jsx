@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.jsx'
+import Shutdown from './Shutdown.jsx'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
 
@@ -41,6 +41,6 @@ registerSW({
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <App />
+    <Shutdown />
   </React.StrictMode>,
 )
