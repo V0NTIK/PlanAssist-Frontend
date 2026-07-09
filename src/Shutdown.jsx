@@ -67,7 +67,7 @@ export default function Shutdown() {
 
           <p style={{ marginBottom: '1.25rem' }}>
             OneSchool has cited safety concerns and a lack of full approval for school use
-            as reasons for verdict.
+            as reasons for the verdict.
           </p>
 
           <p style={{ marginBottom: '1.25rem' }}>
